@@ -90,6 +90,8 @@ to those two files independently of KOSMIC's licence.
 | File | Source | Terms |
 |---|---|---|
 | `olink_panels/Olink_CVD_panels.json`, `olink_panels/Olink_Explore_panels.json` | Protein lists of the Olink Target 96 CVD II/III and Olink Explore 3072 panels, from Olink's published panel contents | Lists of assay targets (facts), transcribed for the validation step. Olink® is a trademark of Olink Proteomics AB. |
+| `olink_panels/Tromp2018_CVD_II_panel_genes.json` | Tromp et al., *European Journal of Heart Failure* 2018: the CVD II panel genes as used in that study | Gene list from a published paper. Not yet used by the application; kept for planned validation work. |
+| `olink_panels/Wang2024_DCM_Olink_S1.xlsx` | Wang et al. 2024, supplementary table S1 (DCM plasma proteomics) | Published supplementary data. Not yet used by the application; kept for planned validation work. Cite the paper if you use the comparison. |
 
 ### Tutorial data
 
