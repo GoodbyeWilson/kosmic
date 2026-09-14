@@ -71,10 +71,8 @@ filter_stat    = "mean_max_pct"     # mean_max_pct | min_studies_above_pct
 [help]
 # Where F1 sends you: the documentation website, with a trailing slash
 # (the same value as site_url in mkdocs.yml). If the site cannot be
-# reached, F1 opens the bundled offline copy instead.
-#
-# While writing docs, set the environment variable KOSMIC_HELP_SITE_URL
-# to http://127.0.0.1:8001/ -- KOSMIC then starts `mkdocs serve` there
-# itself on the first F1 press (source checkout with mkdocs installed)
-# and stops it on exit. Do not commit a localhost value here.
+# reached, a source checkout with mkdocs installed serves the docs to
+# itself on http://127.0.0.1:8001/ instead (started on the first F1,
+# stopped on exit); a packaged install opens the bundled copy.
+# KOSMIC_HELP_SITE_URL in the environment overrides this value.
 site_url = "https://docs.scmetaanalysis.com/"

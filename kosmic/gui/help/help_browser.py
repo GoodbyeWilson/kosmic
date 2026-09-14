@@ -23,6 +23,9 @@ CONTENT_DIR = Path(__file__).parent / "content"
 # The documentation site ('[help] site_url' in config.toml, trailing
 # slash). None means 'no site yet': F1 opens the offline browser.
 ONLINE_BASE: Optional[str] = HELP_SITE_URL
+# Where a source checkout serves the docs to itself when the site is not
+# reachable (see HelpManager._start_local_docs).
+LOCAL_DOCS_URL = "http://127.0.0.1:8001/"
 
 
 # Content registry
@@ -363,8 +366,9 @@ class HelpManager:
             self.show_full(help_id)
 
     @staticmethod
-    def online_url(help_id: str) -> Optional[str]:
-        if not ONLINE_BASE:
+    def online_url(help_id: str, base: Optional[str] = None) -> Optional[str]:
+        base = base or ONLINE_BASE
+        if not base:
             return None
         # 'scrna/index' is the section page, served at '<site>/scrna/'.
         if help_id == HelpBrowser.DEFAULT_HELP_ID:
@@ -373,29 +377,35 @@ class HelpManager:
             page = help_id[:-len("index")]
         else:
             page = f"{help_id}/"
-        return f"{ONLINE_BASE}{page}"
+        return f"{base}{page}"
 
     def open_online(self, help_id: str) -> bool:
-        """Open the site page in the system browser. False if there is no
-        site configured or the host does not answer within a second --
-        the caller then shows the offline copy instead of a browser
-        error page."""
+        """Open the page in the system browser: on the documentation
+        site if it answers, else on a local 'mkdocs serve' when this is
+        a source checkout that can run one. False when neither applies,
+        so the caller shows the bundled copy instead of a browser error
+        page."""
         url = self.online_url(help_id)
-        if url is None:
-            return False
-        if not _host_reachable(url) and not self._start_local_docs(url):
-            return False
-        return bool(QDesktopServices.openUrl(QUrl(url)))
+        if url is not None and _host_reachable(url):
+            return bool(QDesktopServices.openUrl(QUrl(url)))
+        local = self.online_url(help_id, base=LOCAL_DOCS_URL)
+        if local is not None and self._start_local_docs(local):
+            return bool(QDesktopServices.openUrl(QUrl(local)))
+        return False
 
-    # -- developer convenience: a loopback site_url means 'my machine' --
+    # -- developer convenience: serve the docs locally when the site is
+    #    not reachable and this is a source checkout ---------------------
 
     _docs_proc = None
 
     def _start_local_docs(self, url: str) -> bool:
-        """Start 'mkdocs serve' for a localhost site_url that is not
-        answering, and wait for it. Only when this is a source checkout
-        with mkdocs installed; a packaged app never has a loopback URL.
-        The server dies with the app."""
+        """Start 'mkdocs serve' at the loopback 'url' if it is not already
+        answering, and wait for it. Only possible in a source checkout
+        with mkdocs installed -- a packaged install has neither, so this
+        returns False there and the bundled copy is shown. The server
+        dies with the app."""
+        if _host_reachable(url):
+            return True
         import atexit
         import importlib.util
         import subprocess
