@@ -1,0 +1,15 @@
+{
+  "key": "cardiomyocyte",
+  "display_name": "Cardiomyocyte (cardiac snRNA)",
+  "dominant_cell_type": "Cardiomyocyte",
+  "tissue": "Heart",
+  "species": "human",
+  "provenance": "Data-derived from Koenig DCM single-nucleus RNA-seq (GSE183852, 220,752 nuclei). Genes with cardiomyocyte pseudobulk CPM >= 300 and cardiomyocyte/max-other-cell-type specificity >= 10x, excluding OXPHOS and MT- genes. This deliberately drops broadly-expressed abundant sarcomere genes (MYL2/MYL3/MYH7/TTN/MYH6) that co-vary with metabolic state and would over-attribute the effect, keeping only true CM-restricted ambient tracers. Used to quantify cardiomyocyte ambient contamination in non-cardiomyocyte cell types (e.g. endothelial nuclei) as a percent.mito-style score. NOTE: a few entries (RP11-532N4.2, RP11-368L12.1, HRAT17) are clone/locus identifiers that may not harmonise to HGNC symbols in other datasets; unmatched genes simply contribute 0 to the score.",
+  "genes": [
+    "ACTN2", "ALPK2", "CDIN1", "CHRM2", "CORIN", "FGF12", "FHL2", "HRAT17",
+    "LRRC2", "MIR133A1HG", "MLIP", "MPP3", "MYBPC3", "MYH7B", "MYLK3",
+    "MYOM2", "MYOM3", "MYPN", "NRAP", "PACRG", "PKP2", "PPP1R1C", "RBM20",
+    "RNF207", "RP11-368L12.1", "RP11-532N4.2", "RYR2", "SGCG", "SLC4A3",
+    "SMYD1", "SPHKAP", "TECRL", "TENM2", "TRIM54"
+  ]
+}

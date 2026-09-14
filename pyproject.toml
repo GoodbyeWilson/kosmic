@@ -1,0 +1,148 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kosmic"
+version = "0.1.0"
+description = "KOSMIC -- Kirk's Open-source Single-cell Meta-analysis Integration and Comparison"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Calum Wilson" },
+    { name = "Kirk Franks" },
+]
+keywords = [
+    "single-cell",
+    "RNA-seq",
+    "meta-analysis",
+    "differential-expression",
+    "bioinformatics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+# license = "MIT"  # TODO: pick licence; MIT/BSD-3 are safe OSI defaults
+dependencies = [
+    "PyQt6>=6.5",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "scanpy>=1.10",
+    # scanpy delegates seurat_v3 HVG selection's loess fit to this;
+    # without it the flavour raises and we fall back to 'seurat'.
+    "scikit-misc>=0.3",
+    "anndata>=0.10",
+    "matplotlib>=3.7",
+    "pyqtgraph>=0.13",
+    "seaborn>=0.12",
+    "statsmodels>=0.14",
+    "scikit-learn>=1.3",
+    # scanpy.pp.scrublet needs this for its auto-threshold and only
+    # declares it as an optional extra, so it must be named here.
+    "scikit-image>=0.22",
+    "openpyxl>=3.1",
+    "h5py>=3.8",
+    "leidenalg>=0.10",
+    "igraph>=0.11",
+    # <2: harmonypy 2.0 is a C++ rewrite that needs CMake and a compiler
+    # at install time (no wheels). 0.x is pure Python and is what the
+    # Harmony step was written against.
+    "harmonypy>=0.0.10,<2",
+    # 0.5 for DeseqStats(lfc_null=, alt_hypothesis=, independent_filter=).
+    "pydeseq2>=0.5",
+    "gseapy>=1.1",
+    "goatools>=1.3",
+    "markdown-it-py>=3.0",
+]
+
+[project.optional-dependencies]
+# Developer / test tooling
+dev = [
+    "pytest>=7.0",
+    "pyyaml>=6",       # tests read mkdocs.yml
+    "ruff>=0.4",
+]
+# Documentation site (mkdocs.yml builds the F1 help content).
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9,<10",
+    "mkdocstrings[python]>=0.26",   # developer reference from docstrings
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
+]
+# Lazy-imported features. Each silently no-ops if its package isn't
+# installed, so users can pick what they need.
+annotate = ["celltypist>=1.3"]      # ML-based cell-type annotation (alt to PanglaoDB markers)
+# NOT ON PyPI. Both of these are imported lazily and the app reports
+# how to install them if you use the feature without them, so they are
+# listed here for documentation and deliberately left out of `all` --
+# naming them in an installable extra makes that extra fail for
+# everyone, which is what `decontx` in the base dependencies was doing.
+ambient = ["soupx>=0.3"]            # Auto-estimate ambient RNA contamination (alt to manual)
+decontx = ["decontx>=0.1"]          # DecontX ambient-RNA decontamination
+tsne = ["openTSNE>=1.0"]            # Faster t-SNE backend
+rds = ["pyreadr>=0.5"]              # R RDS file reading (pure Python, wheels everywhere)
+# rds2py reads Seurat objects directly but ships no Windows wheel and
+# needs CMake + a C++ compiler to build. The RDS loader tries it first
+# and falls through cleanly when it is absent, so it is documented
+# here rather than required. Install it yourself if you have build
+# tools: pip install rds2py
+rds-seurat = ["rds2py>=0.4"]
+monitor = ["psutil>=5.9"]           # Status-bar CPU/RAM monitor
+# Everything that actually installs from PyPI. soupx and decontx are
+# excluded on purpose -- see above.
+all = [
+    "celltypist>=1.3",
+    "openTSNE>=1.0",
+    "pyreadr>=0.5",
+    "psutil>=5.9",
+]
+
+# [project.urls]
+# Homepage = ""        # TODO
+# Repository = ""      # TODO
+# Documentation = ""   # TODO
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kosmic*"]
+exclude = ["tests*", "dev*"]
+
+[tool.setuptools.package-data]
+"kosmic.reference.gene_sets" = ["*.gmt"]
+"kosmic.reference.marker_dbs" = ["*.tsv", "*.xlsx"]
+"kosmic.reference.olink_panels" = ["*.json", "*.xlsx"]
+"kosmic.reference.gwas" = ["*.tsv"]
+"kosmic.reference.hgnc" = ["*.tsv", "*.tsv.gz"]
+"kosmic.reference.orthologs" = ["*.tsv"]
+"kosmic.reference.go" = ["*.gz", "*.obo", "*.tsv"]
+"kosmic.reference.atlases" = ["*.gz"]
+"kosmic.reference.tutorial" = ["*.h5ad", "*.version"]
+"kosmic.gui.help" = ["*.md", "content/**/*.md"]
+"kosmic.gui.shared" = ["icons/*.svg", "assets/*.png"]
+"kosmic.gui.help.tutorial" = ["*.toml"]
+"kosmic.reference.cell_type_focus" = ["*.json"]
+"kosmic.reference.contamination" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["legacy", "dev/simulations"]
+
+[tool.ruff.lint]
+# Pinned explicitly: ruff 0.16 widened its default rule set from these
+# four families to a large "recommended" one, which turned a clean
+# codebase into several hundred style findings overnight. Adopting the
+# wider set is a deliberate cleanup for another day, not something a
+# ruff upgrade should impose.
+select = ["E4", "E7", "E9", "F"]

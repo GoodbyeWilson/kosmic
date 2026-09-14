@@ -1,0 +1,12 @@
+# Store text as LF in the repository regardless of the committer's OS,
+# so a Windows checkout and a Linux checkout never disagree about
+# line endings and produce whole-file diffs.
+* text=auto eol=lf
+
+# Binary reference data and images: never touch line endings.
+*.png binary
+*.h5ad binary
+*.gz binary
+*.xlsx binary
+*.obo binary
+*.svg text

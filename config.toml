@@ -1,0 +1,77 @@
+# KOSMIC configuration.
+#
+# Edit values here to change defaults across the whole pipeline. Loaded
+# once when ``kosmic`` is imported -- restart Python after editing.
+#
+# Consumers do ``from kosmic import DEFAULT_FDR`` (etc.). The binding
+# layer lives in ``kosmic/__init__.py``.
+
+[significance]
+fdr            = 0.05
+lfc_threshold  = 0.25
+
+[meta_analysis]
+min_studies = 2     # gene must appear in >= N studies to be pooled
+cc_n_perms  = 1000  # case-control permutation depth
+
+[pathway_scoring]
+gene_detection_pct   = 0.05   # gene kept in a pathway score if detected in >= this fraction of cells (disease OR control)
+min_genes            = 3      # drop pathway if fewer than N genes survive coverage
+min_coverage         = 0.30   # drop pathway below this fraction of detected annotated genes
+borderline_coverage  = 0.50   # below this -> orange warning in coverage table
+vif_rho              = 0.1    # CAMERA-style inter-gene correlation correction
+n_ctrl_genes         = 50     # control gene-set size for score_genes mode
+
+[gwas]
+lp_threshold = 7.30103   # -log10(5e-8), genome-wide significance
+window_kb    = 100       # nearest-gene window for variant -> gene mapping
+
+[de]
+min_cells              = 10    # min cells PER DONOR to keep that donor's pseudobulk profile (not per condition).
+                               # Counted over whatever is loaded, so in a per-cell-type run it means cells of that type.
+min_expressing_samples = 2     # legacy sample-level threshold (superseded by the expression filter below)
+filter_min_count       = 10    # sample-level expression filter: CPM cutoff derived from this count vs median library size
+filter_min_total_count = 15    # sample-level expression filter: minimum summed count across all samples
+filter_min_samples     = 0     # samples a gene must clear the CPM cutoff in; 0 = auto (smallest group size)
+max_se                 = 5.0   # SE cap (numerical safety)
+se_floor               = 0.01  # SE floor; bounds inverse-variance weight in meta-analysis (0 disables)
+detection_min_pct      = 0.0   # optional cell-level pre-filter; 0 = off. filterByExpr (below) is the gene filter for
+                               # pseudobulk DE. A detection floor is a Seurat FindMarkers idea (cell-level Wilcoxon);
+                               # at 5% it overrode filterByExpr entirely and cost ~1,250 significant genes.
+detection_on           = true  # apply the pre-DE detection filter by default (0 pct disables)
+detection_min_donor_frac = 0.5 # fraction of a group's donors that must each clear detection_min_pct (0 = pool cells across donors)
+deseq2_independent_filter = true  # DESeq2 independent filtering (drops low-mean genes from BH to gain power)
+deseq2_cooks_filter       = true  # DESeq2 Cook's-distance outlier filtering (drops genes with an extreme sample)
+
+[ui]
+base_font_size = 11    # default plot/font base point size
+export_dpi     = 150   # default DPI for figure export
+font_scale     = 1.0   # extra multiplier on the app font ladder (1.0 = as designed)
+
+[de.independent_filtering]
+# Optional pct-cells filter on the enrichment page. OFF by default: it
+# re-runs BH on a reduced universe *after* the DE test, so the
+# enrichment page would disagree with the DE page about which genes are
+# significant (4,106 vs 3,275 on the DCM EC data). Bourgon-style
+# independent filtering applies before testing, on a statistic
+# independent of the test statistic under the null -- DESeq2 already
+# does that internally on mean normalised counts. Left available as a
+# sensitivity analysis rather than the default.
+enrichment_default_pct    = 0.05   # threshold when the user switches it on
+enrichment_on_by_default  = false  # ORA runs on the DE-significant list as exported
+
+[meta_analysis.independent_filtering]
+# Cross-study Bourgon-style filter on the consensus meta-analysis page.
+# Drops genes below an aggregate pct-expressing threshold before pooling
+# so BH FDR is computed on the surviving universe.
+default_pct    = 0.05               # 5% mean cross-study pct expressing
+on_by_default  = false              # conservative; user opts in
+filter_stat    = "mean_max_pct"     # mean_max_pct | min_studies_above_pct
+
+[help]
+# Where F1 sends you. The documentation website, with a trailing slash;
+# the same value as site_url in mkdocs.yml. Empty = no site yet, so F1
+# opens the offline browser. While writing docs, point it at a localhost
+# address: KOSMIC starts `mkdocs serve` there itself on the first F1
+# (source checkout with mkdocs installed) and stops it on exit.
+site_url = "http://127.0.0.1:8001/"

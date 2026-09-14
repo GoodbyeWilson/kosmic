@@ -1,0 +1,131 @@
+# KOSMIC documentation site.
+#
+# The pages are the same Markdown the app shows on F1: docs_dir points
+# at the help content inside the package, so there is one copy to keep
+# right. Keep the Markdown plain (headings, lists, tables, fenced code,
+# '> **Note:**' blockquotes) -- the in-app renderer is markdown-it with
+# no extensions, and whatever you write must read well there too.
+#
+# Build locally:  pip install -e ".[docs]" && mkdocs serve
+# Deployed by .github/workflows/docs.yml to GitHub Pages on every push
+# to main.
+
+site_name: KOSMIC
+site_description: >-
+  Kirk's Open-source Single-cell Meta-analysis Integration and Comparison —
+  a desktop application for cross-study meta-analysis of single-cell RNA-seq.
+site_url: https://scmetaanalysis.org/   # TODO confirm domain (see CONTRIBUTING.md)
+repo_url: https://github.com/CWilsonStrath/kosmic   # TODO confirm once pushed
+edit_uri: edit/main/kosmic/gui/help/content/
+
+docs_dir: kosmic/gui/help/content
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.indexes   # a section's index.md is the section's own page
+    - navigation.top
+    - search.suggest
+    - content.action.edit
+    - content.code.copy
+
+markdown_extensions:
+  - tables
+  - fenced_code
+  - admonition
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  # Developer reference: one page per module, generated from the
+  # source tree at build time by dev/docs/gen_ref_pages.py.
+  - gen-files:
+      scripts:
+        - dev/docs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: numpy
+            show_source: false
+            show_root_heading: false
+            show_root_toc_entry: false
+            members_order: source
+            filters: ["!^_"]
+            show_if_no_docstring: false
+            heading_level: 2
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+
+nav:
+  - Home: index.md
+  - Project:
+      - project/index.md
+      - 1. Project folder: project/project.md
+      - 2. Studies: project/studies.md
+      - 3. Data: project/data.md
+      - 4. Shared atlas: project/atlas.md
+      - 5. Review: project/review.md
+  - scRNA Analysis:
+      - scrna/index.md
+      - Load Data: scrna/load_data.md
+      - Gene Names: scrna/gene_names.md
+      - Inspect: scrna/inspect.md
+      - Quality Control: scrna/qc.md
+      - Cluster: scrna/cluster.md
+      - Marker Check: scrna/marker_check.md
+      - Decontaminate: scrna/decontx.md
+      - Subset: scrna/subset.md
+  - Differential Expression:
+      - de/index.md
+      - Dataset: de/setup.md
+      - Gene DE: de/gene_de.md
+      - Gene sets: de/gene_set.md
+      - Pathway DE: de/pathway_de.md
+      - Pathway explorer: de/pathway_explorer.md
+      - Enrichment: de/enrichment.md
+      - Methods: de/methods.md
+  - Meta-Analysis:
+      - meta/index.md
+      - Select Studies: meta/select_studies.md
+      - Choose Mode: meta/choose_mode.md
+      - Discovery Meta-Analysis: meta/gene_ma.md
+      - Pathway meta-analysis: meta/pathway_ma.md
+      - Pathway explorer: meta/pathway_explorer.md
+      - Methods Comparison: meta/methods_comparison.md
+      - Methods Comparison results: meta/methods_comparison_results.md
+  - Figures:
+      - figures/index.md
+      - Dataset summary: figures/dataset_summary.md
+      - QC violins: figures/qc_violins.md
+      - Variable genes: figures/variable_genes.md
+      - Elbow: figures/elbow.md
+      - UMAP: figures/umap.md
+      - Gene heatmap: figures/gene_heatmap.md
+      - Patient dot plot: figures/patient_dotplot.md
+      - Volcano: figures/volcano.md
+      - Top DE summary: figures/topde_summary.md
+      - Enrichment bar: figures/enrichment_bar.md
+      - Pathway bar: figures/pathway_bar.md
+      - Pathway bubble: figures/pathway_bubble.md
+  - Glossary: glossary.md
+  - Developer reference: reference/

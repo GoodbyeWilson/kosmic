@@ -1,0 +1,134 @@
+# Guided in-app tutorial. Each [[steps]] block is one card shown by
+# TutorialController; the controller resolves the *_id fields to bound
+# methods (e.g. on_advance_id="setup_tutorial_project" -> the
+# `_setup_tutorial_project` method on the controller).
+#
+# Tab index reference (kosmic.gui.scrna.workspace.SCRNAWorkspace.switch_tab):
+#   -1 = Project page
+#    0 = Load Data
+#    1 = Gene Names
+#    2 = Inspect
+#    3 = QC
+#    4 = Cluster (with embedded Annotate)
+#    5 = Gene Groups
+#    6 = Decontaminate
+#    7 = Subset
+
+[[steps]]
+id = "welcome"
+tab_index = -1
+title = "Welcome to the Tutorial!"
+body = """
+This guided walkthrough will take you through the scRNA-seq pipeline using a sample cardiac dataset.
+
+The dataset simulates 2,400 cells from 6 patients (3 control, 3 disease) across 5 cell types with ~1,600 genes.
+
+Click Next to begin.
+"""
+next_text = "Let's Go!"
+
+[[steps]]
+id = "setup_project"
+tab_index = -1
+title = "Step 1: Set Up Your Project"
+body = """
+We'll create a temporary project directory and drop the tutorial dataset straight into it, so we can skip the Load Data step and go straight to inspecting the data.
+
+Click Next to generate the project.
+"""
+on_advance_id = "setup_tutorial_project"
+
+[[steps]]
+id = "project_created"
+tab_index = -1
+title = "Tutorial Project Ready"
+body = """
+The temporary project is set up and the tutorial h5ad has been copied into its 'processed_data/' folder.
+
+Let's open the Inspect tab to look at the data.
+"""
+next_text = "Go to Inspect"
+
+[[steps]]
+id = "inspect_data"
+tab_index = 2
+title = "Step 2: Inspect Your Data"
+body = """
+The tutorial dataset is already loaded. The Inspect tab is where you tell KOSMIC what the metadata means.
+
+On the Setup sub-tab, the Dataset Mapping card shows which columns identify the Sample, Condition, and Cell type — for the tutorial data these are detected automatically. The Samples sub-tab then shows one row per patient with cell counts and Disease / Control badges.
+
+When you're done exploring, click Next.
+"""
+
+[[steps]]
+id = "run_clustering"
+tab_index = 4
+title = "Step 3: Run Clustering"
+body = """
+The Cluster tab finds natural groupings of similar cells. It runs PCA (summarising each cell's expression), builds a UMAP (the 2-D map), and applies Leiden clustering (the groupings). With the tutorial dataset you should see 5 clear cell-type clusters.
+
+Expand the Clustering card in the Analysis Summary sidebar and click 'Run Clustering' — or click 'Do It For Me'. This may take a moment.
+"""
+target_widget = "cluster_tab.run_cluster_btn"
+auto_action_id = "auto_run_clustering"
+wait_for_signal = "cluster_tab.clustering_complete"
+allow_manual_next = false
+next_text = "Waiting..."
+
+[[steps]]
+id = "clustering_complete"
+tab_index = 4
+title = "Clustering Complete!"
+body = """
+The clustering pipeline has finished. You should see a UMAP preview showing distinct cell clusters.
+
+The Leiden algorithm identified clusters which you can annotate with cell type labels. For our tutorial data, the 5 cell types (Endothelial, Fibroblast, Immune, Smooth Muscle, Cardiomyocyte) should form well-separated clusters.
+
+Use the Figure Export workspace to render publication-quality UMAP / t-SNE figures.
+
+Let's move to Subset to filter by cell type.
+"""
+next_text = "Go to Subset"
+
+[[steps]]
+id = "subset_endothelial"
+tab_index = 7
+title = "Step 4: Subset by Cell Type"
+body = """
+The Subset tab derives a new analysis dataset containing only the cell types you pick — essential for focused downstream analysis.
+
+Select one or more cell types from the list, then click 'Subset to New Study' to create a new study holding only those cells. Use the search box, the quick-select buttons, or your own pattern.
+
+Use 'Do It For Me' to auto-select Endothelial cells and run the subset, or make your own selection.
+"""
+target_widget = "filter_tab"
+auto_action_id = "auto_filter_endothelial"
+wait_for_signal = "filter_tab.filtered_data_ready"
+allow_manual_next = true
+
+[[steps]]
+id = "subset_complete"
+tab_index = 7
+title = "Subset Complete!"
+body = """
+The data has been subset to Endothelial cells only and saved as a new study. The filtered dataset has ~600 cells (100 per patient × 6 patients).
+
+From here you'd switch to the DE Analysis workspace to run differential expression on the filtered subset, then to the Meta-Analysis workspace to integrate results across studies.
+"""
+
+[[steps]]
+id = "congratulations"
+tab_index = -1
+title = "Congratulations!"
+body = """
+You've walked through the scRNA-seq pipeline end to end.
+
+You now know how to:
+1. Set up a project and inspect data
+2. Run clustering to find cell populations
+3. Subset to a specific cell type for focused analysis
+
+The tutorial data remains loaded — feel free to explore the different tabs. When you're ready to work with your own data, open or create a project from the Project page.
+"""
+next_text = "Finish Tutorial"

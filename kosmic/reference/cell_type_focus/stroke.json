@@ -1,0 +1,29 @@
+{
+  "name": "Stroke",
+  "panglaodb": [
+    "Neurons",
+    "Astrocytes",
+    "Oligodendrocytes",
+    "Oligodendrocyte progenitor cells",
+    "Microglia",
+    "Neural stem/precursor cells",
+    "Radial glia cells",
+    "Ependymal cells",
+    "Interneurons",
+    "Pyramidal cells",
+    "Endothelial cells",
+    "Endothelial cells (blood brain barrier)",
+    "Pericytes",
+    "Smooth muscle cells",
+    "Macrophages",
+    "Monocytes",
+    "Neutrophils",
+    "T cells",
+    "T regulatory cells",
+    "NK cells",
+    "Dendritic cells",
+    "Mast cells",
+    "Fibroblasts",
+    "Meningeal cells"
+  ]
+}
