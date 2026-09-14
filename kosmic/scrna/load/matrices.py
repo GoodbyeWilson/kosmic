@@ -98,6 +98,10 @@ def describe_count_matrices(adata, n_sample: int = 2000) -> list[dict]:
 
     add("X", "X", adata.X, adata.shape)
     for key in getattr(adata, "layers", {}) or {}:
+        # anndata 0.13+ lists X in 'layers' under the key None; X is
+        # described above.
+        if key is None:
+            continue
         add(f"layers:{key}", f"layers['{key}']", adata.layers[key], adata.shape)
     raw = getattr(adata, "raw", None)
     if raw is not None:

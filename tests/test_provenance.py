@@ -74,6 +74,17 @@ def test_token_reflects_de_relevant_structure_only():
     assert provenance.compute_fingerprint(a2, 'sample', 'condition')['token'] == with_cluster
 
 
+def test_fingerprint_lists_named_layers_only():
+    # anndata 0.13+ also lists X in 'layers' under the key None. The
+    # fingerprint must record the same layers on every anndata version so
+    # that tokens recorded earlier stay valid.
+    a = _adata()
+    assert provenance.compute_fingerprint(a)['layers'] == []
+    a.layers['decontX_counts'] = a.X.copy()
+    a.layers['counts'] = a.X.copy()
+    assert provenance.compute_fingerprint(a)['layers'] == ['counts', 'decontX_counts']
+
+
 def test_render_and_write_methods(tmp_path):
     a = _adata(roles=['disease'] * 20 + ['control'] * 20)
     fp = provenance.compute_fingerprint(a, 'sample', 'condition')

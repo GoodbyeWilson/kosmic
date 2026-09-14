@@ -1213,10 +1213,13 @@ class DownloadTab(TabbedPage):
             ok=bool(n_var_cols),
             tooltip=f"{n_var_cols} column(s): " + ", ".join(list(adata.var.columns[:8]))
                     + ("..." if n_var_cols > 8 else "") if n_var_cols else None)
-        n_layers = len(adata.layers)
+        # anndata 0.13+ lists X in 'layers' under the key None; count and
+        # name only the named layers.
+        layer_names = [k for k in adata.layers.keys() if k is not None]
+        n_layers = len(layer_names)
         self._overview_panel.set_value(
             'layers', str(n_layers),
-            tooltip=", ".join(adata.layers.keys()) if n_layers else None)
+            tooltip=", ".join(layer_names) if n_layers else None)
         has_raw = adata.raw is not None
         self._overview_panel.set_value(
             'raw_counts', "Available" if has_raw else "Not stored",

@@ -60,7 +60,10 @@ def compute_fingerprint(adata, sample_col: Optional[str] = None,
         'n_obs': int(adata.n_obs),
         'n_vars': int(adata.n_vars),
         'n_raw_vars': int(adata.raw.n_vars) if adata.raw is not None else None,
-        'layers': sorted(adata.layers.keys()),
+        # anndata 0.13+ also lists X in 'layers' under the key None. Only
+        # named layers belong in the token, which also keeps tokens recorded
+        # under earlier anndata versions valid.
+        'layers': sorted(k for k in adata.layers.keys() if k is not None),
         'obs_cols': obs_cols,
     }
     if '_role' in adata.obs.columns:
