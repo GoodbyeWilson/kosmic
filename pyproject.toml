@@ -57,7 +57,9 @@ dependencies = [
     # <2: harmonypy 2.0 is a C++ rewrite that needs CMake and a compiler
     # at install time (no wheels). 0.x is pure Python and is what the
     # Harmony step was written against.
-    "harmonypy>=0.0.10,<2",
+    # The 0.0.x series is the numpy implementation; 0.1+ depends on torch
+    # (~500 MB), which doubles the size of a packaged build for one step.
+    "harmonypy>=0.0.10,<0.1",
     # 0.5 for DeseqStats(lfc_null=, alt_hypothesis=, independent_filter=).
     "pydeseq2>=0.5",
     "gseapy>=1.1",
@@ -72,6 +74,8 @@ dev = [
     "pyyaml>=6",       # tests read mkdocs.yml
     "ruff>=0.4",
 ]
+# Packaged desktop build (packaging/kosmic.spec).
+build = ["pyinstaller>=6.10"]
 # Documentation site (mkdocs.yml builds the F1 help content).
 docs = [
     "mkdocs>=1.6,<2",

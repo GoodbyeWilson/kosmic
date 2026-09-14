@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import math
 import os
-import sys
 import time
 from typing import Callable
 
@@ -22,10 +21,8 @@ def _heart_pixmap(height: int = 250) -> QPixmap:
     Returns a null pixmap when the asset is missing; the splash then
     falls back to its text-only layout.
     """
-    if getattr(sys, "frozen", False):
-        base = sys._MEIPASS  # type: ignore[attr-defined]
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
+    # Beside this module in a source checkout and in a packaged build alike.
+    base = os.path.dirname(os.path.abspath(__file__))
     pm = QPixmap(os.path.join(base, "assets", "heart_umap.png"))
     if not pm.isNull():
         pm = pm.scaledToHeight(

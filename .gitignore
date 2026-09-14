@@ -53,3 +53,7 @@ site/
 # (kosmic/gui/help/tutorial/data.py); never commit it.
 kosmic/reference/tutorial/tutorial_dataset.h5ad
 kosmic/reference/tutorial/tutorial_dataset.version
+
+# PyInstaller output (packaging/kosmic.spec)
+build/
+dist/

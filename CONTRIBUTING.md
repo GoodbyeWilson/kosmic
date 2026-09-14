@@ -157,6 +157,20 @@ describe a module.
 
 ---
 
+## Building the desktop package
+
+`packaging/kosmic.spec` builds a one-directory PyInstaller bundle
+(`dist/KOSMIC/`, ~700 MB): `pip install -e ".[build]"` then
+`pyinstaller packaging/kosmic.spec`. Data files keep their package
+paths inside the bundle, so code locates them from `__file__` exactly
+as in a checkout; never special-case `sys.frozen`. Set
+`KOSMIC_BUILD_CONSOLE=1` to keep a console window and see a startup
+traceback. On Windows, build from a conda environment or a python.org
+Python — a venv created from a conda Python is missing the DLLs
+PyInstaller needs to find (`pyexpat` fails to load).
+
+---
+
 ## Qt pitfalls
 
 **Qt object lifetime.** A widget with no parent and no Python reference

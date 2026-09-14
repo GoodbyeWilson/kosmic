@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from functools import lru_cache
 
 from PyQt6.QtCore import Qt, QRectF, QByteArray, QFileInfo
@@ -12,12 +11,9 @@ from PyQt6.QtSvg import QSvgRenderer
 
 
 def _icons_dir() -> str:
-    # sys._MEIPASS is set when running from a PyInstaller bundle.
-    if getattr(sys, "frozen", False):
-        base = sys._MEIPASS  # type: ignore[attr-defined]
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "icons")
+    # Beside this module in a source checkout and in a packaged build
+    # alike: packaging/kosmic.spec keeps the package tree intact.
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 
 
 def _read_svg(name: str) -> str:
