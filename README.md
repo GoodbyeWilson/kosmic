@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/GoodbyeWilson/kosmic/actions/workflows/ci.yml/badge.svg)](https://github.com/GoodbyeWilson/kosmic/actions/workflows/ci.yml)
 [![Licence: GPL-3.0](https://img.shields.io/badge/licence-GPL--3.0-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen.svg)](https://goodbyewilson.github.io/kosmic/)
 
 **Single-cell and single-nucleus RNA-seq analysis and cross-study
 meta-analysis, without code.**
@@ -88,7 +89,7 @@ studies, annotated once, and the labels transferred back to each study.
   replication.
 
 The statistical reasoning behind the defaults is set out in the
-documentation's [Statistical approach](kosmic/gui/help/content/meta/statistics.md).
+documentation's [Statistical approach](https://goodbyewilson.github.io/kosmic/meta/statistics/).
 
 ## Getting started
 
@@ -109,20 +110,19 @@ python main.py
 
 The step-by-step version, including installing Python, R for Seurat
 files, and the optional extras, is in the
-[installation guide](kosmic/gui/help/content/install.md).
+[installation guide](https://goodbyewilson.github.io/kosmic/install/).
 
 ## Documentation
 
-User documentation is available from within KOSMIC by pressing **F1**.
-The same documentation covers the complete workflow, from project setup
-and single-dataset analysis through differential expression,
-meta-analysis and figure export, and will also be published at
-`docs.scmetaanalysis.com`.
+The [user documentation](https://goodbyewilson.github.io/kosmic/) covers the complete workflow, from
+project setup and single-dataset analysis through differential
+expression, meta-analysis and figure export. The same pages are
+available from within KOSMIC by pressing **F1**.
 
 Developer documentation: [CONTRIBUTING.md](CONTRIBUTING.md) covers
 development setup and conventions; [CODEBASE.md](CODEBASE.md) describes
-the architecture; the API reference is generated from the source
-documentation into the documentation site.
+the architecture; the [developer reference](https://goodbyewilson.github.io/kosmic/reference/) is
+generated from the source documentation.
 
 ## Citation
 
