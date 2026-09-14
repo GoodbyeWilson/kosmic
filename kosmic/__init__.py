@@ -7,6 +7,7 @@ restart Python. Consumers do ``from kosmic import DEFAULT_FDR`` etc.
 """
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 
@@ -35,7 +36,8 @@ GWAS_LP_THRESHOLD            = _cfg["gwas"]["lp_threshold"]
 GWAS_WINDOW_KB               = _cfg["gwas"]["window_kb"]
 
 # Help: documentation site (None = offline browser only)
-HELP_SITE_URL                = _cfg.get("help", {}).get("site_url") or None
+HELP_SITE_URL                = (os.environ.get("KOSMIC_HELP_SITE_URL")
+                                or _cfg.get("help", {}).get("site_url") or None)
 
 # DE pipeline
 DE_MIN_CELLS                 = _cfg["de"]["min_cells"]

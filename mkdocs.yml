@@ -14,7 +14,7 @@ site_name: KOSMIC
 site_description: >-
   Kirk's Open-source Single-cell Meta-analysis Integration and Comparison —
   a desktop application for cross-study meta-analysis of single-cell RNA-seq.
-site_url: https://scmetaanalysis.org/   # TODO confirm domain (see CONTRIBUTING.md)
+site_url: https://docs.scmetaanalysis.com/
 repo_url: https://github.com/CWilsonStrath/kosmic   # TODO confirm once pushed
 edit_uri: edit/main/kosmic/gui/help/content/
 

@@ -5,10 +5,10 @@
 # repo and goes live on merge. Pull requests only build, to catch broken
 # links and nav entries before they land.
 #
-# One-time setup on the repository: Settings -> Pages -> Source: GitHub
-# Actions. To serve it from the project domain, add the domain under
-# Settings -> Pages -> Custom domain and a CNAME record at the DNS host
-# pointing at <owner>.github.io.
+# One-time setup once the repository is public: Settings -> Pages ->
+# Source: GitHub Actions, then Custom domain: docs.scmetaanalysis.com
+# (the CNAME file in the content folder keeps it set across deploys).
+# At the DNS host, add a CNAME record 'docs' -> '<owner>.github.io'.
 name: Docs
 
 on:

@@ -60,10 +60,11 @@ In the app, **F1 opens the website at the page for the screen in
 front** (`HelpManager.open`). The same Markdown ships inside the
 package as the offline fallback: Help → *Offline Help Browser*, and
 where F1 lands when no site is configured or it cannot be reached.
-The site address is `[help] site_url` in `config.toml` and `site_url` in
-`mkdocs.yml`; keep them the same once the site exists. While writing
-docs, set the config one to `http://127.0.0.1:8001/`: F1 then starts
-`mkdocs serve` on that address itself (source checkout, `mkdocs`
+The site is `https://docs.scmetaanalysis.com/` (`site_url` in `mkdocs.yml`
+and `[help] site_url` in `config.toml`; keep them the same). While
+writing docs, set the environment variable
+`KOSMIC_HELP_SITE_URL=http://127.0.0.1:8001/` before launching: F1 then
+starts `mkdocs serve` on that address itself (source checkout, `mkdocs`
 installed) and stops it when KOSMIC exits, so every F1 press is the
 live preview.
 
