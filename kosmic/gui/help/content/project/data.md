@@ -22,7 +22,7 @@ studies you can work down the list.
 
 ![The Data step: the selected study, the Add Data menu, and which studies still lack data](img/step3_data.png)
 
-## Raw counts, and why KOSMIC is fussy about them
+## Raw counts are required
 
 Pseudobulk differential expression is a count model. Give it
 log-normalised values and it produces no error — just wrong answers. So

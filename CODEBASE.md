@@ -121,9 +121,9 @@ throughout:
 
 ## Data flow between workspaces
 
-The Project workspace selects a study. Opening a per-study workspace
-makes that study active, and the workspace loads the study's processed
-AnnData file from `processed_data/`.
+The user selects a study in the Project workspace. Opening a per-study
+workspace makes that study active, and the workspace loads the study's
+processed AnnData file from `processed_data/`.
 
 **scRNA Analysis** processes one study. Each step writes the updated
 AnnData back to the study's processed file and records a provenance
@@ -162,7 +162,7 @@ Differential expression is computed from those counts, never from the
 normalised matrix. DecontX writes its output to
 `adata.layers['decontX_counts']` and leaves the originals unchanged.
 
-**The processed file is the study.** Every workspace reads and writes
+**The processed file holds the study's state.** Every workspace reads and writes
 the study's `processed_data/*.h5ad`. Metadata that other workspaces
 depend on — the sample and condition columns, the role of each
 condition value, cell-type labels — is stored in that file and in the

@@ -55,6 +55,15 @@ paper. See `CODEBASE.md` for the workspace structure and data flow.
   statement in these documents should be surfaced, not worked around.
 - **Tests and lint must pass** before a task is reported as done:
   `pytest tests/` and `ruff check kosmic/ main.py tests/`.
+- **Write literally and precisely.** In any prose — documentation,
+  README, CODEBASE.md, comments — describe what the user can do with
+  KOSMIC and what the software provides. Do not describe KOSMIC as an
+  autonomous actor performing scientific reasoning. Avoid slogans,
+  anthropomorphic descriptions, compressed shorthand and marketing
+  language; use ordinary technical prose in complete sentences.
+  The canonical model: a project represents one biological question;
+  the user adds each dataset that addresses it as a study, analyses
+  each study independently, and then combines the study-level results.
 - **Update documentation with the change.** A changed boundary or
   hand-off updates `CODEBASE.md`; a changed screen updates its page
   under `kosmic/gui/help/content/` and, if the screen looks different,

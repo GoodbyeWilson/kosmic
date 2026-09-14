@@ -69,7 +69,7 @@ source .venv/bin/activate       # macOS / Linux
 Your prompt should now start with `(.venv)`. Finally:
 
 ```sh
-pip install -e ".[dev]"
+pip install -e .
 python main.py
 ```
 
@@ -83,7 +83,7 @@ The install takes about five minutes and downloads roughly a gigabyte
 
 If you already use conda, skip the venv lines: `conda create -n kosmic
 python=3.11`, `conda activate kosmic`, then the same
-`pip install -e ".[dev]"`. Everything comes from PyPI either way.
+`pip install -e .`. Everything comes from PyPI either way.
 
 ## Optional components
 
@@ -124,8 +124,6 @@ Launch with `python main.py`. The window opens on the Home page; the
 Project workspace is where an analysis starts — see
 [The Project workspace](project/index.md).
 
-To run the test suite (a few minutes; useful if you are contributing):
-
-```sh
-pytest tests/
-```
+If you intend to contribute, install the development extras instead
+(`pip install -e ".[dev,docs]"`) and see `CONTRIBUTING.md` in the
+repository.

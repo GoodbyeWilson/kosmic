@@ -35,7 +35,7 @@ raw import  →  harmonised names  →  roles set  →  QC'd + normalised
 
 Two things are worth holding in mind:
 
-- **Counts are never lost.** QC keeps the original counts in `.raw` and
+- **The original counts are preserved.** QC keeps them in `.raw` and
   `layers['counts']`; normalisation, clustering and annotation all work
   on copies or add columns. Differential expression later runs on the
   counts, not the normalised values.

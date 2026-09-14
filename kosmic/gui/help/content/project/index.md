@@ -65,12 +65,13 @@ Selecting a row tells you which kind it is: the details panel says
 *Shared atlas* or *Subset of GSE183852* next to the name. KOSMIC reads
 this from the study's provenance record, not from the folder name.
 
-## The study you have selected
+## The selected study
 
-The row highlighted in the table is the study everything acts on. Add
-Data puts data into it; *Open in scRNA* and *Open in DE* open it; so
-does clicking scRNA or Differential Expression in the left rail while
-you are on this page. There is nothing to "set" — select a row and go.
+The row highlighted in the table is the selected study. The Project
+workspace's actions apply to it: *Add Data* imports into it, and
+*Open in scRNA* and *Open in DE* open it, as does clicking scRNA
+Analysis or Differential Expression in the left-hand rail while this
+page is showing. No separate step is needed to make a study active.
 
 The **Active** chip marks the study the scRNA and DE workspaces are
 currently holding. It follows your selection when you open one of them.

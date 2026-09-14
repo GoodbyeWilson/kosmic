@@ -9,8 +9,9 @@ it absolutely.
 Two studies deposited three years apart used different genome
 annotations, and the same gene has different names in each — `FAM19A5`
 in one, `TAFA5` in the other; `C10orf54` and `VSIR`; `MLLT4` and
-`AFDN`. When KOSMIC pools per-gene results across studies it matches
-genes *by name*, so an un-renamed gene simply drops out of the join.
+`AFDN`. Meta-analysis matches genes across studies *by name*, so a gene
+that has not been renamed to the current symbol drops out of the
+pooled result.
 The shared-gene count on the Project page's Shared Atlas step shows how
 much this costs: a study on an older build can share barely two thirds
 of its genes with the others until it is harmonised.

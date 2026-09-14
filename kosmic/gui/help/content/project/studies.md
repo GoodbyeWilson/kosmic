@@ -30,7 +30,7 @@ the same. Five or more is where the method choice starts to matter.
 ## Removing a study
 
 **Remove selected study…** deletes the study folder and everything in
-it — data, results, figures. KOSMIC asks first; there is no undo. If
+it — data, results, figures. A confirmation is requested first; there is no undo. If
 you might want it back, move the folder out of the project instead.
 
 ## The count
