@@ -1,25 +1,24 @@
-"""Architecture invariants (see CONTRIBUTING.md, "Architecture").
+"""Architecture invariants (CODEBASE.md, "Architectural boundaries").
 
-These tests encode the structural rules from CLAUDE.md and the ADRs so
-that every subsequent cleanup phase has a tripwire if it accidentally
-drifts:
+These tests are the tripwire for the structural rules, so a refactor
+that crosses a boundary fails here rather than being noticed later:
 
-1. No module in `src/` imports Qt (PyQt6 / PyQt5 / PySide6 / PySide2).
-   src/ is the pure-logic layer; any Qt import there is a layering break.
+1. No module in the analysis package (`kosmic/` outside `kosmic/gui/`)
+   imports Qt (PyQt6 / PyQt5 / PySide6 / PySide2). Any Qt import there
+   is a layering break.
 
-2. No module in `src/` imports from `gui/`.
-   Reverse-direction coupling would make `src/` depend on the GUI layer.
+2. No module in the analysis package imports from `kosmic/gui/`.
+   Reverse-direction coupling would make the analysis depend on the GUI.
 
-3. Every top-level module under `src/`, `kosmic/gui/tabs/`, `kosmic/gui/de_analysis/`,
-   `kosmic/gui/meta_analysis/` imports cleanly under the `kirk` env.
+3. Every module under `kosmic/` imports cleanly.
 
 4. `kosmic/gui/shared/` may not import from any workspace
    subpackage. The shared toolbox knows nothing about its consumers.
 
 5. Every concrete page/tab class in a workspace subpackage
-   must inherit from one of the four page bases (SimplePage,
-   TabbedPage, SidebarPage, SidebarTabbedPage) or FigurePage. No page
-   may hand-roll its own QSplitter + sidebar geometry.
+   must inherit from one of the page bases (SimplePage, TabbedPage,
+   SidebarPage, SidebarTabbedPage, ModeChooserPage) or FigurePage. No
+   page may hand-roll its own QSplitter + sidebar geometry.
 
 Parsed via ``ast`` -- docstring mentions and comments do not trigger.
 """
@@ -74,7 +73,7 @@ def _imported_modules(path: str):
 
 
 # ---------------------------------------------------------------------
-# Rule 1: no Qt imports in src/
+# Rule 1: no Qt imports in the analysis package
 # ---------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -83,19 +82,19 @@ def _imported_modules(path: str):
     ids=lambda p: os.path.relpath(p, _ROOT),
 )
 def test_no_qt_imports_in_src(filepath: str):
-    """src/ must stay free of Qt imports (CLAUDE.md principle 2)."""
+    """The analysis package must stay free of Qt imports (CODEBASE.md, boundary 1)."""
     offenders = [
         m for m in _imported_modules(filepath)
         if any(m == q or m.startswith(q + ".") for q in _QT_PREFIXES)
     ]
     assert not offenders, (
         f"{os.path.relpath(filepath, _ROOT)} imports Qt: {offenders}. "
-        "src/ is the pure-logic layer (CLAUDE.md principle 2)."
+        "kosmic/ outside kosmic/gui/ is the Qt-free analysis layer (CODEBASE.md)."
     )
 
 
 # ---------------------------------------------------------------------
-# Rule 2: no src -> gui imports
+# Rule 2: no analysis -> gui imports
 # ---------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -104,14 +103,14 @@ def test_no_qt_imports_in_src(filepath: str):
     ids=lambda p: os.path.relpath(p, _ROOT),
 )
 def test_src_does_not_import_gui(filepath: str):
-    """Reverse-direction coupling (src -> gui) is forbidden."""
+    """Reverse-direction coupling (analysis -> gui) is forbidden."""
     offenders = [
         m for m in _imported_modules(filepath)
         if m == _GUI_PREFIX or m.startswith(_GUI_PREFIX + ".")
     ]
     assert not offenders, (
         f"{os.path.relpath(filepath, _ROOT)} imports from gui/: {offenders}. "
-        "gui/ depends on src/, never the reverse."
+        "kosmic/gui/ depends on the analysis package, never the reverse."
     )
 
 
@@ -161,7 +160,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 @pytest.mark.parametrize("module_name", _collect_import_targets())
 def test_module_imports_cleanly(module_name: str):
-    """Every active src/ + gui/{tabs,de_analysis,meta_analysis} module must
+    """Every module under kosmic/ must
     import without raising."""
     try:
         importlib.import_module(module_name)
