@@ -29,6 +29,9 @@ window_kb    = 100       # nearest-gene window for variant -> gene mapping
 [de]
 min_cells              = 10    # min cells PER DONOR to keep that donor's pseudobulk profile (not per condition).
                                # Counted over whatever is loaded, so in a per-cell-type run it means cells of that type.
+min_counts             = 0     # min summed transcripts PER DONOR to keep that donor's pseudobulk profile; 0 = off.
+                               # Guards depth where min_cells guards cell number: 10 shallow nuclei clear min_cells
+                               # but can sum to a few thousand transcripts. Gao et al. use 50,000 in heart snRNA-seq.
 min_expressing_samples = 2     # legacy sample-level threshold (superseded by the expression filter below)
 filter_min_count       = 10    # sample-level expression filter: CPM cutoff derived from this count vs median library size
 filter_min_total_count = 15    # sample-level expression filter: minimum summed count across all samples

@@ -30,7 +30,9 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from kosmic import DEFAULT_FDR, DEFAULT_LFC_THRESHOLD, DE_MIN_CELLS
+from kosmic import (
+    DEFAULT_FDR, DEFAULT_LFC_THRESHOLD, DE_MIN_CELLS, DE_MIN_COUNTS,
+)
 from kosmic.paths import (
     de_result_path, de_stats_dir, pseudobulk_path, significant_path,
 )
@@ -130,14 +132,17 @@ def included_roles(roles: pd.Series) -> pd.Series:
 def plan_cell_types(adata, cell_type_col: str, sample_col: str,
                     cell_types: Optional[Sequence[str]] = None,
                     min_cells: int = DE_MIN_CELLS,
-                    min_samples_per_arm: int = MIN_SAMPLES_PER_ARM
+                    min_samples_per_arm: int = MIN_SAMPLES_PER_ARM,
+                    min_counts: int = DE_MIN_COUNTS,
+                    counts_layer: Optional[str] = None,
                     ) -> list[CellTypePlan]:
     """Report, per cell type, whether a per-type DE run is worth attempting.
 
     Donor counts mirror what 'create_pseudobulk' will actually keep: a
-    donor contributing fewer than *min_cells* cells of this type is
-    dropped there, so it is not counted here either. A cell type is
-    eligible when both arms retain at least *min_samples_per_arm* donors.
+    donor contributing fewer than *min_cells* cells or fewer than
+    *min_counts* transcripts of this type is dropped there, so it is not
+    counted here either. A cell type is eligible when both arms retain
+    at least *min_samples_per_arm* donors.
 
     Cells whose role is 'exclude' are ignored throughout -- they never
     enter a contrast, so they must not make a cell type look testable.
@@ -147,9 +152,12 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
     if sample_col not in adata.obs.columns:
         raise ValueError(f"Sample column '{sample_col}' not in obs.")
 
+    from kosmic.de.de_analysis import cell_depths
+
     roles = _role_series(adata)
     labels = adata.obs[cell_type_col].astype(str)
     samples = adata.obs[sample_col].astype(str)
+    depths = cell_depths(adata, counts_layer) if min_counts else None
 
     included = included_roles(roles)
     observed = [t for t in pd.unique(labels[included])
@@ -166,11 +174,17 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
                 eligible=False, reason='no cells with this label'))
             continue
 
-        counts = pd.DataFrame({
+        per_cell = pd.DataFrame({
             'sample': samples[in_type].values,
             'role': roles[in_type].values,
-        }).groupby(['sample', 'role'], observed=True).size()
-        kept = counts[counts >= min_cells]
+            'depth': depths[in_type.values] if depths is not None else 0.0,
+        })
+        by_donor = per_cell.groupby(['sample', 'role'], observed=True)['depth']
+        counts = by_donor.size()
+        passing = counts >= min_cells
+        if min_counts:
+            passing &= by_donor.sum() >= min_counts
+        kept = counts[passing]
         n_disease = int(sum(1 for (_s, r) in kept.index if r == 'disease'))
         n_control = int(sum(1 for (_s, r) in kept.index if r == 'control'))
 
@@ -178,8 +192,11 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
                     and n_control >= min_samples_per_arm)
         reason = ''
         if not eligible:
+            floor = f">={min_cells} cells"
+            if min_counts:
+                floor += f" and >={min_counts:,} transcripts"
             reason = (f"needs >={min_samples_per_arm} donors per arm with "
-                      f">={min_cells} cells; has {n_disease} disease / "
+                      f"{floor}; has {n_disease} disease / "
                       f"{n_control} control")
         plans.append(CellTypePlan(
             str(cell_type), slugify_cell_type(cell_type), n_cells,
@@ -192,8 +209,10 @@ def pseudobulk_frame(matrix: np.ndarray, sample_df: pd.DataFrame,
                      genes: Sequence[str]) -> pd.DataFrame:
     """Shape a pseudobulk matrix into the CSV the meta-analysis reads back.
 
-    Index is the donor id; the leading columns are 'condition', 'n_cells'
-    and -- when the source h5ad had roles set -- 'role'. 'role' is the
+    Index is the donor id; the leading columns are 'condition', 'n_cells',
+    'total_counts' (the donor's summed transcripts over all genes, when
+    'create_pseudobulk' supplied it) and -- when the source h5ad had
+    roles set -- 'role'. 'role' is the
     canonical disease/control assignment: the consensus case-control
     permutation refuses to run without it rather than guess which raw
     condition label is the disease arm.
@@ -203,8 +222,13 @@ def pseudobulk_frame(matrix: np.ndarray, sample_df: pd.DataFrame,
         index=[str(s) for s in sample_df['sample'].values])
     df.insert(0, 'condition', [str(c) for c in sample_df['condition'].values])
     df.insert(1, 'n_cells', sample_df['n_cells'].values.astype(int))
+    pos = 2
+    if 'total_counts' in sample_df.columns:
+        df.insert(pos, 'total_counts',
+                  sample_df['total_counts'].values.astype(int))
+        pos += 1
     if 'role' in sample_df.columns:
-        df.insert(2, 'role', [str(r) for r in sample_df['role'].values])
+        df.insert(pos, 'role', [str(r) for r in sample_df['role'].values])
     return df
 
 
@@ -219,6 +243,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                         covariates: Optional[Sequence[str]] = None,
                         min_cells: int = DE_MIN_CELLS,
                         min_samples_per_arm: int = MIN_SAMPLES_PER_ARM,
+                        min_counts: int = DE_MIN_COUNTS,
                         fdr: float = DEFAULT_FDR,
                         lfc: float = DEFAULT_LFC_THRESHOLD,
                         write: bool = True,
@@ -267,7 +292,9 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
 
     plans = plan_cell_types(
         adata, cell_type_col, sample_col, cell_types=cell_types,
-        min_cells=min_cells, min_samples_per_arm=min_samples_per_arm)
+        min_cells=min_cells, min_samples_per_arm=min_samples_per_arm,
+        min_counts=min_counts,
+        counts_layer=pipeline_kwargs.get('counts_layer'))
 
     if write:
         de_stats_dir(output_dir).mkdir(parents=True, exist_ok=True)
@@ -306,7 +333,8 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
         try:
             de_results, _significant, _coverage, sample_df = run_de_pipeline(
                 subset, sample_col, condition_col, pathway_gene_sets or {},
-                min_cells=min_cells, de_method=de_method, full_genome=True,
+                min_cells=min_cells, min_counts=min_counts,
+                de_method=de_method, full_genome=True,
                 moderate=moderate, covariates=covariates,
                 fdr_genes=fdr_genes,
                 progress_callback=lambda m, h=head: _progress(f"{h}: {m}"),
@@ -348,7 +376,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
             gene_names = [str(g) for g in de_results['names'].tolist()]
             pb_matrix, pb_sample_df, pb_genes = create_pseudobulk(
                 subset, gene_names, sample_col, condition_col,
-                min_cells=min_cells, aggregate='sum')
+                min_cells=min_cells, min_counts=min_counts, aggregate='sum')
             if pb_matrix.size:
                 run.pseudobulk_path = pseudobulk_path(output_dir, run_accession)
                 pseudobulk_frame(pb_matrix, pb_sample_df, pb_genes).to_csv(

@@ -371,6 +371,26 @@ class GeneDEPage(SidebarTabbedPage):
         self.min_cells_spin.valueChanged.connect(self._on_min_cells_changed)
         filters_lay.addWidget(self.min_cells_spin)
 
+        filters_lay.addWidget(QLabel("Donor filter: min transcripts per donor"))
+        self.min_counts_spin = NoScrollSpinBox()
+        self.min_counts_spin.setRange(0, 10_000_000)
+        self.min_counts_spin.setSingleStep(10_000)
+        self.min_counts_spin.setGroupSeparatorShown(True)
+        self.min_counts_spin.setSpecialValueText("off")
+        self.min_counts_spin.setValue(self.ws.min_counts)
+        self.min_counts_spin.setToolTip(
+            "A donor whose cells sum to fewer transcripts than this is\n"
+            "dropped from the comparison. 0 turns the floor off.\n\n"
+            "The cell-count filter above does not guard depth: 10 shallow\n"
+            "nuclei clear it but can sum to a few thousand transcripts,\n"
+            "which is too thin a profile for a count model. Summed over\n"
+            "every gene, for the same cells the cell-count filter sees.\n\n"
+            "Gao et al. use 50,000 for heart snRNA-seq. Each donor's total\n"
+            "is written to the pseudobulk file as 'total_counts', so you\n"
+            "can see where a floor would fall before setting one.")
+        self.min_counts_spin.valueChanged.connect(self._on_min_counts_changed)
+        filters_lay.addWidget(self.min_counts_spin)
+
 
         # Built here, shown in the Advanced dialog rather than the sidebar:
         # all three are at standard values and an ordinary run never
@@ -547,6 +567,7 @@ class GeneDEPage(SidebarTabbedPage):
 
         # Restate the whole rule in one sentence whenever a piece changes.
         for _sig in (self.min_cells_spin.valueChanged,
+                     self.min_counts_spin.valueChanged,
                      self.detection_pct_spin.valueChanged,
                      self.detection_donor_frac_spin.valueChanged,
                      self.filter_min_count_spin.valueChanged,
@@ -556,6 +577,7 @@ class GeneDEPage(SidebarTabbedPage):
 
         # Collapsed card summaries track every control they describe.
         for _sig in (self.min_cells_spin.valueChanged,
+                     self.min_counts_spin.valueChanged,
                      self.detection_pct_spin.valueChanged,
                      self.detection_donor_frac_spin.valueChanged,
                      self.filter_min_count_spin.valueChanged,
@@ -1117,6 +1139,9 @@ class GeneDEPage(SidebarTabbedPage):
         self.min_cells_spin.blockSignals(True)
         self.min_cells_spin.setValue(self.ws.min_cells)
         self.min_cells_spin.blockSignals(False)
+        self.min_counts_spin.blockSignals(True)
+        self.min_counts_spin.setValue(self.ws.min_counts)
+        self.min_counts_spin.blockSignals(False)
 
         self._refresh_count_source()
 
@@ -1161,6 +1186,7 @@ class GeneDEPage(SidebarTabbedPage):
             'condition_col': self.ws.condition_col,
             'sample_col': self.ws.sample_col,
             'min_cells': self.ws.min_cells,
+            'min_counts': self.ws.min_counts,
             'de_method': self.ws.de_method,
             'unit': self.ws.unit,
             'moderate': self.eb_checkbox.isChecked(),
@@ -1214,6 +1240,7 @@ class GeneDEPage(SidebarTabbedPage):
                 'method': self.ws.de_method,
                 'unit': self.ws.unit,
                 'min_cells': self.ws.min_cells,
+                'min_counts': self.ws.min_counts,
                 'detection_min_pct': round(self.detection_pct_spin.value() / 100.0, 4),
                 'detection_min_donor_frac': round(
                     self.detection_donor_frac_spin.value() / 100.0, 4),
@@ -1417,6 +1444,10 @@ class GeneDEPage(SidebarTabbedPage):
 
     def _on_min_cells_changed(self, value):
         self.ws.min_cells = value
+        self._refresh_run_dirty()
+
+    def _on_min_counts_changed(self, value):
+        self.ws.min_counts = value
         self._refresh_run_dirty()
 
     # --- Run DE ---
@@ -1643,10 +1674,10 @@ class GeneDEPage(SidebarTabbedPage):
             self.filter_min_samples_spin.setSpecialValueText(auto_txt)
         if self.detection_pct_spin.value() > 0:
             second += f", {self.detection_pct_spin.value():g}%+ detection"
-        self._filters_card.set_summary([
-            f"Donors: \u2265{self.min_cells_spin.value()} cells each",
-            second,
-        ])
+        donors = f"Donors: \u2265{self.min_cells_spin.value()} cells each"
+        if self.min_counts_spin.value():
+            donors += f", \u2265{self.min_counts_spin.value():,} transcripts"
+        self._filters_card.set_summary([donors, second])
 
         if self.ws.de_method == 'deseq2' and self.ws.unit == 'sample':
             indep = ("independent filtering on"
@@ -1854,6 +1885,7 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.current_adata, sample_col, condition_col,
             control_label, disease_label,
             self.ws.pathway_gene_sets, min_cells,
+            min_counts=self.ws.min_counts,
             de_method=de_method, full_genome=full_genome,
             moderate=self.eb_checkbox.isChecked(),
             unit=self.ws.unit,
@@ -2066,6 +2098,8 @@ class GeneDEPage(SidebarTabbedPage):
         layout.addWidget(buttons)
 
         min_cells = self.min_cells_spin.value()
+        min_counts = self.min_counts_spin.value()
+        counts_layer = self._selected_counts_layer()
 
         def _checked_types():
             return [type_list.item(i).data(Qt.ItemDataRole.UserRole)
@@ -2087,7 +2121,8 @@ class GeneDEPage(SidebarTabbedPage):
             col = col_combo.currentData()
             try:
                 plans = plan_cell_types(
-                    adata, col, self.ws.sample_col, min_cells=min_cells)
+                    adata, col, self.ws.sample_col, min_cells=min_cells,
+                    min_counts=min_counts, counts_layer=counts_layer)
             except ValueError as exc:
                 summary.setText(str(exc))
                 return
@@ -2171,6 +2206,7 @@ class GeneDEPage(SidebarTabbedPage):
             # Same source the dialog's eligibility counts came from, so
             # what it promised is what actually runs.
             min_cells=self.min_cells_spin.value(),
+            min_counts=self.min_counts_spin.value(),
             pathway_gene_sets=self.ws.pathway_gene_sets,
             fdr_genes=self._committed_fdr_genes(),
             counts_layer=self._selected_counts_layer(),
@@ -2507,6 +2543,7 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.current_adata, self.ws.sample_col, self.ws.condition_col,
             self.ws.min_cells, self.ws.de_method, self.eb_checkbox.isChecked(),
             self.ws.de_results, self.ws.project_dir, gse_id,
+            min_counts=self.ws.min_counts,
         )
         if self.ws.progress_bar:
             self.ws.progress_bar.setValue(0)
@@ -2913,7 +2950,7 @@ class GeneDEPage(SidebarTabbedPage):
             df = pseudobulk_expression_matrix(
                 adata, self.ws.sample_col, self.ws.condition_col,
                 normalization=norm, counts_layer=counts_layer,
-                min_cells=self.ws.min_cells)
+                min_cells=self.ws.min_cells, min_counts=self.ws.min_counts)
         finally:
             self.status_label.setText("")
             self.ws.status_message.emit("Ready")
