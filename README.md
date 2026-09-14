@@ -299,7 +299,12 @@ A methods paper is in preparation. Until it lands, please cite the GitHub reposi
 
 ## License
 
-To be chosen. Until then, all rights reserved by the authors.
+KOSMIC is released under the [GNU General Public License v3.0](LICENSE).
+It depends on PyQt6 and leidenalg, which are themselves GPL, so any
+distributed build is GPL whatever the KOSMIC code carries; the licence
+states that plainly. The licences and terms of the bundled reference
+data are listed in [NOTICE.md](NOTICE.md) — two gene-set files are
+derived from KEGG, whose terms permit academic use only.
 
 ## Authors
 

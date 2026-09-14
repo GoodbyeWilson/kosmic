@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]   # PEP 639 licence expression
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,7 +28,10 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-# license = "MIT"  # TODO: pick licence; MIT/BSD-3 are safe OSI defaults
+# GPL-3.0: PyQt6 and leidenalg are GPL, so a distributed build is GPL
+# regardless; see NOTICE.md.
+license = "GPL-3.0-only"
+license-files = ["LICENSE", "NOTICE.md"]
 dependencies = [
     "PyQt6>=6.5",
     "numpy>=1.24",

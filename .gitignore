@@ -48,3 +48,8 @@ dev/simulations/Heart Logo/
 
 # MkDocs build output (mkdocs.yml -> site/)
 site/
+
+# The tutorial dataset is synthetic and regenerated on first run
+# (kosmic/gui/help/tutorial/data.py); never commit it.
+kosmic/reference/tutorial/tutorial_dataset.h5ad
+kosmic/reference/tutorial/tutorial_dataset.version
