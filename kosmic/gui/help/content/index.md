@@ -180,7 +180,8 @@ compared. Mouse datasets can also be analysed individually.
 
 ## Getting started
 
-For a new analysis, begin in the [Project workspace](project/index.md).
+Install KOSMIC following the [installation guide](install.md). For a
+new analysis, then begin in the [Project workspace](project/index.md).
 
 Create a project for the biological question you want to investigate,
 then add your first scRNA-seq or snRNA-seq dataset as a study. KOSMIC

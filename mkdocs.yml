@@ -78,6 +78,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Installation: install.md
   - Project:
       - project/index.md
       - 1. Project folder: project/project.md
@@ -113,6 +114,7 @@ nav:
       - Pathway explorer: meta/pathway_explorer.md
       - Methods Comparison: meta/methods_comparison.md
       - Methods Comparison results: meta/methods_comparison_results.md
+      - Statistical approach: meta/statistics.md
   - Figures:
       - figures/index.md
       - Dataset summary: figures/dataset_summary.md
