@@ -56,7 +56,11 @@ jobs:
           path: site
 
   deploy:
-    if: github.event_name == 'push'
+    # GitHub Pages needs a public repository on a Free account. Flip
+    # this to 'true' (or delete the second condition) when the repo goes
+    # public and Pages is enabled; until then the site is built and
+    # checked on every push but not published.
+    if: github.event_name == 'push' && vars.DOCS_DEPLOY == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:
