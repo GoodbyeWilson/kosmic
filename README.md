@@ -214,7 +214,7 @@ independent of how Python is installed. If you only ever load `.h5ad`,
 Open a terminal in the folder where you want KOSMIC to live, then:
 
 ```sh
-git clone <REPO_URL>
+git clone https://github.com/GoodbyeWilson/kosmic.git
 cd kosmic
 python -m venv .venv
 ```

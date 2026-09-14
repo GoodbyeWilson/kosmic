@@ -8,7 +8,7 @@
 # One-time setup once the repository is public: Settings -> Pages ->
 # Source: GitHub Actions, then Custom domain: docs.scmetaanalysis.com
 # (the CNAME file in the content folder keeps it set across deploys).
-# At the DNS host, add a CNAME record 'docs' -> '<owner>.github.io'.
+# At the DNS host, add a CNAME record 'docs' -> 'goodbyewilson.github.io'.
 name: Docs
 
 on:

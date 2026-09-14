@@ -11,7 +11,7 @@ For how the code is currently laid out, see [`CODEBASE.md`](CODEBASE.md).
 ## Getting set up
 
 ```sh
-git clone <REPO_URL>
+git clone https://github.com/GoodbyeWilson/kosmic.git
 cd kosmic
 python -m venv .venv
 .venv\Scripts\activate          # Windows
