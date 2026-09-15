@@ -248,7 +248,10 @@ def sample_overview(adata, sample_col: Optional[str] = None) -> dict:
     'table' has one row per sample: 'sample', 'n_cells', and, when
     derivable, 'condition' (from '_role' else 'condition'),
     'median_genes' (per-cell genes detected), 'pct_mito' (mean per-cell
-    mitochondrial %), and 'pct_doublets' (when Scrublet has run).
+    mitochondrial %), 'pct_doublets' (when Scrublet has run), and the sex
+    call from 'kosmic.scrna.inspect.sex': 'sex_inferred', 'xist_cpm',
+    'y_cpm', 'sex_recorded' (from the first sex-like obs column) and
+    'sex_check' ('' / 'mismatch' / 'not recorded' / 'mixed signal' ...).
     Metrics use the scanpy QC obs columns when present and fall back to
     cheap sparse ops on X; every field degrades gracefully.
     """
@@ -330,6 +333,26 @@ def sample_overview(adata, sample_col: Optional[str] = None) -> dict:
     table = table.reset_index().rename(columns={'index': 'sample'})
     if table.columns[0] != 'sample':
         table = table.rename(columns={table.columns[0]: 'sample'})
+
+    # Sex per sample: a genotype read from XIST and the Y genes, checked
+    # against whatever the depositor recorded.
+    try:
+        from kosmic.scrna.inspect.sex import compare_with_recorded, infer_sex
+        sex = infer_sex(adata, sample_col)
+        if not sex.empty:
+            sex = compare_with_recorded(sex, obs, sample_col)
+            sex.index = sex.index.astype(str)
+            # One column for the table: a flag on the call itself first,
+            # else the comparison; nothing to compare against shows blank.
+            sex['sex_check'] = [
+                flag if flag else ('' if check == 'not recorded' else check)
+                for flag, check in zip(sex['sex_flag'], sex['sex_check'])]
+            table = table.merge(
+                sex[['sex_inferred', 'xist_cpm', 'y_cpm', 'sex_recorded',
+                     'sex_check']],
+                left_on='sample', right_index=True, how='left')
+    except (AttributeError, TypeError, ValueError, MemoryError):
+        pass
     sort_cols = (['condition', 'sample'] if 'condition' in table.columns
                  else ['sample'])
     table = table.sort_values(sort_cols).reset_index(drop=True)

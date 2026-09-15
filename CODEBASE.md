@@ -171,8 +171,10 @@ normalised matrix. DecontX writes its output to
 **The processed file holds the study's state.** Every workspace reads and writes
 the study's `processed_data/*.h5ad`. Metadata that other workspaces
 depend on — the sample and condition columns, the role of each
-condition value, cell-type labels — is stored in that file and in the
-study's `study.json` manifest, not in application settings.
+condition value, the sex column (recorded, or `sex_inferred` written by
+the Inspect step from XIST and Y-gene expression), cell-type labels — is
+stored in that file and in the study's `study.json` manifest, not in
+application settings.
 
 **Differential expression output.** Meta-Analysis requires, for each
 study it pools, a `{accession}_DE_{method}.csv` and a

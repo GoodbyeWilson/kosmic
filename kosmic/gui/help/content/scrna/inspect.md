@@ -91,7 +91,28 @@ Two things worth knowing:
 ## Samples tab
 
 One row per sample: cell count, condition, median genes detected per cell,
-mitochondrial percentage, and doublet rate once Scrublet has run.
+mitochondrial percentage, doublet rate once Scrublet has run, and the
+sample's sex.
+
+**Sex** is read from the data, not the metadata: XIST is expressed in every
+female cell and no male cell, and the Y-chromosome genes (DDX3Y, UTY,
+KDM5D, RPS4Y1, EIF1AY, USP9Y) the reverse, so summed over a sample's cells
+the two signals separate completely. Saving the setup writes the call to
+`obs['sex_inferred']`, one value per cell, so it is available as a
+covariate in differential expression and for the methods text. If the
+file has a sex column, designate it as **Sex** in the column mapping (the
+usual names are picked up automatically); the study then keeps that
+column, and the **Sex check** column reports any sample whose call
+disagrees with it — a mislabelled or swapped sample. With no recorded
+sex, the inferred column becomes the study's sex column.
+
+Two other things the check can show. **Mixed signal**: a sample carrying
+both XIST and Y-gene counts well above zero, which means cells of both
+sexes are in it — ambient contamination, or a multiplexed library that
+was not demultiplexed. The call is still made (from the larger signal),
+but the sample deserves a look. **No signal**: neither gene set is
+detected, usually because the matrix does not contain them. Hover the
+cell for the counts per million behind the flag.
 
 This is the verification step. Look for a sample with far fewer cells than the
 rest, an outlying mitochondrial fraction, or — most importantly — a sample in

@@ -726,7 +726,7 @@ class ConvertTab(SidebarTabbedPage):
 
             # Per-row "Designate as" combo: column browsing and mapping share one widget.
             designate_combo = QComboBox()
-            designate_combo.addItems(['—', 'Condition', 'Sample', 'Cell type'])
+            designate_combo.addItems(['—', 'Condition', 'Sample', 'Cell type', 'Sex'])
             designate_combo.currentTextChanged.connect(
                 lambda role, c=col: self._on_designate_changed(c, role))
             self.meta_table.setCellWidget(row, 4, designate_combo)
@@ -758,9 +758,16 @@ class ConvertTab(SidebarTabbedPage):
 
         for std_name, role in (('condition', 'Condition'),
                                ('sample', 'Sample'),
-                               ('cell_type', 'Cell type')):
+                               ('cell_type', 'Cell type'),
+                               ('sex', 'Sex')):
             if std_name in obs_cols:
                 designations[role] = std_name
+        if 'Sex' not in designations:
+            from kosmic.scrna.inspect.sex import SEX_COLUMN_CANDIDATES
+            for c in SEX_COLUMN_CANDIDATES:
+                if c in obs_cols:
+                    designations['Sex'] = c
+                    break
 
         if 'Condition' not in designations:
             for pat in ('condition', 'group', 'disease', 'status', 'treatment'):
@@ -1104,6 +1111,7 @@ class ConvertTab(SidebarTabbedPage):
             'Condition': 'condition',
             'Sample': 'sample',
             'Cell type': 'cell_type',
+            'Sex': 'sex',
         }
         designations = {}
         for r in range(self.meta_table.rowCount()):
@@ -1163,6 +1171,37 @@ class ConvertTab(SidebarTabbedPage):
                 role_changes.append(
                     f"_role ({n_dis} disease, {n_ctl} control)")
 
+        # ── Step 2b: sex per sample ─────────────────────────────────
+        # A genotype read from XIST and the Y genes, written per cell so
+        # it can serve as a DE covariate. Where a Sex column is designated
+        # it is checked against the record; where none is, the inferred
+        # column is the study's sex column.
+        if 'sample' in self.adata.obs.columns:
+            try:
+                from kosmic.scrna.inspect.sex import (
+                    compare_with_recorded, infer_sex, write_inferred_sex,
+                )
+                sex_table = infer_sex(self.adata, 'sample')
+                if not sex_table.empty:
+                    write_inferred_sex(self.adata, 'sample', sex_table)
+                    recorded_col = 'sex' if 'sex' in self.adata.obs.columns else None
+                    checked = compare_with_recorded(
+                        sex_table, self.adata.obs, 'sample', recorded_col)
+                    n_f = int((checked['sex_inferred'] == 'female').sum())
+                    n_m = int((checked['sex_inferred'] == 'male').sum())
+                    mismatched = list(checked.index[checked['sex_check'] == 'mismatch'])
+                    mixed = list(checked.index[checked['sex_flag'] == 'mixed signal'])
+                    line = f"sex_inferred ({n_f} female, {n_m} male"
+                    if recorded_col:
+                        line += (f"; {len(mismatched)} mismatch vs '{recorded_col}'"
+                                 + (": " + ", ".join(mismatched) if mismatched else ""))
+                    if mixed:
+                        line += f"; mixed signal: {', '.join(mixed)}"
+                    changes.append(line + ")")
+                    self.adata.uns['sex_column'] = recorded_col or 'sex_inferred'
+            except (ValueError, TypeError, MemoryError) as exc:
+                changes.append(f"sex inference skipped: {exc}")
+
         # ── Step 3: write once ───────────────────────────────────────
         if not changes and not role_changes:
             self.status_label.setText("Nothing to save — no changes detected.")
@@ -1190,6 +1229,7 @@ class ConvertTab(SidebarTabbedPage):
             self.main_window.record_provenance('setup', {
                 'condition_col': self.adata.uns.get('role_condition_col'),
                 'role_map': dict(self.adata.uns.get('role_map', {})),
+                'sex_column': self.adata.uns.get('sex_column'),
                 'changes': list(getattr(self, '_pending_save_summary', [])),
             })
         self._write_study_manifest()
@@ -1230,6 +1270,8 @@ class ConvertTab(SidebarTabbedPage):
                     'condition_column': self.adata.uns.get('role_condition_col')
                                         or ('condition' if 'condition' in obs_cols else None),
                     'cell_type_column': 'cell_type' if 'cell_type' in obs_cols else None,
+                    'sex_column': self.adata.uns.get('sex_column')
+                                  or ('sex' if 'sex' in obs_cols else None),
                     'role_map': dict(self.adata.uns.get('role_map', {})),
                 },
             )
@@ -1265,6 +1307,8 @@ class ConvertTab(SidebarTabbedPage):
         ('pct_doublets', "Doublets (%)", "{:.1f}"),
         ('pct_mito', "Mitochondrial (%)", "{:.1f}"),
         ('median_genes', "Median genes/cell", "{:,.0f}"),
+        ('sex_inferred', "Sex (inferred)", "{}"),
+        ('sex_check', "Sex check", "{}"),
     )
 
     def _samples_view_df(self):
@@ -1331,7 +1375,18 @@ class ConvertTab(SidebarTabbedPage):
                     continue
                 value = rec.get(key)
                 text = fmt.format(value) if pd.notna(value) else ""
-                table.setItem(row, col, QTableWidgetItem(text))
+                item = QTableWidgetItem(text)
+                if key == 'sex_check' and text:
+                    if text in ('mismatch', 'mixed signal', 'inconsistent record'):
+                        item.setForeground(QColor(get_color('warning')))
+                        item.setToolTip(
+                            f"XIST {rec.get('xist_cpm', float('nan')):,.0f} CPM, "
+                            f"Y genes {rec.get('y_cpm', float('nan')):,.0f} CPM"
+                            + (f"; recorded {rec.get('sex_recorded')}"
+                               if pd.notna(rec.get('sex_recorded')) else ""))
+                    else:
+                        item.setForeground(QColor(get_color('fg_secondary')))
+                table.setItem(row, col, item)
                 col += 1
 
         def add_group_header(name, sub):
@@ -1350,9 +1405,11 @@ class ConvertTab(SidebarTabbedPage):
             head.setFont(font)
             head.setForeground(QColor(colour))
             table.setItem(row, 0, head)
+            # The cell count sits in the Cells column, under the numbers
+            # it sums, rather than in whatever column happens to be last.
             sub_item = QTableWidgetItem(f"{n_cells:,} cells ({pct:.1f}%)")
             sub_item.setForeground(QColor(colour))
-            table.setItem(row, table.columnCount() - 1, sub_item)
+            table.setItem(row, 1, sub_item)
 
         if group_by_condition:
             order = sorted(
