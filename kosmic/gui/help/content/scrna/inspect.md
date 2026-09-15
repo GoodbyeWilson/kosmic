@@ -81,8 +81,12 @@ you are mining for DCM, or a treatment group you are not comparing.
 
 Two things worth knowing:
 
-- Exclude works on a **condition value**, not a sample. To drop a single bad
-  donor you would have to give it its own label first.
+- Exclude works on a **condition value**, not a sample. To drop one donor,
+  or a few, give them their own value first: open **Set condition per
+  sample…**, type a new label into those samples' condition box (for
+  example `DCM_paediatric`), Apply, and the new value appears in Condition
+  Roles, where you set it to Exclude. The original column is untouched, so
+  a sensitivity run is one role change back to Disease or Control.
 - Excluded samples still influence the **gene filter** — the prevalence
   test that decides which genes are worth testing runs over the whole
   pseudobulk matrix. They never affect a fold change or a p-value, but they

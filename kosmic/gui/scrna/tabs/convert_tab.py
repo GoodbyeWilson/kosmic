@@ -1996,8 +1996,17 @@ class ConvertTab(SidebarTabbedPage):
             else:
                 cond_col_idx = 1
 
+            # Editable: a label typed here that is not yet in the column
+            # creates it on Apply. That is how a few donors are split off
+            # from an arm (a study's paediatric donors, controls sequenced
+            # elsewhere) so the Condition Roles table can exclude them.
             condition_combo = NoScrollComboBox()
+            condition_combo.setEditable(True)
             condition_combo.addItems(options)
+            condition_combo.setToolTip(
+                "Pick a condition value, or type a new label to give this "
+                "sample its own value. A new label appears in Condition "
+                "Roles after Apply, where it can be set to Exclude.")
 
             if sample in existing_conditions and existing_conditions[sample] not in ['', 'nan']:
                 condition_combo.setCurrentText(existing_conditions[sample])
@@ -2023,8 +2032,8 @@ class ConvertTab(SidebarTabbedPage):
                 current_text = combo.currentText()
                 combo.clear()
                 combo.addItems(options)
-                if current_text in options:
-                    combo.setCurrentText(current_text)
+                # Keep a typed label that is not (yet) one of the options.
+                combo.setCurrentText(current_text)
 
     def _apply_sample_conditions(self):
         """Apply the sample condition assignments to create/update the condition column."""
