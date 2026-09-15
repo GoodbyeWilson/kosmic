@@ -147,17 +147,32 @@ class _QCHistogramWidget(QWidget):
         self._draw()
 
     def set_threshold(self, metric: str, bound: str, value: float):
-        """Programmatically move a threshold line (called from spinbox changes)."""
+        """Programmatically move a threshold line (called from spinbox changes).
+
+        A value of 0 means the bound is off -- the filter skips it -- so
+        it is removed here too, and its line goes with it. Otherwise the
+        pass/removed preview would count every cell as above a cap of 0.
+        """
         if self._syncing:
             return
+        key, _, _, _ = _METRICS[self._current_metric]
+        if value <= 0:
+            self._thresholds.get(metric, {}).pop(bound, None)
+            if metric == key:
+                self._draw()
+            else:
+                self._update_info()
+            return
+        had_line = bound in self._lines
         self._thresholds.setdefault(metric, {})[bound] = value
         # If this metric is currently displayed, move the line
-        key, _, _, _ = _METRICS[self._current_metric]
-        if metric == key and bound in self._lines:
+        if metric == key and had_line:
             self._syncing = True
             self._lines[bound].setValue(value)
             self._syncing = False
             self._update_info()
+        elif metric == key:
+            self._draw()
 
     def set_lines_movable(self, movable: bool):
         """Set whether threshold lines are draggable (Fixed mode) or static (MAD mode)."""
@@ -767,7 +782,12 @@ class QCTab(SidebarPage):
         self.qc_max_genes_spin = NoScrollSpinBox()
         self.qc_max_genes_spin.setRange(0, 50000)
         self.qc_max_genes_spin.setValue(6000)
-        self.qc_max_genes_spin.setToolTip("Filter cells with more than this many genes (potential doublets)")
+        self.qc_max_genes_spin.setSpecialValueText("off")
+        self.qc_max_genes_spin.setToolTip(
+            "Filter cells with more than this many genes (0 = no filter). "
+            "In tissues where one cell type carries far more transcripts "
+            "than the others -- cardiomyocytes in heart -- a cap removes "
+            "that type, not doublets; use Scrublet for doublets.")
         grid.addWidget(self.qc_max_genes_spin, 3, 1)
 
         # Row 4: Min counts/cell
@@ -775,6 +795,7 @@ class QCTab(SidebarPage):
         self.qc_min_counts_spin = NoScrollSpinBox()
         self.qc_min_counts_spin.setRange(0, 500000)
         self.qc_min_counts_spin.setValue(0)
+        self.qc_min_counts_spin.setSpecialValueText("off")
         self.qc_min_counts_spin.setToolTip("Filter cells with fewer than this many total counts (0 = no filter)")
         grid.addWidget(self.qc_min_counts_spin, 4, 1)
 
@@ -783,6 +804,7 @@ class QCTab(SidebarPage):
         self.qc_max_counts_spin = NoScrollSpinBox()
         self.qc_max_counts_spin.setRange(0, 500000)
         self.qc_max_counts_spin.setValue(0)
+        self.qc_max_counts_spin.setSpecialValueText("off")
         self.qc_max_counts_spin.setToolTip("Filter cells with more than this many total counts (0 = no filter)")
         grid.addWidget(self.qc_max_counts_spin, 5, 1)
 
@@ -833,9 +855,9 @@ class QCTab(SidebarPage):
         self.qc_max_genes_spin.valueChanged.connect(
             lambda v: self._qc_histogram.set_threshold("n_genes_by_counts", "max", float(v)))
         self.qc_min_counts_spin.valueChanged.connect(
-            lambda v: self._qc_histogram.set_threshold("total_counts", "min", float(v)) if v > 0 else None)
+            lambda v: self._qc_histogram.set_threshold("total_counts", "min", float(v)))
         self.qc_max_counts_spin.valueChanged.connect(
-            lambda v: self._qc_histogram.set_threshold("total_counts", "max", float(v)) if v > 0 else None)
+            lambda v: self._qc_histogram.set_threshold("total_counts", "max", float(v)))
         self.qc_max_mt_spin.valueChanged.connect(
             lambda v: self._qc_histogram.set_threshold("pct_counts_mt", "max", float(v)))
 
@@ -1516,7 +1538,7 @@ class QCTab(SidebarPage):
         # Build filter description
         filters = [
             f"  - Min genes/cell: {min_genes}",
-            f"  - Max genes/cell: {max_genes}",
+            f"  - Max genes/cell: {max_genes if max_genes > 0 else 'off'}",
         ]
         if min_counts > 0:
             filters.append(f"  - Min counts/cell: {min_counts:,}")

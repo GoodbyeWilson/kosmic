@@ -24,9 +24,20 @@ on the recomputed metrics. The original counts are kept in
 | Setting | Default | What it catches |
 |---|---|---|
 | Min genes | 200 | empty droplets, debris |
-| Max genes | 6,000 | likely doublets |
+| Max genes | 6,000 | likely doublets; 0 = off |
 | Min / Max counts | 0 (off) | the same, by depth; use when genes-per-cell is uninformative |
 | Max MT % | 20 | dying cells with leaky membranes |
+
+A max bound of 0 is off, in the filter and in the histogram's
+pass/removed preview alike. Think before capping genes or counts in a
+tissue where one cell type carries far more transcripts than the rest —
+cardiomyocyte nuclei in heart — because the cap removes that type, not
+doublets. Scrublet (below) is the doublet filter.
+
+On a deposited dataset the authors have already filtered, set the floors
+at or below theirs and the caps off, so this step removes nothing but
+creates the counts layer and normalises; the number removed is reported
+and recorded, and should be near zero.
 
 Two ways to set them:
 
