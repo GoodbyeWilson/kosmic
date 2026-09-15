@@ -54,3 +54,12 @@ def test_positive_max_after_zero_counts_cells(app):
     # and back to off
     w.set_threshold("n_genes_by_counts", "max", 0.0)
     assert "500 / 500 pass" in w._info_label.text()
+
+
+def test_excluded_count_is_stated_in_the_info_line(app):
+    w = _widget(app)
+    # Rebuild with an excluded count, as the QC tab does for 'exclude' roles.
+    w.set_data(w._obs_df, n_excluded=32_138)
+    text = w._info_label.text()
+    assert "500 / 500 pass" in text
+    assert "32,138 excluded cells not shown" in text
