@@ -25,15 +25,12 @@ from pathlib import Path
 
 REFERENCES_DIR = Path(str(files("kosmic.reference.atlases")))
 
-# Built-in reference catalog
-BUILTIN_REFERENCES = {
-    'Heart Cell Atlas': {
-        'file': 'heart_atlas.json.gz',
-        'species': 'human',
-        'description': 'Human heart (704K cells, 12 cell types)',
-        'source': 'CellxGene Heart Combined',
-    },
-}
+# Built-in reference catalog. Empty on purpose: every '.json.gz' in
+# kosmic/reference/atlases/ -- the two shipped LV references included -- is
+# discovered by 'list_available_references' and describes itself (name,
+# source, and a 'description' recording the build). Build another with
+# dev/scripts/build_reference.py or build_lv_reference.py.
+BUILTIN_REFERENCES = {}
 
 
 def list_available_references():

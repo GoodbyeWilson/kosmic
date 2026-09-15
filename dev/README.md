@@ -30,8 +30,15 @@ Method comparisons and reference builders.
   alongside themselves or into `results/`.
 - `benchmark_dl_welch.py`, `sweep_k_tau.py` — DL vs Welch, and how the
   methods behave as study count k and heterogeneity τ² vary.
-- `build_reference.py`, `build_all_references.py` — rebuild the bundled
-  reference files under `kosmic/reference/`.
+- `build_reference.py` — build a cell-type centroid reference (`.json.gz`)
+  from an annotated h5ad, for `kosmic/reference/atlases/`. Record the
+  input and filters in the file's `description` field.
+- `build_lv_reference.py` — the same for an atlas too large to load
+  (HeartMap, 42 GB; Gao/Wu, 96 GB): streams the CSR matrix in row chunks.
+  Presets fix the matrix slot, label column, row filters and label
+  mapping per atlas; the h5ad path is an argument. Records every filter
+  and count in the output's `description`. The two shipped references
+  (`heartmap_lv_broad`, `gao_lv_broad`) were built with it on 2026-09-15.
 - `generate_gene_positions.py` — regenerates the GRCh37 gene-position
   table used by the GWAS overlap.
 - `capture_help_screenshots.py` — regenerates every screenshot the

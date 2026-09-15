@@ -57,3 +57,4 @@ kosmic/reference/tutorial/tutorial_dataset.version
 # PyInstaller output (packaging/kosmic.spec)
 build/
 dist/
+
