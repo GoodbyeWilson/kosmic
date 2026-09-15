@@ -991,6 +991,12 @@ class DownloadTab(TabbedPage):
     def _log(self, msg: str):
         self.log_message.emit(msg)
 
+    def _on_status(self, message: str):
+        """Progress callback for run_worker(on_progress=...): update the
+        in-tab status label and mirror the message to the log panel."""
+        self._tab_status_label.setText(message)
+        self._log(message)
+
     # === MTX / SCP Converter Methods ===
 
     def _on_multi_file_convert_failed(self, message: str):
