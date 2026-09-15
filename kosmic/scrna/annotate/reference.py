@@ -102,12 +102,20 @@ def load_reference(name_or_path):
     """
     path = Path(name_or_path)
 
-    # If it's a catalog name, resolve to file path
-    if not path.exists() and name_or_path in BUILTIN_REFERENCES:
-        path = REFERENCES_DIR / BUILTIN_REFERENCES[name_or_path]['file']
+    # A name rather than a path: resolve through whatever is discovered in
+    # kosmic/reference/atlases/ (the same list the Annotate dropdown
+    # shows), then the built-in catalogue.
+    if not path.exists():
+        available = list_available_references()
+        if name_or_path in available:
+            path = REFERENCES_DIR / available[name_or_path]['file']
+        elif name_or_path in BUILTIN_REFERENCES:
+            path = REFERENCES_DIR / BUILTIN_REFERENCES[name_or_path]['file']
 
     if not path.exists():
-        raise FileNotFoundError(f"Reference not found: {name_or_path}")
+        raise FileNotFoundError(
+            f"Reference not found: {name_or_path}. Available: "
+            + (", ".join(sorted(list_available_references())) or "none"))
 
     if path.suffix == '.gz':
         with gzip.open(path, 'rt') as f:
