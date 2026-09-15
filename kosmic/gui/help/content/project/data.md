@@ -58,6 +58,26 @@ Three outcomes:
 - **None** — the import stops. A file with no raw counts cannot support
   DE, and it is better to find that out now than after clustering.
 
+Integer values are not proof of raw counts. SCTransform's "corrected
+counts" are integers with every cell rescaled to a common depth, and a
+Seurat object whose default assay is SCT looks like counts by that test
+alone. So after reading the matrix, KOSMIC also compares each cell's row
+sum with the per-cell total the depositor recorded (`nCount_RNA`,
+`n_counts`, `total_counts` or similar) and reports the result in the
+output panel:
+
+- **Equal** — raw counts.
+- **At or below for every cell** — counts with some genes or ambient
+  signal removed (a CELLxGENE gene subset, a CellBender matrix). Still
+  counts; the ratio says how much was removed.
+- **Scattered above and below** — rescaled. The import stops, unless you
+  chose that matrix yourself in the dialog, in which case it is logged
+  as a warning. For a Seurat object, KOSMIC exports the `RNA` assay, so
+  this usually means the file itself holds no original counts.
+
+If the file records no per-cell total, the check is skipped and the
+output panel says so.
+
 ## Seurat files
 
 KOSMIC exports the RNA assay's `counts` slot by running R as a separate
