@@ -243,59 +243,68 @@ def harmonise_adata(adata, lookup: Dict[str, str] = None,
     report.mappings = mapping_list
     _progress(f"Found {report.renamed:,} genes to rename")
 
-    # Check for duplicates (multiple old names → same approved symbol)
+    # Check for duplicates (multiple old names -> same approved symbol).
+    # Merging is one sparse matmul with a column-merge matrix G (old genes
+    # x kept genes, one 1 per row): every column of X lands in its kept
+    # column and duplicates sum. The previous per-duplicate column
+    # assignment rebuilt the whole sparse matrix once per merge, which on
+    # a 220k x 34k, 630M-non-zero dataset took the better part of an hour.
     from collections import Counter
     name_counts = Counter(new_names)
     duplicates = {name: count for name, count in name_counts.items() if count > 1}
 
     if duplicates:
+        import anndata as ad
         import scipy.sparse as sp
 
-        name_to_positions = {}
+        first_position = {}
+        kept_positions = []          # old column index of each kept column, in order
+        target = np.empty(adata.n_vars, dtype=np.int64)
         for i, name in enumerate(new_names):
-            name_to_positions.setdefault(name, []).append(i)
+            if name not in first_position:
+                first_position[name] = len(kept_positions)
+                kept_positions.append(i)
+            target[i] = first_position[name]
+        merge_info = [(name, [var_names[i] for i, n in enumerate(new_names) if n == name])
+                      for name in duplicates]
 
-        drop_indices = set()
-        merge_info = []
-        n_to_merge = sum(1 for p in name_to_positions.values() if len(p) > 1)
+        n_kept = len(kept_positions)
+        G = sp.csc_matrix(
+            (np.ones(adata.n_vars, dtype=np.float32),
+             (np.arange(adata.n_vars), target)),
+            shape=(adata.n_vars, n_kept))
+        _progress(f"Merging {len(duplicates):,} duplicate symbols "
+                  f"({adata.n_vars - n_kept:,} columns)...")
 
-        # Convert to CSC for fast column operations if sparse
-        X_was_csr = False
-        if sp.issparse(adata.X) and sp.isspmatrix_csr(adata.X):
-            _progress("Converting matrix for column operations...")
-            adata.X = adata.X.tocsc()
-            X_was_csr = True
+        def _merge(M):
+            if M is None:
+                return None
+            out = M @ G
+            if sp.issparse(out):
+                out = sp.csr_matrix(out)
+                out.sort_indices()
+            return out
 
-        merged_count = 0
-        for name, positions in name_to_positions.items():
-            if len(positions) <= 1:
-                continue
-            merged_count += 1
-            if merged_count % 10 == 0 or merged_count == n_to_merge:
-                _progress(f"Merging duplicates {merged_count}/{n_to_merge}")
-            primary = positions[0]
-            merge_info.append((name, [var_names[p] for p in positions]))
-            for secondary in positions[1:]:
-                if sp.issparse(adata.X):
-                    adata.X[:, primary] = adata.X[:, primary] + adata.X[:, secondary]
-                else:
-                    adata.X[:, primary] += adata.X[:, secondary]
-                drop_indices.add(secondary)
-
-        # Convert back to CSR
-        if X_was_csr:
-            _progress("Converting matrix back...")
-            adata.X = adata.X.tocsr()
+        kept_mask = np.zeros(adata.n_vars, dtype=bool)
+        kept_mask[kept_positions] = True
+        merged = ad.AnnData(
+            X=_merge(adata.X),
+            obs=adata.obs,
+            var=adata.var.iloc[kept_positions].copy(),
+            obsm=dict(adata.obsm) if adata.obsm is not None else None,
+            obsp=dict(adata.obsp) if adata.obsp is not None else None,
+            uns=dict(adata.uns),
+            layers={k: _merge(v) for k, v in adata.layers.items() if k is not None},
+        )
+        for k in list(adata.varm.keys()):
+            merged.varm[k] = np.asarray(adata.varm[k])[kept_mask]
+        if getattr(adata, 'raw', None) is not None:
+            merged.raw = adata.raw
+        adata = merged
+        new_names = [new_names[i] for i in kept_positions]
 
         report.merged_genes = merge_info
         report.duplicates_merged = len(merge_info)
-
-        # Drop secondary columns
-        _progress("Dropping duplicate columns...")
-        keep_mask = np.ones(adata.n_vars, dtype=bool)
-        keep_mask[list(drop_indices)] = False
-        adata = adata[:, keep_mask]
-        new_names = [n for i, n in enumerate(new_names) if keep_mask[i]]
     else:
         report.merged_genes = []
         report.duplicates_merged = 0
