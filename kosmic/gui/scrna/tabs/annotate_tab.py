@@ -1732,13 +1732,23 @@ class AnnotateTab(QWidget):
 
     def _on_ref_changed(self):
         """Update info label when reference selection changes."""
-        from kosmic.scrna.annotate.reference import BUILTIN_REFERENCES
+        from kosmic.scrna.annotate.reference import list_available_references
         ref_name = self.ref_combo.currentData()
-        if ref_name and ref_name != '__custom__' and ref_name in BUILTIN_REFERENCES:
-            info = BUILTIN_REFERENCES[ref_name]
-            self.ref_info_label.setText(
-                f"{info['description']}\nSource: {info['source']}"
-            )
+        refs = list_available_references()
+        if ref_name and ref_name != '__custom__' and ref_name in refs:
+            info = refs[ref_name]
+            desc = info.get('description', '')
+            # A build record stored as JSON is shown as its headline counts only.
+            if desc.startswith('{'):
+                try:
+                    import json as _json
+                    rec = _json.loads(desc)
+                    if 'n_kept' in rec and 'n_total' in rec:
+                        desc = (f"{rec['n_kept']:,} nuclei kept of "
+                                f"{rec['n_total']:,}; built {rec.get('built', '')[:10]}")
+                except (ValueError, TypeError):
+                    pass
+            self.ref_info_label.setText(f"{desc}\nSource: {info.get('source', '')}")
         else:
             self.ref_info_label.setText("")
 

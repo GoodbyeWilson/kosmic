@@ -61,7 +61,8 @@ own terms, which take precedence over the GPL for that data.
 |---|---|---|
 | `marker_dbs/PanglaoDB_markers.tsv` | PanglaoDB (Franzén, Gan & Björkegren, *Database* 2019) | The site states the data are public but publishes no licence. Academic use is the stated purpose; contact the authors before commercial redistribution. |
 | `marker_dbs/Cell_marker_Seq.xlsx` | CellMarker 2.0 (Hu et al., *Nucleic Acids Research* 2023) | Freely downloadable; no licence text published. Same caution as PanglaoDB. |
-| `atlases/heart_atlas.json.gz` | Cell-type centroids computed from human heart datasets on CellxGene (CZ CELLxGENE Discover) | Underlying datasets are CC BY 4.0; this file is a derived summary (per-cell-type mean profiles), not the data. |
+| `atlases/heartmap_lv_broad.json.gz` | Per-cell-type mean expression profiles (13 types, 2,000 genes) derived from HeartMap (Datar et al., *Nat Cardiovasc Res* 2026; Broad Single Cell Portal SCP3689) | Derived summary, not the data. The SCP deposit is public; check the study's terms before commercial redistribution. |
+| `atlases/gao_lv_broad.json.gz` | Per-cell-type mean expression profiles (13 types, 2,000 genes) derived from the Gao/Wu human LV atlas (Gao et al., *Genome Biol* 2026; GEO GSE290367) | Derived summary, not the data. GEO deposits are public. |
 | `cell_type_focus/cardiac.json`, `cell_type_focus/stroke.json` | Lists of cell-type names selected from the two marker databases above | Names only. |
 | `contamination/cardiomyocyte.json` | Derived from GSE183852 (Koenig et al., *Nature Cardiovascular Research* 2022): 34 cardiomyocyte-restricted genes chosen by expression and specificity thresholds recorded in the file | Derived gene list; the GEO deposit is public. |
 
