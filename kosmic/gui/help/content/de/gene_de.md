@@ -15,6 +15,7 @@ analysis is the donor / sample rather than the cell.
 | **DE method** | Welch's t-test or DESeq2 (default). |
 | **EB moderation** | Limma-style variance shrinkage (t-test only). |
 | **Min cells per donor** | A donor contributing fewer cells is dropped. |
+| **Min transcripts per donor** | A donor whose cells sum to fewer transcripts is dropped. Off (0) by default. |
 | **Filter genes within each study** | Atlas only -- see below. |
 
 ## The two filters
@@ -34,6 +35,24 @@ The count is over whatever is loaded. On a whole dataset that is all of
 a donor's cells; in a per-cell-type run it is only their cells of that
 type. That is why this setting decides which cell types are testable: a
 donor with 5,000 cells but 30 adipocytes fails it for the adipocyte run.
+
+**Min transcripts per donor (drops donors).** The cell-count filter
+does not guard depth. Ten shallow nuclei clear it and can still sum to a
+few thousand transcripts, which is too thin a profile for a count model
+for the same reason a three-cell profile is. This setting drops a donor
+whose cells sum, over every gene, to fewer transcripts than the value.
+It is off by default; Gao et al. use 50,000 for heart snRNA-seq. The two
+filters count the same cells, so in a per-cell-type run both apply to
+the donor's cells of that type.
+
+Before setting a floor, look at where it would fall. Each donor's summed
+depth is written to the pseudobulk file (`{accession}_pseudobulk.csv`,
+column `total_counts`) beside the cell count, and donors dropped by
+either filter are named in the output panel when the analysis runs. In
+shallow datasets the floor mostly removes donors from rare cell types
+(mast cells, neurons, lymphatics); it rarely touches the abundant ones.
+In a small study losing one donor can leave an arm with a single
+replicate, which stops that study being testable at all.
 
 **The gene filter (drops genes).** A gene is kept when it reaches roughly
 10 counts in a donor of median depth, in at least the smaller arm's

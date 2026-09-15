@@ -41,6 +41,7 @@ HELP_SITE_URL                = (os.environ.get("KOSMIC_HELP_SITE_URL")
 
 # DE pipeline
 DE_MIN_CELLS                 = _cfg["de"]["min_cells"]
+DE_MIN_COUNTS                = _cfg["de"].get("min_counts", 0)
 DE_MIN_EXPRESSING_SAMPLES    = _cfg["de"]["min_expressing_samples"]
 DE_FILTER_MIN_COUNT          = _cfg["de"]["filter_min_count"]
 DE_FILTER_MIN_TOTAL_COUNT    = _cfg["de"]["filter_min_total_count"]

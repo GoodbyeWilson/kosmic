@@ -42,7 +42,7 @@ class MetabolicDEWorker(BaseWorker):
                  detection_min_donor_frac=None, detection_study_col=None,
                  fdr_genes=None, deseq2_independent_filter=None,
                  deseq2_cooks_filter=None, filter_min_count=None,
-                 filter_min_samples=None, covariates=None):
+                 filter_min_samples=None, covariates=None, min_counts=0):
         super().__init__()
         self.adata = adata
         self.sample_col = sample_col
@@ -51,6 +51,7 @@ class MetabolicDEWorker(BaseWorker):
         self.disease_label = disease_label
         self.pathway_gene_sets = pathway_gene_sets
         self.min_cells = min_cells
+        self.min_counts = min_counts
         self.min_expressing_samples = min_expressing_samples
         self.de_method = de_method
         self.full_genome = full_genome
@@ -93,6 +94,7 @@ class MetabolicDEWorker(BaseWorker):
             condition_col=self.condition_col,
             pathway_gene_sets=self.pathway_gene_sets,
             min_cells=self.min_cells,
+            min_counts=self.min_counts,
             min_expressing_samples=self.min_expressing_samples,
             de_method=self.de_method,
             full_genome=self.full_genome,
@@ -429,12 +431,13 @@ class MetaExportWorker(BaseWorker):
 
     def __init__(self, adata, sample_col, condition_col, min_cells,
                  primary_method, primary_moderate, primary_de_results,
-                 output_dir, gse_id):
+                 output_dir, gse_id, min_counts=0):
         super().__init__()
         self.adata = adata
         self.sample_col = sample_col
         self.condition_col = condition_col
         self.min_cells = min_cells
+        self.min_counts = min_counts
         self.primary_method = primary_method
         self.primary_moderate = primary_moderate
         self.primary_de_results = primary_de_results
@@ -468,7 +471,8 @@ class MetaExportWorker(BaseWorker):
             self.progress.emit(f"Creating pseudobulk ({len(gene_names)} genes)...")
             pb_matrix, pb_sample_df, pb_genes = create_pseudobulk(
                 self.adata, gene_names, self.sample_col, self.condition_col,
-                min_cells=self.min_cells, aggregate='sum')
+                min_cells=self.min_cells, min_counts=self.min_counts,
+                aggregate='sum')
 
             # Drop the excluded arm. The DE dropped it, so leaving it here
             # hands the consensus case-control permutation and
@@ -522,7 +526,7 @@ class CellTypeBatchWorker(BaseWorker):
                  output_dir, accession, cell_types=None,
                  de_method='deseq2', moderate=False, covariates=None,
                  min_cells=10, pathway_gene_sets=None, fdr_genes=None,
-                 **pipeline_kwargs):
+                 min_counts=0, **pipeline_kwargs):
         super().__init__()
         self.adata = adata
         self.cell_type_col = cell_type_col
@@ -535,6 +539,7 @@ class CellTypeBatchWorker(BaseWorker):
         self.moderate = moderate
         self.covariates = list(covariates or ())
         self.min_cells = min_cells
+        self.min_counts = min_counts
         self.pathway_gene_sets = pathway_gene_sets
         self.fdr_genes = fdr_genes
         self.pipeline_kwargs = pipeline_kwargs
@@ -572,7 +577,7 @@ class CellTypeBatchWorker(BaseWorker):
             self.condition_col, self.output_dir, self.accession,
             cell_types=self.cell_types, de_method=self.de_method,
             moderate=self.moderate, covariates=self.covariates,
-            min_cells=self.min_cells,
+            min_cells=self.min_cells, min_counts=self.min_counts,
             pathway_gene_sets=self.pathway_gene_sets,
             fdr_genes=self.fdr_genes,
             progress_callback=_progress,

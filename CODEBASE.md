@@ -171,7 +171,12 @@ study's `study.json` manifest, not in application settings.
 **Differential expression output.** Meta-Analysis requires, for each
 study it pools, a `{accession}_DE_{method}.csv` and a
 `{accession}_pseudobulk.csv` containing a `role` column. The role
-column is how Meta-Analysis identifies disease and control samples.
+column is how Meta-Analysis identifies disease and control samples. The
+pseudobulk file's other leading columns, `condition`, `n_cells` and
+`total_counts` (the donor's summed transcripts), are per-donor metadata;
+every column after them is a gene. Which donors appear is decided once,
+by `profile_table` in `kosmic/de/de_analysis.py`, from the cell-count
+and transcript-depth floors.
 
 **Subsets are studies.** Extracting a cell type in the scRNA Subset
 step creates a new study folder whose provenance record's `source`

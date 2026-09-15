@@ -9,7 +9,8 @@ from kosmic.scrna.inspect.detection import detect_species, format_gene_for_speci
 from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD,
     PATHWAY_GENE_DETECTION_PCT, PATHWAY_MIN_GENES, PATHWAY_MIN_COVERAGE,
-    DE_MIN_CELLS, DE_MIN_EXPRESSING_SAMPLES, DE_MAX_SE, DE_SE_FLOOR,
+    DE_MIN_CELLS, DE_MIN_COUNTS, DE_MIN_EXPRESSING_SAMPLES, DE_MAX_SE,
+    DE_SE_FLOOR,
     DE_FILTER_MIN_COUNT, DE_FILTER_MIN_TOTAL_COUNT, DE_FILTER_MIN_SAMPLES,
     DE_DETECTION_MIN_PCT, DE_DETECTION_ON, DE_DETECTION_MIN_DONOR_FRAC,
     DE_DESEQ2_INDEPENDENT_FILTER, DE_DESEQ2_COOKS_FILTER,
@@ -65,11 +66,89 @@ def prepare_gene_coverage(pathway_gene_sets, var_names, species='human'):
     return metabolic_genes, pathway_coverage
 
 
+def cell_depths(adata, counts_layer=None):
+    """Total raw counts per cell, summed over every gene in the count source.
+
+    The source is resolved the way 'create_pseudobulk' resolves it --
+    'counts_layer' if given, else 'layers['counts']', else 'adata.raw',
+    else 'adata.X' -- but over all genes rather than the tested subset,
+    so a donor's depth is a property of the data and does not change
+    with the gene list of the run.
+    """
+    if counts_layer is not None:
+        if counts_layer not in adata.layers:
+            raise ValueError(
+                f"Counts layer '{counts_layer}' not found in adata.layers.")
+        X = adata.layers[counts_layer]
+    elif 'counts' in adata.layers:
+        X = adata.layers['counts']
+    elif adata.raw is not None:
+        X = adata.raw.X
+    else:
+        X = adata.X
+    return np.asarray(X.sum(axis=1)).ravel().astype(float)
+
+
+def profile_table(adata, sample_col, min_cells=DE_MIN_CELLS,
+                  min_counts=DE_MIN_COUNTS, counts_layer=None):
+    """One row per donor: cells, summed transcripts, and whether it is kept.
+
+    This is the single decision of which donors enter a pseudobulk
+    analysis; 'create_pseudobulk', the detection pre-filter and the
+    per-cell-type planner all defer to it. A donor is dropped when it
+    has fewer than *min_cells* cells or fewer than *min_counts* summed
+    transcripts (0 disables the depth floor). Both are counted over
+    whatever is loaded, so in a per-cell-type run they mean that
+    donor's cells of that type.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns 'sample', 'n_cells', 'total_counts', 'kept', 'reason',
+        in the donors' order of first appearance. 'reason' is '' for a
+        kept donor.
+    """
+    depths = cell_depths(adata, counts_layer)
+    per_cell = pd.DataFrame({
+        'sample': adata.obs[sample_col].values,
+        'depth': depths,
+    })
+    table = (per_cell.groupby('sample', observed=True, sort=False)['depth']
+             .agg(n_cells='size', total_counts='sum')
+             .reset_index())
+    table['n_cells'] = table['n_cells'].astype(int)
+    table['total_counts'] = table['total_counts'].round().astype(int)
+
+    reasons = []
+    for n, depth in zip(table['n_cells'], table['total_counts']):
+        if min_cells and n < min_cells:
+            reasons.append(f"{n} cells < {min_cells}")
+        elif min_counts and depth < min_counts:
+            reasons.append(f"{depth:,} transcripts < {min_counts:,}")
+        else:
+            reasons.append('')
+    table['reason'] = reasons
+    table['kept'] = table['reason'] == ''
+    return table
+
+
+def dropped_donor_message(profiles):
+    """One log line naming the donors 'profile_table' rejected, or ''."""
+    dropped = profiles[~profiles['kept']]
+    if dropped.empty:
+        return ''
+    parts = [f"{s} ({r})" for s, r in zip(dropped['sample'], dropped['reason'])]
+    return (f"Dropped {len(dropped)} donor(s) below the donor filter: "
+            + "; ".join(parts))
+
+
 def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_CELLS,
-                      aggregate='mean', counts_layer=None, covariates=None):
+                      aggregate='mean', counts_layer=None, covariates=None,
+                      min_counts=DE_MIN_COUNTS):
     """Create pseudobulk expression profiles by sample.
 
     Uses raw counts (adata.raw if available) without per-cell normalisation.
+    Which donors are kept is decided by 'profile_table'.
 
     Parameters
     ----------
@@ -81,6 +160,9 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
         Columns in obs for sample grouping and condition labels.
     min_cells : int
         Minimum cells per sample to include.
+    min_counts : int
+        Minimum summed transcripts (over all genes) per sample to
+        include; 0 disables.
     aggregate : 'mean' | 'sum'
         'mean' for t-test, 'sum' for DESeq2.
     counts_layer : str, optional
@@ -103,7 +185,8 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
     pseudobulk_matrix : np.ndarray
         Shape '(n_samples, n_genes)'.
     sample_df : pd.DataFrame
-        Columns: 'sample', 'condition', 'n_cells'. Adds a 'role'
+        Columns: 'sample', 'condition', 'n_cells', 'total_counts'
+        (summed transcripts over all genes). Adds a 'role'
         column ('disease' / 'control' / 'exclude') when
         'adata.obs._role' is present, so DE / CC perm consumers
         read roles directly without re-resolving from condition labels.
@@ -150,14 +233,18 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
     # All cells of one sample share the same role -- take the first cell's _role.
     has_role = '_role' in adata_for_de.obs.columns
 
-    samples = adata_for_de.obs[sample_col].unique()
+    # Depth is summed over every gene of the source, not the subset in
+    # 'adata_for_de', so the same donors are kept whatever genes a run asks for.
+    profiles = profile_table(adata, sample_col, min_cells=min_cells,
+                             min_counts=min_counts, counts_layer=counts_layer)
+    depth_of = dict(zip(profiles['sample'], profiles['total_counts']))
+    kept = set(profiles.loc[profiles['kept'], 'sample'])
 
-    for sample_id in samples:
+    for sample_id in profiles['sample']:
+        if sample_id not in kept:
+            continue
         mask = adata_for_de.obs[sample_col] == sample_id
         sample_cells = adata_for_de[mask]
-
-        if sample_cells.n_obs < min_cells:
-            continue
 
         if hasattr(sample_cells.X, 'toarray'):
             X = sample_cells.X.toarray()
@@ -176,6 +263,7 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
             'sample': sample_id,
             'condition': sample_cells.obs[condition_col].iloc[0],
             'n_cells': sample_cells.n_obs,
+            'total_counts': int(depth_of[sample_id]),
         }
         if has_role:
             meta['role'] = str(sample_cells.obs['_role'].iloc[0])
@@ -294,6 +382,7 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
                            min_coverage=PATHWAY_MIN_COVERAGE,
                            min_genes=PATHWAY_MIN_GENES,
                            normalization='cpm', counts_layer=None,
+                           min_counts=DE_MIN_COUNTS,
                            standardize_genes=False):
     """Compute per-donor pathway scores from raw counts.
 
@@ -318,6 +407,8 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
         Metadata columns.
     min_cells : int
         Minimum cells per sample.
+    min_counts : int
+        Minimum summed transcripts per sample; 0 disables.
     gene_detection_pct : float
         A pathway gene is retained only if detected (non-zero count) in at
         least this fraction of cells in disease OR control. 0 disables the
@@ -364,6 +455,7 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
     pb_matrix, sample_df, genes_used = create_pseudobulk(
         adata, all_genes, sample_col, condition_col,
         min_cells=min_cells, aggregate='sum', counts_layer=counts_layer,
+        min_counts=min_counts,
     )
 
     if pb_matrix.size == 0:
@@ -374,6 +466,7 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
     pb_full, _, full_genes_used = create_pseudobulk(
         adata, base_var_names, sample_col, condition_col,
         min_cells=min_cells, aggregate='sum', counts_layer=counts_layer,
+        min_counts=min_counts,
     )
 
     # Each branch yields a per-donor gene matrix 'values' plus the gene
@@ -449,7 +542,8 @@ def _vst_transform(pb_full, gene_names, sample_df, condition_col):
 
 def pseudobulk_expression_matrix(adata, sample_col, condition_col,
                                  normalization='vst', counts_layer=None,
-                                 min_cells=DE_MIN_CELLS):
+                                 min_cells=DE_MIN_CELLS,
+                                 min_counts=DE_MIN_COUNTS):
     """Per-donor normalised expression matrix (donors x genes) for plots.
 
     Pseudobulk-sums each donor, then normalises to match the DE method the
@@ -476,7 +570,8 @@ def pseudobulk_expression_matrix(adata, sample_col, condition_col,
             adata.raw.var_names if adata.raw is not None else adata.var_names)
     pb_full, sample_df, genes_used = create_pseudobulk(
         adata, base_var_names, sample_col, condition_col,
-        min_cells=min_cells, aggregate='sum', counts_layer=counts_layer)
+        min_cells=min_cells, aggregate='sum', counts_layer=counts_layer,
+        min_counts=min_counts)
     if pb_full.size == 0 or not genes_used:
         return pd.DataFrame()
 
@@ -1055,24 +1150,28 @@ def genes_passing_detection(adata, genes, min_pct, counts_layer=None, *,
     return [g for g in genes if max_det.get(g, True)]
 
 
-def donors_meeting_min_cells(adata, sample_col, min_cells):
-    """Boolean cell mask for donors contributing at least *min_cells* cells.
+def donors_meeting_min_cells(adata, sample_col, min_cells,
+                             min_counts=DE_MIN_COUNTS, counts_layer=None):
+    """Boolean cell mask for donors that pass the donor filter, or None.
 
-    'create_pseudobulk' drops thin donors, so their cells never reach the
-    model. Detection is computed over this mask so the gene list is
-    decided by the same donors the contrast is.
+    'create_pseudobulk' drops donors below *min_cells* cells or
+    *min_counts* transcripts, so their cells never reach the model.
+    Detection is computed over this mask so the gene list is decided by
+    the same donors the contrast is. None means every donor passes.
     """
-    if not min_cells or sample_col not in adata.obs.columns:
+    if (not min_cells and not min_counts) or sample_col not in adata.obs.columns:
         return None
-    sizes = adata.obs.groupby(sample_col, observed=True).size()
-    keep = set(sizes[sizes >= min_cells].index)
-    if len(keep) == len(sizes):
+    profiles = profile_table(adata, sample_col, min_cells=min_cells,
+                             min_counts=min_counts, counts_layer=counts_layer)
+    if profiles['kept'].all():
         return None
+    keep = set(profiles.loc[profiles['kept'], 'sample'])
     return adata.obs[sample_col].isin(keep).to_numpy()
 
 
 def run_de_pipeline(adata, sample_col, condition_col,
                     pathway_gene_sets, min_cells=DE_MIN_CELLS, min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES,
+                    min_counts=DE_MIN_COUNTS,
                     de_method='ttest', max_se=DE_MAX_SE, full_genome=False,
                     moderate=False, unit='sample', counts_layer=None,
                     detection_min_pct=DE_DETECTION_DEFAULT,
@@ -1111,6 +1210,8 @@ def run_de_pipeline(adata, sample_col, condition_col,
         '{pathway: [genes]}'.
     min_cells : int
         Min cells per sample.
+    min_counts : int
+        Min summed transcripts per sample; 0 disables.
     min_expressing_samples : int
         Min expressing samples per gene.
     de_method : 'ttest' | 'ttest_raw' | 'deseq2'
@@ -1237,7 +1338,9 @@ def run_de_pipeline(adata, sample_col, condition_col,
         # Donors below min_cells are dropped by create_pseudobulk, so their
         # cells must not shape the gene list either -- otherwise the filter
         # is decided partly by cells the model never sees.
-        cell_mask = donors_meeting_min_cells(adata, sample_col, min_cells)
+        cell_mask = donors_meeting_min_cells(
+            adata, sample_col, min_cells, min_counts=min_counts,
+            counts_layer=counts_layer)
         genes_to_test = genes_passing_detection(
             adata, genes_to_test, detection_min_pct, counts_layer=counts_layer,
             donor_col=sample_col, min_donor_frac=detection_min_donor_frac,
@@ -1250,7 +1353,10 @@ def run_de_pipeline(adata, sample_col, condition_col,
         if study_col:
             scope += f", in every '{study_col}'"
         if cell_mask is not None:
-            scope += f" (donors with >={min_cells} cells only)"
+            scope += f" (donors with >={min_cells} cells"
+            if min_counts:
+                scope += f" and >={min_counts:,} transcripts"
+            scope += " only)"
         _progress(
             f"Detection pre-filter: kept {len(genes_to_test):,} of {n_before:,} "
             f"genes ({scope}); dropped {n_before - len(genes_to_test):,}")
@@ -1267,10 +1373,15 @@ def run_de_pipeline(adata, sample_col, condition_col,
     pb_covariates = list(covariates or ())
     if detection_study_col and detection_study_col not in pb_covariates:
         pb_covariates.append(detection_study_col)
+    dropped = dropped_donor_message(profile_table(
+        adata, sample_col, min_cells=min_cells, min_counts=min_counts,
+        counts_layer=counts_layer))
+    if dropped:
+        _progress(dropped)
     pseudobulk_matrix, sample_df, genes_used = create_pseudobulk(
         adata, genes_to_test, sample_col, condition_col,
         min_cells=min_cells, aggregate=aggregate, counts_layer=counts_layer,
-        covariates=pb_covariates,
+        covariates=pb_covariates, min_counts=min_counts,
     )
 
     if pseudobulk_matrix.size == 0:

@@ -623,6 +623,8 @@ class MethodsPage(SimplePage):
                           "Welch's t-test on log2(CPM+1) pseudobulk"))
 
         items.append(("Min cells per donor:", str(ws.min_cells)))
+        if ws.min_counts:
+            items.append(("Min transcripts per donor:", f"{ws.min_counts:,}"))
         det = self._detection_pct_value()
         if det is not None:
             items.append((

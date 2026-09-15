@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QSettings, pyqtSignal
 from pathlib import Path
 
-from kosmic import DE_MIN_CELLS
+from kosmic import DE_MIN_CELLS, DE_MIN_COUNTS
 from kosmic.gui.shared import borderless
 
 
@@ -103,6 +103,7 @@ class DEWorkspace(QWidget):
         # documented default of 10 and excluded whole cell types (7 of 13
         # testable on the DCM master, against 12 at the config value).
         self.min_cells = DE_MIN_CELLS
+        self.min_counts = DE_MIN_COUNTS   # summed transcripts per donor; 0 = off
         self.de_method = 'deseq2'
         self.unit = 'sample'   # 'sample' (pseudobulk) or 'cell' (scanpy Wilcoxon)
         self.geneset_label = 'Metabolic -- Comprehensive (12 pathways)'

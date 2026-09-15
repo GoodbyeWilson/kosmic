@@ -58,6 +58,9 @@ def load_pseudobulk(filepath: str):
     if 'n_cells' in df.columns:
         n_cells = df['n_cells'].values.astype(int)
         drop_cols.append('n_cells')
+    if 'total_counts' in df.columns:
+        # Per-donor depth written by 'pseudobulk_frame'; metadata, not a gene.
+        drop_cols.append('total_counts')
     roles = None
     if 'role' in df.columns:
         roles = df['role'].astype(str).values
