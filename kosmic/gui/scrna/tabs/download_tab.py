@@ -1239,12 +1239,15 @@ class DownloadTab(TabbedPage):
         import numpy as np
 
         from kosmic.scrna.load.matrices import (
-            LOG_NORMALISED, RAW_COUNTS, describe_count_matrices,
+            DEPTH_RESCALED, LOG_NORMALISED, RAW_COUNTS,
+            describe_count_matrices, describe_depth,
         )
         candidates = describe_count_matrices(adata)
         by_slot = {d['slot']: d for d in candidates}
         x_info = by_slot.get('X', {})
         max_val = x_info.get('max', 0.0)
+        depth = x_info.get('depth')
+        depth_line = describe_depth(depth)
         others = [d for d in candidates
                   if d['slot'] != 'X' and d['verdict'] == RAW_COUNTS]
         elsewhere = ("\n\nRaw counts are also in: "
@@ -1263,8 +1266,14 @@ class DownloadTab(TabbedPage):
         elif x_info.get('verdict') == RAW_COUNTS:
             self._overview_panel.set_value(
                 'normalised', "Raw counts", ok=True,
-                tooltip=f"Integer values (max {max_val:,.0f}). Normalise at "
-                        "the QC step before clustering." + elsewhere)
+                tooltip=f"Integer values (max {max_val:,.0f}); {depth_line}.\n"
+                        "Normalise at the QC step before clustering." + elsewhere)
+        elif depth is not None and depth['verdict'] == DEPTH_RESCALED:
+            self._overview_panel.set_value(
+                'normalised', "Rescaled counts", ok=False,
+                tooltip=f"Integer values (max {max_val:,.0f}) but {depth_line}.\n"
+                        "Pseudobulk DE needs the original counts: re-import "
+                        "from the RNA assay or an uncorrected matrix." + elsewhere)
         else:
             self._overview_panel.set_value(
                 'normalised', "Unclear", ok=False,
