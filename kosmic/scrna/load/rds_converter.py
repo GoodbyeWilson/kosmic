@@ -158,16 +158,24 @@ message("PROGRESS:30:Saving metadata...")
 write.csv(obj@meta.data, paste0(output_prefix, "_metadata.csv"), row.names = TRUE)
 message("PROGRESS:40:Metadata saved")
 
-# Extract expression matrix
+# Extract expression matrix from the RNA assay. The object's default
+# assay is often SCT, whose "counts" slot holds SCT-corrected counts on a
+# reduced gene set, not the raw counts a pseudobulk model needs.
 message("PROGRESS:42:Extracting expression matrix...")
+assay <- if ("RNA" %in% names(obj@assays)) "RNA" else DefaultAssay(obj)
+message("Assays present: ", paste(names(obj@assays), collapse = ", "),
+        " | exporting counts from: ", assay)
 counts <- NULL
 tryCatch({
-  counts <- GetAssayData(obj, layer = "counts")
+  counts <- GetAssayData(obj, assay = assay, layer = "counts")
 }, error = function(e) {
   message("Trying slot instead of layer...")
 })
 if (is.null(counts)) {
-  counts <- GetAssayData(obj, slot = "counts")
+  counts <- GetAssayData(obj, assay = assay, slot = "counts")
+}
+if (any(counts@x != floor(counts@x))) {
+  stop("The ", assay, " counts slot is not integer counts; refusing to export it.")
 }
 
 message("PROGRESS:50:Writing expression matrix...")
@@ -176,8 +184,8 @@ message("PROGRESS:70:Expression matrix saved")
 
 # Gene/cell names
 message("PROGRESS:72:Saving gene and cell names...")
-writeLines(rownames(obj), paste0(output_prefix, "_genes.txt"))
-writeLines(colnames(obj), paste0(output_prefix, "_cells.txt"))
+writeLines(rownames(counts), paste0(output_prefix, "_genes.txt"))
+writeLines(colnames(counts), paste0(output_prefix, "_cells.txt"))
 message("PROGRESS:75:Gene/cell names saved")
 
 # Variable features
@@ -291,8 +299,9 @@ tryCatch({
 
     if (!file.exists(file.path(temp_dir, "temp.h5ad"))) {
       cat("Extracting sparse matrix (memory-efficient)...\n")
+      assay <- if ("RNA" %in% names(obj@assays)) "RNA" else DefaultAssay(obj)
       counts <- tryCatch({
-        GetAssayData(obj, slot = "counts")
+        GetAssayData(obj, assay = assay, slot = "counts")
       }, error = function(e) {
         tryCatch({
           obj[["RNA"]]$counts
