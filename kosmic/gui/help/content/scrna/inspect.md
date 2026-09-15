@@ -60,6 +60,31 @@ column; the labels you enter there *become* the values this card assigns roles
 to. When a condition column already exists the dropdown offers all of its
 values, and changing one rewrites that column for every cell of that sample.
 
+## Adding donor metadata from a table
+
+Deposited objects often carry only the donor id and the arm; age, sex
+and aetiology live in the paper's supplementary table. **Add donor
+metadata from table…** (next to *Browse all columns…*) reads a CSV, TSV
+or Excel table with one row per donor, finds the column that holds the
+study's sample ids, and reports the match — 38 of 38, or 34 of 38 with
+the missing four named. Samples not in the table get blank values; the
+import never fails on a missing id, because papers and deposits disagree
+on the odd one.
+
+Only the columns you tick are added. Sex- and age-like columns are ticked
+for you, because those two feed the analysis; everything else (BMI,
+ejection fraction, comorbidities) is off, because every column added is
+one more entry in every metadata list. Each chosen column becomes one
+value per cell under a tidied name (`Etiology of HF` → `etiology_of_hf`),
+which you can edit in the dialog.
+
+An imported sex column is offered for the **Sex** designation at once, so
+after *Save Setup* the Samples tab checks it against the inferred sex. An
+imported age or aetiology column is offered as a covariate in
+differential expression, and can be used to split off donors (see
+*Exclude* below). The import is recorded in the study's provenance with
+the table name, the key column and the columns added.
+
 ## What Exclude actually does
 
 The cells stay in the dataset. They are simply never part of a comparison.
