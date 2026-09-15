@@ -93,6 +93,33 @@ def _study_dataset_path(output_dir, suffix: str = ".h5ad") -> Path:
     return out / f"{out.parent.name}{suffix}"
 
 
+def _check_recorded_totals(adata, log, user_chose: bool = False) -> None:
+    """Refuse a matrix whose row sums do not add up to the recorded totals.
+
+    SCT-corrected counts are integers and pass the integer test, but every
+    cell has been rescaled to a common depth. When the object records each
+    cell's original total, that shows as row sums scattered above and
+    below it. A matrix the user picked by hand is logged rather than
+    refused, because the dialog has already shown them the alternatives.
+    """
+    from kosmic.scrna.load.matrices import (
+        DEPTH_RESCALED, compare_with_recorded_totals, describe_depth,
+    )
+    depth = compare_with_recorded_totals(adata.X, adata.obs)
+    line = describe_depth(depth)
+    if depth is None or depth["verdict"] != DEPTH_RESCALED:
+        log(f"Depth check: {line}")
+        return
+    if user_chose:
+        log(f"WARNING: {line}")
+        return
+    raise RuntimeError(
+        f"The matrix looks like rescaled counts, not raw counts: {line}. "
+        "Pseudobulk DE needs the original counts. If this came from a "
+        "Seurat object, export the RNA assay rather than SCT; otherwise "
+        "check the source file for an uncorrected matrix.")
+
+
 class H5adImportWorker(BaseWorker):
     """
     Worker to import an h5ad from raw_data/ into processed_data/.
@@ -158,6 +185,12 @@ class H5adImportWorker(BaseWorker):
         self.progress_pct.emit(25)
         adata = read_counts(src, slot)
 
+        # Integer is not the same as raw: check the row sums against the
+        # per-cell totals the depositor recorded, now that the matrix is
+        # in memory and the check is cheap.
+        _check_recorded_totals(adata, self.progress.emit,
+                               user_chose=self.slot is not None)
+
         self.progress.emit(f"Writing {out.name}...")
         self.progress_pct.emit(75)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +255,7 @@ class RDSConvertWorker(BaseWorker):
         self.progress_pct.emit(50)
 
         adata = assemble_h5ad_from_r_export(intermediate_dir, rds_name, h5ad_path)
+        _check_recorded_totals(adata, self.progress.emit)
 
         self.progress_pct.emit(100)
         message = (

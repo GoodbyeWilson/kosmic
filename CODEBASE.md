@@ -156,8 +156,14 @@ into each study's processed file.
 
 ## Data contracts
 
-**Raw counts are preserved.** Quality control stores the original
-counts in `adata.raw` and `adata.layers['counts']` before normalising.
+**Raw counts are required and preserved.** Import accepts only a matrix
+that passes two tests in `kosmic/scrna/load/matrices.py`: integer
+values, and row sums that are consistent with the per-cell totals the
+depositor recorded in `obs` (equal, or at or below for every cell; a
+rescaled matrix such as SCT corrected counts is refused). The Seurat
+route exports the `RNA` assay, never the default assay. Quality control
+then stores the original counts in `adata.raw` and
+`adata.layers['counts']` before normalising.
 Differential expression is computed from those counts, never from the
 normalised matrix. DecontX writes its output to
 `adata.layers['decontX_counts']` and leaves the originals unchanged.
