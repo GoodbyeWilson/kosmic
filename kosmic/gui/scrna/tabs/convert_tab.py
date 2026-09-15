@@ -341,6 +341,13 @@ class ConvertTab(SidebarTabbedPage):
             "as sample / condition / cell type.")
         self._browse_columns_btn.clicked.connect(self._open_columns_dialog)
         browse_row.addWidget(self._browse_columns_btn)
+        self._donor_meta_btn = SecondaryButton("Add donor metadata from table...")
+        self._donor_meta_btn.setToolTip(
+            "Join columns from a per-donor table (a paper's supplementary "
+            "table, a clinical sheet) onto the cells by sample id. You "
+            "choose which columns come in.")
+        self._donor_meta_btn.clicked.connect(self._open_donor_metadata_dialog)
+        browse_row.addWidget(self._donor_meta_btn)
         browse_row.addStretch()
         ml.addLayout(browse_row)
 
@@ -1781,6 +1788,57 @@ class ConvertTab(SidebarTabbedPage):
         self._sample_assign_dialog.show()
         self._sample_assign_dialog.raise_()
         self._sample_assign_dialog.activateWindow()
+
+    def _open_donor_metadata_dialog(self):
+        """Join per-donor columns from a table onto obs, then save."""
+        if self.adata is None:
+            return
+        sample_col = self._designated_col('Sample') or (
+            'sample' if 'sample' in self.adata.obs.columns else None)
+        if sample_col is None:
+            dialogs.warning(
+                self, "No sample column",
+                "Designate the sample column first (Dataset Mapping), so "
+                "the table's ids have something to match against.")
+            return
+        from kosmic.gui.scrna.tabs.donor_metadata_dialog import DonorMetadataDialog
+        from kosmic.scrna.inspect.donor_metadata import apply_metadata, match_report
+        dlg = DonorMetadataDialog(self.adata, sample_col, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.chosen:
+            return
+        written = apply_metadata(
+            self.adata, sample_col, dlg.table, dlg.key_column,
+            list(dlg.chosen), rename=dlg.chosen)
+        rep = match_report(dlg.table, dlg.key_column,
+                           self.adata.obs[sample_col].astype(str).unique())
+        # Re-read the summary so the new columns appear in the column
+        # browser, the mapping combos and the Samples tab; a sex-like
+        # column is offered for the Sex designation there.
+        from kosmic.scrna.load.converters import build_adata_summary
+        self.summary = build_adata_summary(self.adata, str(self.h5ad_path or ""))
+        self._update_display()
+        self._refresh_mapping_editor()
+        self._populate_samples_table()
+        self.adata.write_h5ad(self.h5ad_path)
+        if hasattr(self.main_window, 'record_provenance'):
+            self.main_window.record_provenance('donor_metadata', {
+                'table': Path(self._last_donor_table_path(dlg)).name,
+                'key_column': dlg.key_column,
+                'columns': written,
+                'n_samples': rep.n_samples,
+                'n_matched': rep.n_matched,
+                'unmatched_samples': rep.unmatched_samples,
+            })
+        self.main_window.set_adata(self.adata, str(self.h5ad_path))
+        self.status_label.setText(
+            f"Added {', '.join(written)} from the table "
+            f"({rep.n_matched} of {rep.n_samples} samples matched). "
+            "Designate a sex column under Dataset Mapping if you added one, "
+            "then Save Setup.")
+
+    @staticmethod
+    def _last_donor_table_path(dlg) -> str:
+        return dlg._path_edit.text() or "table"
 
     def _open_columns_dialog(self):
         """Show the metadata-column browser."""
