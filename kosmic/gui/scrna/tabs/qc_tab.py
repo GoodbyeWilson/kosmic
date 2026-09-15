@@ -138,9 +138,16 @@ class _QCHistogramWidget(QWidget):
 
     # -- public API --
 
-    def set_data(self, obs_df):
-        """Set observation DataFrame (adata.obs) and redraw current metric."""
+    def set_data(self, obs_df, n_excluded: int = 0):
+        """Set observation DataFrame (adata.obs) and redraw current metric.
+
+        ``n_excluded`` is how many cells of the dataset are not in
+        ``obs_df`` because their role is 'exclude'; the info line says so,
+        because the pass count would otherwise look like the whole
+        dataset had shrunk.
+        """
         self._obs_df = obs_df
+        self._n_excluded = int(n_excluded)
         # InteractivePlot's empty-state overlay is hidden in '_draw()'
         # once a metric is rendered.
         self._btn_bar.show()
@@ -327,6 +334,10 @@ class _QCHistogramWidget(QWidget):
         parts = [f"{n_pass:,} / {n_total:,} pass ({n_removed:,} removed, {pct:.1f}%)"]
         if per_metric:
             parts.append("  |  ".join(per_metric))
+        n_excl = getattr(self, '_n_excluded', 0)
+        if n_excl:
+            parts.append(f"{n_excl:,} excluded cells not shown; the same "
+                         "thresholds apply to them")
         self._info_label.setText("    ".join(parts))
 
 
@@ -1439,7 +1450,7 @@ class QCTab(SidebarPage):
         obs, n_used, n_excluded = self._qc_obs()
         if obs is None:
             return
-        self._qc_histogram.set_data(obs)
+        self._qc_histogram.set_data(obs, n_excluded)
         if n_excluded:
             self.qc_status.setText(
                 f"Thresholds computed from {n_used:,} cells; "
@@ -1553,9 +1564,16 @@ class QCTab(SidebarPage):
                 f"  - Score contamination panel: {contam_spec.get('display_name', contam_key)} "
                 f"(no cells removed)")
 
+        _obs, n_included, n_excluded = self._qc_obs()
+        count_line = f"Current cell count: {n_before:,}"
+        if n_excluded:
+            count_line += (f" ({n_included:,} included, {n_excluded:,} marked "
+                           "'exclude' -- kept in the file and filtered by the "
+                           "same thresholds, so a later sensitivity run can "
+                           "bring them back)")
         if not dialogs.confirm(self, "Apply QC Filters", "This will filter cells with the following criteria:\n\n"
             + "\n".join(filters) + "\n\n"
-            f"Current cell count: {n_before:,}\n\n"
+            f"{count_line}\n\n"
             "Proceed?"):
             return
 
