@@ -1348,7 +1348,8 @@ class GeneDEPage(SidebarTabbedPage):
             from kosmic.de.de_analysis import prepare_gene_coverage
             from kosmic.scrna.inspect.detection import detect_species
             species = detect_species(list(self.ws.current_adata.var_names))
-            var_names = set(self.ws.current_adata.raw.var_names) if self.ws.current_adata.raw is not None else set(self.ws.current_adata.var_names)
+            from kosmic.scrna.counts import count_var_names
+            var_names = set(count_var_names(self.ws.current_adata))
             _, self.ws.pathway_coverage = prepare_gene_coverage(
                 self.ws.pathway_gene_sets, var_names, species
             )

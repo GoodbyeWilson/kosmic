@@ -32,13 +32,8 @@ def test_transcriptome_size_adata(adata, sample_col, condition_col,
         metric_name -> {mean_disease, mean_control, ratio, t_stat, pval}),
         per_sample (list of dicts).
     """
-    # Use raw counts if available
-    if 'counts' in adata.layers:
-        X = adata.layers['counts']
-    elif adata.raw is not None:
-        X = adata.raw.X
-    else:
-        X = adata.X
+    from kosmic.scrna.counts import count_source
+    X, _, _ = count_source(adata)
 
     samples = adata.obs[sample_col].unique()
     per_sample = []

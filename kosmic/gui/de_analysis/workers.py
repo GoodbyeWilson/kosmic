@@ -352,13 +352,12 @@ class PathwayScoringWorker(BaseWorker):
         )
 
         pathway_coverage = {}
-        var_names_seq = (self.adata.raw.var_names if self.adata.raw is not None
-                         else self.adata.var_names)
-        var_names = set(var_names_seq)
+        from kosmic.scrna.counts import count_var_names
+        var_names = set(count_var_names(self.adata))
         # Convert human pathway symbols to the dataset's species namespace,
         # matching what kosmic.de.de_analysis.prepare_gene_coverage does so
         # the scorer and the gene-DE engine agree on coverage.
-        species = detect_species(list(var_names_seq))
+        species = detect_species(list(var_names))
         if species == 'mouse':
             def _match(g):
                 return format_gene_for_species(g, 'mouse')

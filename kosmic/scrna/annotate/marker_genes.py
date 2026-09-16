@@ -43,9 +43,10 @@ def compute_cluster_marker_genes(
     method : str
         Passed to 'sc.tl.rank_genes_groups'. Default 'wilcoxon'.
     use_raw : bool, optional
-        Whether to compute on 'adata.raw' (full gene set) or
-        'adata.X' (potentially HVG-subset). When 'None', auto-picks
-        'True' if 'adata.raw' exists.
+        Passed to scanpy. Default False: X is the full gene list and is
+        log-normalised, which is what the Wilcoxon test expects; '.raw'
+        in KOSMIC files held raw counts, so ranking on it confounded
+        every gene with sequencing depth.
 
     Returns
     -------
@@ -78,7 +79,7 @@ def compute_cluster_marker_genes(
         adata.obs[cluster_col] = adata.obs[cluster_col].astype('category')
 
     if use_raw is None:
-        use_raw = adata.raw is not None
+        use_raw = False
 
     sc.tl.rank_genes_groups(
         adata,

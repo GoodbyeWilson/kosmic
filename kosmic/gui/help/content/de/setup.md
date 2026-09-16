@@ -4,7 +4,7 @@ Load an h5ad file and configure sample and condition columns for DE analysis.
 
 ## Input format
 
-KOSMIC expects an AnnData .h5ad file with raw counts stored in adata.raw (preferred) or adata.X. The file should already be QC-filtered and annotated with metadata columns in adata.obs.
+KOSMIC expects an AnnData .h5ad file with raw counts in `layers['counts']` (what the scRNA QC step writes), or in `.raw` or `X` for a file from elsewhere. The file should already be QC-filtered and annotated with metadata columns in adata.obs.
 
 ## Sample column
 

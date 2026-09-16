@@ -21,23 +21,22 @@ def _format_panel(adata, genes):
     from kosmic.scrna.inspect.detection import (
         detect_species, format_gene_for_species)
 
-    ref = adata.raw.var_names if adata.raw is not None else adata.var_names
-    species = detect_species(list(ref))
+    from kosmic.scrna.counts import count_var_names
+    species = detect_species(count_var_names(adata))
     return [format_gene_for_species(g, species) for g in genes]
 
 
 def _counts_source(adata, use_raw=True):
     """Pick the best raw-count source and its var_names.
 
-    Prefers `adata.raw` (full pre-HVG gene set) so panel genes survive HVG
-    subsetting, then `layers['counts']` (raw counts stored pre-normalisation),
-    then `adata.X`. Returns `(matrix, var_names_list)`.
+    The counts (layers['counts'], else .raw, else X) when `use_raw`,
+    otherwise `adata.X`. Returns `(matrix, var_names_list)`.
     """
-    if use_raw and adata.raw is not None:
-        return adata.raw.X, list(adata.raw.var_names)
-    if 'counts' in adata.layers:
-        return adata.layers['counts'], list(adata.var_names)
-    return adata.X, list(adata.var_names)
+    from kosmic.scrna.counts import count_source
+    if use_raw:
+        X, names, _ = count_source(adata)
+        return X, names
+    return adata.X, list(map(str, adata.var_names))
 
 
 def flag_signature_genes(adata, genes, key):
@@ -57,9 +56,8 @@ def compute_signature_pct(adata, genes, key=None, use_raw=True, store=True):
 
     ``pct_i = 100 * sum(counts in panel genes) / total counts`` for cell
     *i*, computed on raw counts so it is independent of normalisation and
-    HVG subsetting. This is the on-demand path that works even on an
-    already-subset object (e.g. endothelial-only), where the panel genes
-    live in `adata.raw` but not in the HVG-reduced `adata.X`.
+    HVG subsetting. This is the on-demand path that works on any object,
+    reading the panel genes from the counts.
 
     Parameters
     ----------
@@ -70,7 +68,7 @@ def compute_signature_pct(adata, genes, key=None, use_raw=True, store=True):
         If given and `store`, result is written to
         ``obs['pct_counts_<key>']``.
     use_raw : bool
-        Prefer `adata.raw` as the count source.
+        Read the counts rather than X.
     store : bool
         Write the metric into `adata.obs`.
 

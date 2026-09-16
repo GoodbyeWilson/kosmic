@@ -1,7 +1,9 @@
 # Library-size normalisation + log1p for scRNA-seq counts.
 #
-# Stores raw counts in 'adata.layers['counts']' and 'adata.raw' before
-# normalising so any downstream step (DE, MA) can recover the originals.
+# Stores raw counts in 'adata.layers['counts']' before normalising so any
+# downstream step (DE, MA) can recover the originals. That layer is the
+# one copy of the counts a study keeps; '.raw' is no longer written
+# (it duplicated the layer -- 8 GB of memory and disk on a large study).
 from __future__ import annotations
 
 
@@ -26,9 +28,6 @@ def normalize_adata(adata, target_sum: int = 10000, log_transform: bool = True):
 
     if 'counts' not in adata.layers:
         adata.layers['counts'] = adata.X.copy()
-
-    if adata.raw is None:
-        adata.raw = adata.copy()
 
     sc.pp.normalize_total(adata, target_sum=target_sum)
     if log_transform:

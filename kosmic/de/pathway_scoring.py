@@ -150,7 +150,7 @@ def score_pathways(adata, pathway_gene_sets, method="score_genes",
     Parameters
     ----------
     adata : anndata.AnnData
-        Input data. Uses adata.raw if available (to avoid HVG subsetting).
+        Input data. Scored on the raw counts (see kosmic.scrna.counts).
     pathway_gene_sets : dict
         {pathway_name: [gene_list]}.
     method : str
@@ -171,12 +171,10 @@ def score_pathways(adata, pathway_gene_sets, method="score_genes",
         score_adata: AnnData with '{pathway}_score' columns in obs.
         available_pathways: dict of {pathway_name: [available_genes]}.
     """
-    # Use raw data to avoid HVG subsetting
-    if adata.raw is not None:
-        work = adata.raw.to_adata()
-        work.obs = adata.obs.copy()
-    else:
-        work = adata.copy()
+    # Score on the raw counts (layers['counts'], else .raw, else X).
+    from kosmic.scrna.counts import counts_adata
+    work = counts_adata(adata)
+    work.obs = adata.obs.copy()
 
     # Per-cell module scores (score_genes / mean / zscore) expect
     # log-normalised values, but `adata.raw` holds RAW COUNTS in the
@@ -214,12 +212,12 @@ def score_pathways(adata, pathway_gene_sets, method="score_genes",
 def _ensure_lognorm(work):
     """Log-normalise ``work`` in place if it still looks like raw counts.
 
-    ``score_pathways`` sources the full gene set from ``adata.raw``, which
+    ``score_pathways`` sources the full gene set from the counts, which
     holds raw counts in the standard pipeline. Per-cell scoring expects
     log-normalised data, so detect counts (non-negative integers) and apply
     library-size + log1p; skip if already normalised (e.g. an imported raw
     slot that is float) to avoid double normalisation. ``work`` is a copy,
-    so ``adata.raw`` is never mutated.
+    so the study's counts are never mutated.
     """
     import scanpy as sc
     from scipy import sparse as sp

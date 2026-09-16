@@ -19,7 +19,7 @@ def analyze_gene_expression(adata, gene_name, sample_col, condition_col, use_raw
     condition_col : str
         Condition column in obs.
     use_raw : bool
-        If True and adata.raw is available, use raw expression values.
+        If True, use the raw counts (layers['counts'] / .raw); else X.
 
     Returns
     -------
@@ -33,11 +33,14 @@ def analyze_gene_expression(adata, gene_name, sample_col, condition_col, use_raw
     ValueError
         If gene is not found in dataset.
     """
-    # Determine data source
-    if use_raw and adata.raw is not None:
-        var_names = adata.raw.var_names
+    # Data source: the counts (layers['counts'], else .raw, else X) when
+    # 'use_raw', otherwise X as stored.
+    from kosmic.scrna.counts import count_source
+    if use_raw:
+        src_X, src_names, _ = count_source(adata)
     else:
-        var_names = adata.var_names
+        src_X, src_names = adata.X, list(map(str, adata.var_names))
+    var_names = pd.Index(src_names)
 
     # Case-insensitive gene lookup
     gene = _resolve_gene_name(gene_name, var_names)
@@ -45,18 +48,11 @@ def analyze_gene_expression(adata, gene_name, sample_col, condition_col, use_raw
         raise ValueError(f"Gene '{gene_name}' not found in dataset")
 
     # Extract expression
-    if use_raw and adata.raw is not None:
-        gene_data = adata.raw[:, gene].X
-        if hasattr(gene_data, 'toarray'):
-            gene_expr = gene_data.toarray().flatten()
-        else:
-            gene_expr = np.array(gene_data).flatten()
+    gene_data = src_X[:, src_names.index(gene)]
+    if hasattr(gene_data, 'toarray'):
+        gene_expr = gene_data.toarray().flatten()
     else:
-        gene_idx = adata.var_names.get_loc(gene)
-        if hasattr(adata.X, 'toarray'):
-            gene_expr = adata.X[:, gene_idx].toarray().flatten()
-        else:
-            gene_expr = adata.X[:, gene_idx].flatten()
+        gene_expr = np.array(gene_data).flatten()
 
     # Build per-cell DataFrame
     per_cell_df = pd.DataFrame({
@@ -132,7 +128,7 @@ def compute_dotplot_stats(adata, gene_list, condition_col, conditions,
     conditions : list of str
         Conditions to include.
     use_raw : bool
-        If True and adata.raw available, use raw expression.
+        If True, use the raw counts (layers['counts'] / .raw); else X.
     expressing_only : bool
         If True, compute mean only over expressing cells (>0).
 
@@ -143,10 +139,12 @@ def compute_dotplot_stats(adata, gene_list, condition_col, conditions,
                   mean_all_cells, n_cells columns.
         resolved_genes: list of resolved gene names.
     """
-    if use_raw and adata.raw is not None:
-        var_names = adata.raw.var_names
+    from kosmic.scrna.counts import count_source
+    if use_raw:
+        src_X, src_names, _ = count_source(adata)
     else:
-        var_names = adata.var_names
+        src_X, src_names = adata.X, list(map(str, adata.var_names))
+    var_names = pd.Index(src_names)
 
     # Resolve gene names
     resolved_genes = []
@@ -164,18 +162,11 @@ def compute_dotplot_stats(adata, gene_list, condition_col, conditions,
     # Compute stats
     rows = []
     for gene in resolved_genes:
-        if use_raw and adata.raw is not None:
-            gene_data = adata.raw[:, gene].X
-            if hasattr(gene_data, 'toarray'):
-                expr = gene_data.toarray().flatten()
-            else:
-                expr = np.array(gene_data).flatten()
+        gene_data = src_X[:, src_names.index(gene)]
+        if hasattr(gene_data, 'toarray'):
+            expr = gene_data.toarray().flatten()
         else:
-            gene_idx = var_names.get_loc(gene)
-            if hasattr(adata.X, 'toarray'):
-                expr = adata.X[:, gene_idx].toarray().flatten()
-            else:
-                expr = adata.X[:, gene_idx].flatten()
+            expr = np.array(gene_data).flatten()
 
         cond_values = adata.obs[condition_col].values
 
