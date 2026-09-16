@@ -32,11 +32,15 @@ Two options that matter more than they look:
   dataset costs more memory than everything else together. HVG
   selection has already removed most of what scaling would help with.
 
-**Run PCA**, then look at the **Elbow Plot**. KOSMIC suggests a number
-of PCs to use — the largest of the classic elbow (max distance to the
-line), the point where 80% of variance is explained, and a floor of 10.
-Under-estimating is the common mistake, so it errs high. The suggestion
-lands in *PCs to use*; you can change it.
+**Run PCA**, then look at the **Elbow Plot**. KOSMIC marks the elbow —
+the knee of the variance curve on a log scale, which is where the decay
+slows rather than the corner of the first few PCs' steep drop — with a
+floor of 10, and puts it in *PCs to use*; you can change it. On the DCM
+studies the elbow falls at PC 12–18 with 30–50 % of the variance in the
+computed PCs; single-cell data never gets near 80 % of total variance
+within 80 PCs, so cumulative variance is shown for information, not
+used as a rule. If the curve has no knee within the PCs computed, the
+plot says so and the floor is used.
 
 ## Batch correction
 

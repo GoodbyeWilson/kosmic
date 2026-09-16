@@ -8,35 +8,53 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
-def find_elbow(variance_ratio: np.ndarray, min_pcs: int = 10,
-               cumulative_threshold: float = 0.80) -> int:
-    """Detect the suggested number of PCs for scRNA-seq analysis.
+def find_elbow(variance_ratio: np.ndarray, min_pcs: int = 10) -> int:
+    """The suggested number of PCs: the elbow of the variance curve.
 
-    Hybrid approach: takes the maximum of three estimates to avoid
-    under-estimation, which is the most common failure mode in scRNA.
+    The elbow is the point of maximum distance from the straight line
+    joining the first and last PC (the Kneedle method), taken on the
+    log of the variance so the knee marks where the decay slows rather
+    than the corner of the first few PCs' steep drop (on linear scale a
+    heart snRNA-seq scree "knees" at PC 6-7; on log scale at PC 18),
+    floored at *min_pcs*. See :func:`elbow_report` for whether an elbow
+    was found.
 
-    1. **Max-distance-to-line** (classic elbow/Kneedle method)
-    2. **Cumulative variance threshold** (default 80%)
-    3. **Hard floor** (default 10 PCs)
+    Earlier versions also took the PC at which cumulative variance
+    reached 80% and returned the largest of the estimates. Single-cell
+    data never gets near 80% of total variance within the PCs computed
+    (a heart snRNA-seq study sits at 50-65% by PC 80), so that estimate
+    was always the last PC and the "elbow" was reported at the ceiling.
 
     Parameters
     ----------
     variance_ratio : array-like
         Per-PC explained variance ratio.
     min_pcs : int
-        Absolute minimum PCs to suggest (default 10).
-    cumulative_threshold : float
-        Cumulative variance fraction target (default 0.80).
+        Minimum PCs to suggest (default 10).
 
     Returns
     -------
     int
         1-based PC number at the suggested cutoff.
     """
-    y = np.asarray(variance_ratio)
-    n = len(y)
+    return elbow_report(variance_ratio, min_pcs)['suggested']
+
+
+def elbow_report(variance_ratio: np.ndarray, min_pcs: int = 10) -> dict:
+    """Elbow of the variance curve, with whether it is a real one.
+
+    Returns a dict: ``elbow`` (1-based PC of maximum distance from the
+    end-to-end line), ``found`` (False when the elbow lands on the first
+    or last PC, i.e. the curve has no knee within the computed PCs),
+    ``suggested`` (``elbow`` floored at *min_pcs*; *min_pcs* when not
+    found), ``cumulative`` (cumulative variance fraction per PC).
+    """
+    ratio = np.asarray(variance_ratio, dtype=float)
+    n = len(ratio)
     if n < 3:
-        return n
+        return {'elbow': n, 'found': False, 'suggested': n,
+                'cumulative': np.cumsum(ratio) if n else np.array([])}
+    y = np.log(np.clip(ratio, 1e-12, None))
 
     # Method 1: max-distance-to-line (classic elbow)
     x = np.linspace(0, 1, n)
@@ -45,21 +63,19 @@ def find_elbow(variance_ratio: np.ndarray, min_pcs: int = 10,
     line_vec = p2 - p1
     line_len = np.linalg.norm(line_vec)
     if line_len == 0:
-        return min_pcs
+        return {'elbow': n, 'found': False, 'suggested': min(min_pcs, n),
+                'cumulative': np.cumsum(ratio)}
 
     line_unit = line_vec / line_len
     dists = np.abs(np.cross(line_unit, p1 - np.column_stack([x, y])))
     elbow_pc = int(np.argmax(dists)) + 1  # 1-based
-
-    # Method 2: cumulative variance threshold
-    cumulative = np.cumsum(y)
-    above = np.where(cumulative >= cumulative_threshold)[0]
-    cum_pc = int(above[0]) + 1 if len(above) > 0 else n
-
-    # Take the max of all three
-    suggested = max(elbow_pc, cum_pc, min_pcs)
-    # Cap at available PCs
-    return min(suggested, n)
+    # A knee is real when the curve bows away from its end-to-end line by
+    # more than 1% of that line's length (a scree with a knee sits at
+    # 3-40%; a straight line at ~0) and the knee is not an end point.
+    found = bool(1 < elbow_pc < n and dists.max() / line_len > 0.01)
+    suggested = min(max(elbow_pc, min_pcs), n) if found else min(min_pcs, n)
+    return {'elbow': elbow_pc, 'found': found, 'suggested': suggested,
+            'cumulative': np.cumsum(ratio)}
 
 
 def create_elbow_plot(variance_ratio: np.ndarray, *,
