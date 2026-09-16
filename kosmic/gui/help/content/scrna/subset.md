@@ -39,8 +39,12 @@ the forest plots and the results tables.
 
 ## What the subset contains
 
-- The selected cells, and only genes that at least one of them
-  expresses.
+- The selected cells, with the parent's full gene list. A gene with no
+  counts in these cells is kept as a measured zero rather than dropped:
+  it costs nothing in a sparse matrix, the DE gene filter sets it aside
+  per run with the reason recorded, and keeping it means every subset
+  of a study shares the same genes — which the atlas and the
+  meta-analysis rely on when they take the genes studies have in common.
 - The counts (`X`, `.raw`, `layers['counts']`) and, if you ran
   Decontaminate, `layers['decontX_counts']`.
 - All `obs` metadata: sample, condition, roles, cell-type labels.
