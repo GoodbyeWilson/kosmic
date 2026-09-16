@@ -1427,8 +1427,12 @@ class ClusterTab(SidebarPage):
         pca_page_layout.addWidget(self.scale_check)
 
         self.harmony_check = QCheckBox("Harmony batch correction")
-        self.harmony_check.setChecked(False)
-        self.harmony_check.setToolTip("Correct batch effects in PCA space. Needs harmonypy.")
+        self.harmony_check.setChecked(False)   # turned on once a batch column is known
+        self._harmony_default_applied = False
+        self.harmony_check.setToolTip(
+            "Correct the PCA space for the batch key (the donor / sample) so "
+            "cells of one type from different donors overlap. On by default "
+            "for multi-donor data; it changes clustering only, never DE.")
         self.harmony_check.stateChanged.connect(self._on_harmony_toggled)
         pca_page_layout.addWidget(self.harmony_check)
 
@@ -2229,9 +2233,12 @@ class ClusterTab(SidebarPage):
         except Exception:
             pass
 
-        # Condition / protect combo
+        # Merge-across combo. Offered, never pre-selected: correcting on the
+        # condition pulls disease and control cells into shared clusters,
+        # which hides disease-specific states in the embedding. The user
+        # opts in; the default is to correct on the sample only.
         self.condition_combo.clear()
-        self.condition_combo.addItem("")  # no protection
+        self.condition_combo.addItem("")  # no second variable
         condition_priority = [
             'condition', 'Condition', 'disease', 'Disease',
             'group', 'Group', 'treatment', 'Treatment',
@@ -2249,18 +2256,14 @@ class ClusterTab(SidebarPage):
                 except Exception:
                     pass
 
-        # Auto-select detected condition column
-        try:
-            from kosmic.scrna.inspect.batch import detect_condition_column
-            detected_cond = detect_condition_column(
-                self.adata, self.batch_combo.currentText(),
-            )
-            if detected_cond:
-                idx = self.condition_combo.findText(detected_cond)
-                if idx >= 0:
-                    self.condition_combo.setCurrentIndex(idx)
-        except Exception:
-            pass
+        self.condition_combo.setCurrentIndex(0)
+
+        # Harmony on by default when there is a sample column to correct
+        # on: every multi-donor study has donor as its dominant technical
+        # batch, and the authors of the deposited datasets corrected on it.
+        if self.batch_combo.currentText().strip() and not self._harmony_default_applied:
+            self.harmony_check.setChecked(True)
+            self._harmony_default_applied = True
 
     def _get_save_path(self) -> str | None:
         """Resolve the h5ad path to save to."""
