@@ -2384,20 +2384,20 @@ class ClusterTab(SidebarPage):
             self._on_pca_status("PCA variance data not available.")
             return
 
-        from kosmic.visualisation.scrna.pca_plots import find_elbow
+        from kosmic.visualisation.scrna.pca_plots import elbow_report
 
         variance_ratio = np.asarray(adata.uns['pca']['variance_ratio'], dtype=float)
-        suggested = find_elbow(variance_ratio)
-        cumulative = np.cumsum(variance_ratio)
+        report = elbow_report(variance_ratio)
+        suggested = report['suggested']
+        cumulative = report['cumulative']
         n_pcs = len(variance_ratio)
         cum_at_suggested = cumulative[min(suggested - 1, n_pcs - 1)] * 100
+        verdict = (f"Elbow at PC {report['elbow']}" if report['found']
+                   else f"No clear elbow within {n_pcs} PCs; using {suggested}")
 
         # Store suggestion for auto-setting the PCs spinner
         self._suggested_pcs = suggested
-        self._on_pca_status(
-            f"Elbow detected at PC {suggested} "
-            f"({cum_at_suggested:.0f}% variance)"
-        )
+        self._on_pca_status(f"{verdict} ({cum_at_suggested:.0f}% variance)")
 
         # Clear and draw
         self._elbow_plot.clear_plot_items()
@@ -2423,7 +2423,8 @@ class ClusterTab(SidebarPage):
 
         # Elbow label
         elbow_text = pg.TextItem(
-            f"Elbow: PC {suggested}", color=warning, anchor=(0, 1),
+            f"Elbow: PC {suggested}" if report['found'] else f"No clear elbow (using {suggested})",
+            color=warning, anchor=(0, 1),
         )
         elbow_text.setPos(suggested + 0.5, variance_ratio[0] * 0.9)
         self._elbow_plot.addItem(elbow_text)
@@ -2434,16 +2435,15 @@ class ClusterTab(SidebarPage):
         # Show info below the plot
         total_var = cumulative[-1] * 100 if len(cumulative) > 0 else 0
         self._elbow_info_label.setText(
-            f"Suggested PCs: {suggested}  |  "
-            f"Cumulative variance at elbow: {cum_at_suggested:.1f}%  |  "
-            f"Total variance ({n_pcs} PCs): {total_var:.1f}%"
+            f"{verdict}  |  "
+            f"Cumulative variance at PC {suggested}: {cum_at_suggested:.1f}%  |  "
+            f"Total in {n_pcs} PCs: {total_var:.1f}%"
         )
         self._elbow_info_label.setVisible(True)
 
         # Mirror the verdict under the Run PCA button, where the user
         # picks "PCs to use" next.
-        self.pca_status.setText(
-            f"Elbow detected at PC {suggested} ({cum_at_suggested:.0f}% variance)")
+        self.pca_status.setText(f"{verdict} ({cum_at_suggested:.0f}% variance)")
         self.pca_status.setProperty("role", "status_success")
         _refresh_style(self.pca_status)
         self._pca_card.set_summary([
