@@ -827,11 +827,29 @@ class QCTab(SidebarPage):
         self.qc_max_mt_spin.setToolTip("Filter cells with more than this percentage of mitochondrial genes")
         grid.addWidget(self.qc_max_mt_spin, 6, 1)
 
-        # Row 7: Ambient-contamination panel (optional). Scores a
+        # Row 7: Min cells per gene. Off by default: a gene seen in a
+        # handful of cells is a measured near-zero, never an HVG, and the
+        # DE gene filter sets it aside per run; dropping it here gives
+        # each study its own gene list (Reichart-LV lost 3,126 genes to
+        # the old default of 3), which shrinks the shared-gene set the
+        # atlas and the meta-analysis are built on.
+        grid.addWidget(QLabel("Min cells / gene"), 7, 0)
+        self.qc_min_cells_gene_spin = NoScrollSpinBox()
+        self.qc_min_cells_gene_spin.setRange(0, 1000)
+        self.qc_min_cells_gene_spin.setValue(0)
+        self.qc_min_cells_gene_spin.setSpecialValueText("off")
+        self.qc_min_cells_gene_spin.setToolTip(
+            "Drop genes detected in fewer than this many cells (0 = keep "
+            "every gene). Removing them changes the study's gene list, "
+            "so it is off by default; the count of genes kept is reported "
+            "either way.")
+        grid.addWidget(self.qc_min_cells_gene_spin, 7, 1)
+
+        # Row 8: Ambient-contamination panel (optional). Scores a
         # dominant-cell-type gene panel into obs['pct_counts_<key>']
         # (percent.mito-style) on the pre-filter counts, for the DE
         # spillover diagnostic. Does NOT filter cells.
-        grid.addWidget(QLabel("Contam. panel"), 7, 0)
+        grid.addWidget(QLabel("Contam. panel"), 8, 0)
         self.qc_contam_combo = NoScrollComboBox()
         self.qc_contam_combo.addItem("None", None)
         self._contam_panels = builtin_panels()
@@ -841,7 +859,7 @@ class QCTab(SidebarPage):
             "Score a dominant-cell-type ambient-contamination panel per cell "
             "into pct_counts_<panel>, stored in obs so it survives subsetting "
             "and feeds the spillover diagnostic in DE. 'None' disables it.")
-        grid.addWidget(self.qc_contam_combo, 7, 1)
+        grid.addWidget(self.qc_contam_combo, 8, 1)
 
         # Re-preview MAD thresholds when multiplier changes
         self.qc_mad_spin.valueChanged.connect(self._on_mad_spin_changed)
@@ -1545,6 +1563,7 @@ class QCTab(SidebarPage):
         min_counts = self.qc_min_counts_spin.value()
         max_counts = self.qc_max_counts_spin.value()
         max_mt = self.qc_max_mt_spin.value()
+        min_cells_gene = self.qc_min_cells_gene_spin.value()
 
         # Build filter description
         filters = [
@@ -1556,6 +1575,7 @@ class QCTab(SidebarPage):
         if max_counts > 0:
             filters.append(f"  - Max counts/cell: {max_counts:,}")
         filters.append(f"  - Max MT %: {max_mt}%")
+        filters.append(f"  - Min cells/gene: {min_cells_gene if min_cells_gene > 0 else 'off (every gene kept)'}")
 
         contam_key = self.qc_contam_combo.currentData()
         contam_spec = self._contam_panels.get(contam_key) if contam_key else None
@@ -1593,6 +1613,7 @@ class QCTab(SidebarPage):
             'min_counts': min_counts,
             'max_counts': max_counts,
             'max_mt': max_mt,
+            'min_cells': min_cells_gene,
         }
         if contam_spec and contam_spec.get('genes'):
             params['signature_panels'] = {contam_key: contam_spec['genes']}
@@ -1612,7 +1633,7 @@ class QCTab(SidebarPage):
 
     def _on_qc_filter_finished(self, payload):
         """Handle QCFilterWorker completion: rebind adata, update UI, save."""
-        adata, _stats = payload
+        adata, stats = payload
         self.apply_qc_btn.setEnabled(True)
         if self.progress_bar:
             self.progress_bar.setRange(0, 100)
@@ -1633,15 +1654,22 @@ class QCTab(SidebarPage):
                 p['contamination_panels'] = list(self._last_qc_params['signature_panels'].keys())
             p['n_cells_before'] = int(n_before)
             p['n_cells_after'] = int(n_after)
+            p['n_genes_before'] = int(stats.get('n_genes_before', adata.n_vars))
+            p['n_genes_after'] = int(adata.n_vars)
             self.main_window.record_provenance('qc', p)
         self.main_window.mark_step_complete(3)
 
+        g_before = int(stats.get('n_genes_before', adata.n_vars))
+        g_after = int(adata.n_vars)
+        genes_line = (f"{g_before:,} -> {g_after:,} genes ({g_before - g_after:,} removed)"
+                      if g_after != g_before else f"{g_after:,} genes (none removed)")
         self.qc_status.setText(
-            f"QC Applied: {n_before:,} -> {n_after:,} cells ({n_removed:,} removed)")
+            f"QC Applied: {n_before:,} -> {n_after:,} cells ({n_removed:,} removed); "
+            f"{genes_line}")
         self.qc_status.set_state('success')
         self._update_controls()
         self.log_message.emit(
-            f"QC: {n_before:,} -> {n_after:,} cells ({n_removed:,} removed)")
+            f"QC: {n_before:,} -> {n_after:,} cells ({n_removed:,} removed); {genes_line}")
 
         # Refresh histogram with filtered data
         self._refresh_histogram_source()
