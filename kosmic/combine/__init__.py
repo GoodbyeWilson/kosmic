@@ -38,7 +38,8 @@ def concat_studies(
 
     For each input h5ad:
       1. Load it (one at a time -- peak RAM = single study).
-      2. Promote '.raw' -> '.X' so the temp holds integer raw counts.
+      2. Put the raw counts in '.X' (from layers['counts'], else '.raw',
+         else X itself) so the temp holds integer counts.
       3. Optional subsample to 'cap_per_study'.
       4. Strip obsm / varm / uns / layers; keep a tight obs subset.
       5. Write to a temp h5ad.
@@ -102,8 +103,8 @@ def concat_studies(
                     f"Extracting raw counts: {accession} (from {path.parent.name}/)...")
 
             a = ad.read_h5ad(path)
-            if a.raw is not None:
-                a = a.raw.to_adata()
+            from kosmic.scrna.counts import counts_adata
+            a = counts_adata(a, copy=False)
 
             if cap_per_study is not None and a.n_obs > cap_per_study:
                 idx = np.sort(

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from kosmic.scrna.inspect.detection import detect_species, format_gene_for_species
+from kosmic.scrna.counts import count_source, count_var_names, counts_adata, has_counts_layer
 from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD,
     PATHWAY_GENE_DETECTION_PCT, PATHWAY_MIN_GENES, PATHWAY_MIN_COVERAGE,
@@ -69,23 +70,12 @@ def prepare_gene_coverage(pathway_gene_sets, var_names, species='human'):
 def cell_depths(adata, counts_layer=None):
     """Total raw counts per cell, summed over every gene in the count source.
 
-    The source is resolved the way 'create_pseudobulk' resolves it --
-    'counts_layer' if given, else 'layers['counts']', else 'adata.raw',
-    else 'adata.X' -- but over all genes rather than the tested subset,
-    so a donor's depth is a property of the data and does not change
-    with the gene list of the run.
+    The source is 'kosmic.scrna.counts.count_source' -- 'counts_layer'
+    if given, else layers['counts'], else '.raw', else X -- over all
+    genes rather than the tested subset, so a donor's depth is a property
+    of the data and does not change with the gene list of the run.
     """
-    if counts_layer is not None:
-        if counts_layer not in adata.layers:
-            raise ValueError(
-                f"Counts layer '{counts_layer}' not found in adata.layers.")
-        X = adata.layers[counts_layer]
-    elif 'counts' in adata.layers:
-        X = adata.layers['counts']
-    elif adata.raw is not None:
-        X = adata.raw.X
-    else:
-        X = adata.X
+    X, _, _ = count_source(adata, counts_layer)
     return np.asarray(X.sum(axis=1)).ravel().astype(float)
 
 
@@ -147,13 +137,13 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
                       min_counts=DE_MIN_COUNTS):
     """Create pseudobulk expression profiles by sample.
 
-    Uses raw counts (adata.raw if available) without per-cell normalisation.
+    Uses raw counts (see 'kosmic.scrna.counts') without per-cell normalisation.
     Which donors are kept is decided by 'profile_table'.
 
     Parameters
     ----------
     adata : anndata.AnnData
-        Input data. Uses adata.raw if available for raw counts.
+        Input data. Counts come from layers['counts'] (else .raw, else X).
     genes : list of str
         Genes to include.
     sample_col, condition_col : str
@@ -193,39 +183,15 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
     genes_used : list of str
         Gene names in the matrix (subset of 'genes' present in adata).
     """
-    # Prefer layers['counts'], then adata.raw, then adata.X (raw retains
-    # the full gene set if HVG filtering trimmed adata.var_names).
-    all_var = set(adata.raw.var_names) if adata.raw is not None else set(adata.var_names)
-    genes_used = [g for g in genes if g in all_var]
+    # One count source (kosmic.scrna.counts), and only the requested
+    # genes are copied: the previous adata[:, genes].copy() duplicated X
+    # and every layer for those genes before swapping in the counts.
+    _, count_names, _ = count_source(adata, counts_layer)
+    present = set(count_names)
+    genes_used = [g for g in genes if g in present]
     if not genes_used:
         return np.array([]), pd.DataFrame(), []
-
-    if counts_layer is not None:
-        # Explicit count source (e.g. DecontX-corrected counts). The layer
-        # is keyed on the current var_names, so restrict to genes present
-        # there rather than the raw superset.
-        layer_genes = [g for g in genes_used if g in adata.var_names]
-        if not layer_genes:
-            return np.array([]), pd.DataFrame(), []
-        if counts_layer not in adata.layers:
-            raise ValueError(
-                f"Counts layer '{counts_layer}' not found in adata.layers.")
-        adata_for_de = adata[:, layer_genes].copy()
-        adata_for_de.X = adata_for_de.layers[counts_layer].copy()
-        genes_used = layer_genes
-    elif 'counts' in adata.layers and all(g in adata.var_names for g in genes_used):
-        # True raw counts stored before normalisation -- best source.
-        adata_for_de = adata[:, genes_used].copy()
-        adata_for_de.X = adata_for_de.layers['counts'].copy()
-    elif adata.raw is not None:
-        raw_genes = [g for g in genes_used if g in adata.raw.var_names]
-        if raw_genes:
-            adata_for_de = adata.raw[:, raw_genes].to_adata()
-            genes_used = raw_genes
-        else:
-            adata_for_de = adata[:, genes_used].copy()
-    else:
-        adata_for_de = adata[:, genes_used].copy()
+    adata_for_de = counts_adata(adata, genes=genes_used, counts_layer=counts_layer)
 
     pseudobulk_data = []
     sample_metadata = []
@@ -311,7 +277,7 @@ def _pathway_retention(adata, pathway_gene_sets, gene_detection_pct,
     if counts_layer is not None:
         base_var_names = list(adata.var_names)
     else:
-        base_var_names = list(adata.raw.var_names if adata.raw is not None else adata.var_names)
+        base_var_names = count_var_names(adata)
     var_names = set(base_var_names)
     species = detect_species(list(var_names))
 
@@ -567,7 +533,7 @@ def pseudobulk_expression_matrix(adata, sample_col, condition_col,
         base_var_names = list(adata.var_names)
     else:
         base_var_names = list(
-            adata.raw.var_names if adata.raw is not None else adata.var_names)
+            count_var_names(adata))
     pb_full, sample_df, genes_used = create_pseudobulk(
         adata, base_var_names, sample_col, condition_col,
         min_cells=min_cells, aggregate='sum', counts_layer=counts_layer,
@@ -1010,12 +976,8 @@ def _detection_counts_by_donor(adata, counts_layer, donor_values, cell_mask):
     """
     from scipy import sparse as sp
 
-    if counts_layer is not None and counts_layer in adata.layers:
-        X, var_names = adata.layers[counts_layer], list(adata.var_names)
-    elif adata.raw is not None:
-        X, var_names = adata.raw.X, list(adata.raw.var_names)
-    else:
-        X, var_names = adata.X, list(adata.var_names)
+    X, var_names, _ = count_source(
+        adata, counts_layer if counts_layer in (adata.layers or {}) else None)
 
     binary = (X != 0)
     donors = [d for d in pd.unique(donor_values) if d is not None]
@@ -1278,7 +1240,7 @@ def run_de_pipeline(adata, sample_col, condition_col,
     species = detect_species(list(adata.var_names))
 
     # Always compute coverage so pathway annotation is available downstream.
-    coverage_var_names = set(adata.raw.var_names) if adata.raw is not None else set(adata.var_names)
+    coverage_var_names = set(count_var_names(adata))
     metabolic_genes, pathway_coverage = prepare_gene_coverage(
         pathway_gene_sets, coverage_var_names, species
     )
@@ -1293,7 +1255,7 @@ def run_de_pipeline(adata, sample_col, condition_col,
     def _genome_var_names():
         if counts_layer is not None:
             return list(adata.var_names)
-        return list(adata.raw.var_names) if adata.raw is not None else list(adata.var_names)
+        return count_var_names(adata)
 
     if de_method == 'deseq2' and not full_genome:
         # DESeq2 must see the full transcriptome -- median-of-ratios
@@ -1505,8 +1467,8 @@ def run_cell_level_de(adata):
 
     Input normalisation
     -------------------
-    scanpy 'rank_genes_groups' expects log-normalised expression. KOSMIC's
-    'adata.raw' holds *raw counts* (normalize.py snapshots raw counts before
+    scanpy 'rank_genes_groups' expects log-normalised expression. KOSMIC
+    keeps *raw counts* in layers['counts'] (normalize.py stores them before
     normalising), so we rebuild a log1p(CPM) matrix from counts here rather
     than passing 'use_raw=True'. Running Wilcoxon on un-normalised counts
     would leave the test confounded by per-cell sequencing depth -- biasing
@@ -1548,20 +1510,15 @@ def run_cell_level_de(adata):
 
     # Source raw counts on the full gene set, then CPM + log1p so the
     # Wilcoxon test sees depth-normalised log expression (see docstring).
-    if adata.raw is not None:
-        work = adata.raw.to_adata()
-        from_counts = True
-    elif 'counts' in adata.layers:
-        work = adata.copy()
-        work.X = work.layers['counts'].copy()
+    if has_counts_layer(adata):
+        work = counts_adata(adata)
         from_counts = True
     else:
         # No stored counts -- assume adata.X is already log-normalised.
-        work = adata.copy()
+        work = counts_adata(adata)
         from_counts = False
 
     work = work[keep].copy()
-    work.raw = None
     if from_counts:
         sc.pp.normalize_total(work, target_sum=1e4)
         sc.pp.log1p(work)

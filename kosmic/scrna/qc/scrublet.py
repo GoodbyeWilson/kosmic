@@ -28,7 +28,7 @@ def run_scrublet(
     Parameters
     ----------
     adata : anndata.AnnData
-        Data to check for doublets. Uses 'adata.raw' if available.
+        Data to check for doublets. Uses the raw counts (layers['counts']).
     expected_doublet_rate : float
         Expected fraction of doublets.
     min_counts : int
@@ -45,7 +45,8 @@ def run_scrublet(
     import scanpy as sc
     import scipy.sparse as sp
 
-    counts_matrix = adata.raw.X if adata.raw is not None else adata.X
+    from kosmic.scrna.counts import count_source
+    counts_matrix, _, _ = count_source(adata)
 
     # Score on a throwaway object so scanpy's internal filtering and
     # normalisation never touch the caller's data.

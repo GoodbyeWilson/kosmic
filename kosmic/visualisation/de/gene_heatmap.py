@@ -189,10 +189,10 @@ def prepare_heatmap_data(adata, pathway_gene_sets, sample_col, condition_col,
     """
     import scanpy as sc
 
-    species = detect_species(list(
-        adata.raw.var_names if adata.raw is not None else adata.var_names
-    ))
-    coverage_var = set(adata.raw.var_names if adata.raw is not None else adata.var_names)
+    from kosmic.scrna.counts import count_var_names, counts_adata, has_counts_layer
+    count_names = count_var_names(adata)
+    species = detect_species(count_names)
+    coverage_var = set(count_names)
 
     # Find available pathways
     available_pathways = {}
@@ -207,11 +207,10 @@ def prepare_heatmap_data(adata, pathway_gene_sets, sample_col, condition_col,
     # Collect all genes
     all_genes = list(dict.fromkeys(g for gs in available_pathways.values() for g in gs))
 
-    # Use raw data, normalize for consistent expression values
-    use_raw = adata.raw is not None
-    if use_raw:
-        valid_genes = [g for g in all_genes if g in adata.raw.var_names]
-        adata_expr = adata.raw[:, valid_genes].to_adata()
+    # Normalise from the counts so expression values are on one scale
+    if has_counts_layer(adata):
+        valid_genes = [g for g in all_genes if g in coverage_var]
+        adata_expr = counts_adata(adata, genes=valid_genes)
         adata_expr.obs = adata.obs.copy()
         sc.pp.normalize_total(adata_expr, target_sum=1e4)
         sc.pp.log1p(adata_expr)

@@ -162,8 +162,13 @@ values, and row sums that are consistent with the per-cell totals the
 depositor recorded in `obs` (equal, or at or below for every cell; a
 rescaled matrix such as SCT corrected counts is refused). The Seurat
 route exports the `RNA` assay, never the default assay. Quality control
-then stores the original counts in `adata.raw` and
-`adata.layers['counts']` before normalising.
+then stores the original counts in `adata.layers['counts']` before
+normalising. That layer is the one copy of the counts a study keeps;
+every reader resolves the counts through `kosmic/scrna/counts.py`
+(`layers['counts']`, else `.raw` for files from older versions or other
+tools, else `X` for a file QC has not touched). `X` is never subset to
+highly variable genes, so `adata.var_names` is always the full gene
+list.
 Differential expression is computed from those counts, never from the
 normalised matrix. DecontX writes its output to
 `adata.layers['decontX_counts']` and leaves the originals unchanged.

@@ -1956,7 +1956,7 @@ class QCTab(SidebarPage):
 
         if not dialogs.confirm(self, "Normalize Data", f"This will normalize the data to {self.target_sum_spin.value():,} counts per cell"
             + (" and log-transform." if self.log_transform_check.isChecked() else ".")
-            + "\n\nRaw counts will be stored in adata.raw.\n\nProceed?"):
+            + "\n\nThe original counts stay in layers['counts'].\n\nProceed?"):
             return
 
         self._last_norm_target = self.target_sum_spin.value()

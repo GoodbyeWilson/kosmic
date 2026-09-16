@@ -96,8 +96,9 @@ it.
 
 **Normalize & Save** rescales every cell to *Target sum* total counts
 (10,000, the scanpy convention) and applies log(1 + x). Before it does,
-it stores the counts in `.raw` — this is the snapshot differential
-expression will use, so normalisation never affects DE. Leave *Log1p
+it makes sure the counts are in `layers['counts']` (the Filter step
+puts them there) — that layer is what differential expression reads,
+so normalisation never affects DE. Leave *Log1p
 transform* on; clustering assumes it.
 
 ## What to record

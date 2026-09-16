@@ -141,13 +141,9 @@ def score_marker_genes(adata, markers=None, skip_gene_conversion=False,
     if old_score_cols:
         adata.obs.drop(columns=old_score_cols, inplace=True)
 
-    # Get expression matrix and gene names
-    if adata.raw is not None:
-        X = adata.raw.X
-        gene_names = list(adata.raw.var_names)
-    else:
-        X = adata.X
-        gene_names = list(adata.var_names)
+    # Log-normalised expression on the full gene list
+    from kosmic.scrna.counts import log_normalised
+    X, gene_names = log_normalised(adata)
 
     gene_to_idx = {g: i for i, g in enumerate(gene_names)}
     n_cells, n_genes = X.shape
@@ -383,13 +379,10 @@ def run_ora_per_cluster(adata, markers, cluster_col='leiden',
             genes = set(format_gene_for_species(g, species) for g in gene_list)
         resolved_markers[ct] = genes
 
-    # Get expression matrix and gene names
-    if adata.raw is not None:
-        X = adata.raw.X
-        var_names = np.array(list(adata.raw.var_names))
-    else:
-        X = adata.X
-        var_names = np.array(list(adata.var_names))
+    # Log-normalised expression on the full gene list
+    from kosmic.scrna.counts import log_normalised
+    X, names = log_normalised(adata)
+    var_names = np.array(names)
 
     n_genes = len(var_names)
 
@@ -544,21 +537,14 @@ def run_celltypist(adata, model_name, majority_voting=True, progress_callback=No
     if progress_callback:
         progress_callback("Preparing expression data for CellTypist...")
 
-    # CellTypist requires log1p normalized expression (target_sum=1e4).
-    # After clustering, adata.X may be z-scored from sc.pp.scale(),
-    # so reconstruct properly normalized data from adata.raw.
-    if adata.raw is not None:
-        adata_ct = adata.raw.to_adata()
-        # Check if raw holds unnormalized counts
-        if hasattr(adata_ct.X, 'data') and len(adata_ct.X.data) > 0:
-            max_val = adata_ct.X.data.max()
-        elif hasattr(adata_ct.X, 'max'):
-            max_val = adata_ct.X.max()
-        else:
-            max_val = 100
-        if max_val > 20:
-            sc.pp.normalize_total(adata_ct, target_sum=1e4)
-            sc.pp.log1p(adata_ct)
+    # CellTypist requires log1p normalised expression (target_sum=1e4).
+    # Rebuild it from the counts rather than trusting X, which may have
+    # been scaled by the cluster step.
+    from kosmic.scrna.counts import counts_adata, has_counts_layer
+    if has_counts_layer(adata):
+        adata_ct = counts_adata(adata)
+        sc.pp.normalize_total(adata_ct, target_sum=1e4)
+        sc.pp.log1p(adata_ct)
     else:
         adata_ct = adata.copy()
         if hasattr(adata_ct.X, 'data') and len(adata_ct.X.data) > 0:

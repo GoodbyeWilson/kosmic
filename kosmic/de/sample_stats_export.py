@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import sem
 
+from kosmic.scrna.counts import counts_adata, has_counts_layer
 from kosmic.scrna.inspect.detection import detect_species, format_gene_for_species
 
 
@@ -75,9 +76,10 @@ def _per_sample_pathway_means(adata, pathway_gene_sets: Mapping[str, List[str]],
     Returns '{pathway_name: [{condition, raw, norm}, ...]}'. Pathways
     with zero gene coverage are dropped.
     """
-    ref_var_names = (adata.raw.var_names if adata.raw is not None
-                     else adata.var_names)
-    is_mouse = detect_species(list(ref_var_names)) == 'mouse'
+    counts = counts_adata(adata, copy=False)
+    from_counts = has_counts_layer(adata)
+    ref_var_names = list(counts.var_names)
+    is_mouse = detect_species(ref_var_names) == 'mouse'
     coverage_var_names = set(ref_var_names)
 
     out: dict[str, list[dict]] = {}
@@ -93,13 +95,7 @@ def _per_sample_pathway_means(adata, pathway_gene_sets: Mapping[str, List[str]],
             condition = row['condition']
             sample_mask = adata.obs[sample_col] == sample_id
 
-            if adata.raw is not None:
-                raw_genes = [g for g in available_genes if g in adata.raw.var_names]
-                if not raw_genes:
-                    continue
-                sample_cells = adata.raw[sample_mask, raw_genes]
-            else:
-                sample_cells = adata[sample_mask, available_genes]
+            sample_cells = counts[sample_mask, available_genes]
 
             if sample_cells.n_obs == 0:
                 continue
@@ -107,7 +103,7 @@ def _per_sample_pathway_means(adata, pathway_gene_sets: Mapping[str, List[str]],
             raw_expr = _to_dense_float64(sample_cells.X)
             raw_sample_mean = float(np.mean(np.mean(raw_expr, axis=1)))
 
-            if adata.raw is not None:
+            if from_counts:
                 cell_totals = raw_expr.sum(axis=1, keepdims=True)
                 cell_totals[cell_totals == 0] = 1
                 norm_expr = np.log1p(raw_expr / cell_totals * 1e4)
@@ -176,27 +172,24 @@ def _per_sample_per_gene_means(adata, gene_list: List[str],
                                ) -> pd.DataFrame:
     """Return long-form '(sample, condition, gene, norm_mean, raw_mean)'
     dataframe for the requested gene list."""
+    counts = counts_adata(adata, copy=False)
+    from_counts = has_counts_layer(adata)
     rows: list[dict] = []
     for _, row in sample_df.iterrows():
         sample_id = row['sample']
         condition = row['condition']
         sample_mask = adata.obs[sample_col] == sample_id
 
-        if adata.raw is not None:
-            raw_genes = [g for g in gene_list if g in adata.raw.var_names]
-            if not raw_genes:
-                continue
-            sample_cells = adata.raw[sample_mask, raw_genes]
-            genes_to_use = raw_genes
-        else:
-            sample_cells = adata[sample_mask, gene_list]
-            genes_to_use = list(gene_list)
+        genes_to_use = [g for g in gene_list if g in counts.var_names]
+        if not genes_to_use:
+            continue
+        sample_cells = counts[sample_mask, genes_to_use]
 
         if sample_cells.n_obs == 0:
             continue
 
         raw_expr = _to_dense_float64(sample_cells.X)
-        if adata.raw is not None:
+        if from_counts:
             cell_totals = raw_expr.sum(axis=1, keepdims=True)
             cell_totals[cell_totals == 0] = 1
             norm_expr = np.log1p(raw_expr / cell_totals * 1e4)
@@ -221,9 +214,8 @@ def compute_gene_level_stats(adata, sample_df: pd.DataFrame,
                              gse_id: str,
                              ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Gene-level per-sample expression stats restricted to pathway genes."""
-    ref_var_names = (adata.raw.var_names if adata.raw is not None
-                     else adata.var_names)
-    is_mouse = detect_species(list(ref_var_names)) == 'mouse'
+    ref_var_names = list(counts_adata(adata, copy=False).var_names)
+    is_mouse = detect_species(ref_var_names) == 'mouse'
     ref_var_set = set(ref_var_names)
 
     all_pathway_genes: dict[str, list[str]] = {}

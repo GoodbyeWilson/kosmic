@@ -163,11 +163,12 @@ def annotate_by_reference(adata, reference, cluster_col='leiden',
     ref_cell_types = reference['cell_types']
     ref_species = reference.get('species', 'human')
 
-    # Get expression data (prefer raw)
-    if adata.raw is not None:
-        expr_var_names = list(adata.raw.var_names)
-    else:
-        expr_var_names = list(adata.var_names)
+    # Expression on the reference's scale: the centroids are mean
+    # log1p(CP10k) per type, so the query is compared as log1p(CP10k)
+    # too. (Earlier versions correlated mean raw counts from '.raw'
+    # against the log-scale centroids.)
+    from kosmic.scrna.counts import log_normalised
+    expr_X, expr_var_names = log_normalised(adata)
 
     # Detect species of query data
     query_species = detect_species(expr_var_names)
@@ -201,24 +202,14 @@ def annotate_by_reference(adata, reference, cluster_col='leiden',
     # Subset reference centroids to shared genes
     ref_centroids_shared = ref_centroids[:, shared_ref_indices]
 
-    # Get expression matrix for shared genes
-    if adata.raw is not None:
-        raw_adata = adata.raw.to_adata()
-        expr_df = pd.DataFrame(
-            raw_adata[:, shared_genes].X.toarray()
-            if hasattr(raw_adata[:, shared_genes].X, 'toarray')
-            else raw_adata[:, shared_genes].X,
-            index=adata.obs_names,
-            columns=shared_genes,
-        )
-        del raw_adata
-    else:
-        X = adata[:, shared_genes].X
-        expr_df = pd.DataFrame(
-            X.toarray() if hasattr(X, 'toarray') else X,
-            index=adata.obs_names,
-            columns=shared_genes,
-        )
+    # Expression matrix for the shared genes
+    col_idx = [expr_var_names.index(g) for g in shared_genes]
+    X = expr_X[:, col_idx]
+    expr_df = pd.DataFrame(
+        X.toarray() if hasattr(X, 'toarray') else np.asarray(X),
+        index=adata.obs_names,
+        columns=shared_genes,
+    )
 
     # Detect cluster column
     if cluster_col not in adata.obs.columns:
