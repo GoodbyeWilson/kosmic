@@ -38,7 +38,6 @@ class FilterWorker(BaseWorker):
         self.output_path = output_path
 
     def _run(self):
-        import scanpy as sc
         self.progress.emit("Filtering cells...")
         self.progress_pct.emit(10)
 
@@ -61,9 +60,13 @@ class FilterWorker(BaseWorker):
         adata_filtered = self.adata[mask].copy()
         self.progress_pct.emit(50)
 
-        # Optionally remove genes with zero expression
-        self.progress.emit("Removing zero-expression genes...")
-        sc.pp.filter_genes(adata_filtered, min_cells=1)
+        # The subset keeps the parent's full gene list. A gene with no
+        # counts in the kept cells is a measured zero, not a missing gene:
+        # HVG selection never picks it, the DE gene filter drops it per run
+        # with the reason recorded, and all-zero columns cost nothing in a
+        # sparse matrix. Dropping them gave every subset its own gene
+        # universe, which shrank the shared-gene intersection the atlas and
+        # the meta-analysis are built on.
         n_genes_filtered = adata_filtered.n_vars
         self.progress_pct.emit(70)
 
