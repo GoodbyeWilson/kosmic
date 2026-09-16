@@ -94,3 +94,48 @@ def test_harmonise_merges_duplicates_when_two_aliases_share_canonical():
     assert report.duplicates_merged == 1
     merged_idx = list(result.var_names).index('MERGED')
     np.testing.assert_array_equal(result.X[:, merged_idx], [3, 9])
+
+
+def test_merge_matches_column_sum_reference_and_keeps_order():
+    """The in-place merge (relabel columns, sum duplicates) must equal an
+    explicit column-sum, keep the first occurrence's position, and leave
+    non-merged columns untouched -- on sparse and dense input, with X and
+    a layer alike."""
+    import scipy.sparse as sp
+    rng = np.random.default_rng(7)
+    n_cells, n_genes = 300, 40
+    X = rng.poisson(1.5, size=(n_cells, n_genes)).astype(np.float32)
+    names = [f'G{i}' for i in range(n_genes)]
+    # three merge groups: (2,17,33)->M1, (5,6)->M2, and G0 renamed alone
+    lookup = {'G2': 'M1', 'G17': 'M1', 'G33': 'M1', 'G5': 'M2', 'G6': 'M2', 'G0': 'R0'}
+    reasons = {k: 'alias' for k in lookup}
+
+    def expected():
+        cols, out_names = [], []
+        seen = {}
+        for i, nm in enumerate(names):
+            new = lookup.get(nm, nm)
+            if new in seen:
+                cols[seen[new]] = cols[seen[new]] + X[:, i]
+            else:
+                seen[new] = len(cols)
+                cols.append(X[:, i].copy())
+                out_names.append(new)
+        return np.column_stack(cols), out_names
+
+    exp_X, exp_names = expected()
+    for sparse in (True, False):
+        obs = pd.DataFrame(index=[f'c{i}' for i in range(n_cells)])
+        var = pd.DataFrame(index=names)
+        a = ad.AnnData(X=sp.csr_matrix(X) if sparse else X.copy(), obs=obs, var=var)
+        a.layers['counts'] = sp.csr_matrix(X) if sparse else X.copy()
+        result, report = harmonise_adata(a, lookup=lookup, reasons=reasons)
+        assert list(result.var_names) == exp_names
+        assert report.duplicates_merged == 2
+        got = result.X.toarray() if sp.issparse(result.X) else np.asarray(result.X)
+        np.testing.assert_array_equal(got, exp_X)
+        lay = result.layers['counts']
+        lay = lay.toarray() if sp.issparse(lay) else np.asarray(lay)
+        np.testing.assert_array_equal(lay, exp_X)
+        if sparse:
+            assert result.X.has_canonical_format

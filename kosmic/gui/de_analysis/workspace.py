@@ -348,9 +348,20 @@ class DEWorkspace(QWidget):
         self.status_message.emit(f"Project: {folder_name}")
         self.project_directory_changed.emit(directory)
 
-        # Auto-advance to Load Data if no data loaded yet.
+        # Auto-advance to the Dataset page if no data loaded yet. Only
+        # activate the page when this workspace is the one on screen:
+        # its on_activated() loads the study's h5ad, and doing that on
+        # every study switch while the user is in scRNA held a second
+        # copy of the dataset in memory (11 GB on Reichart) for nothing.
+        # When DE is opened later, _activate_de calls on_activated then.
         if self.current_adata is None:
-            self.switch_tab(0)
+            if self.isVisible():
+                self.switch_tab(0)
+            else:
+                page_map = self.get_page_map()
+                if page_map:
+                    self.stack.setCurrentIndex(page_map[0])
+                    self.tab_changed.emit(0)
 
     def open_project_dialog(self):
         """Show a folder picker to set the project directory."""

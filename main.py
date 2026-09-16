@@ -568,6 +568,11 @@ class AppWindow(QMainWindow):
             return
 
         self._sync_de_sidebar_to_stack()
+        # Now that the workspace is on screen, let the Dataset page load
+        # the study if scRNA did not hand one over. set_project_directory
+        # above deliberately does not do this while DE is hidden.
+        if ws.current_adata is None:
+            ws.switch_tab(0)
         if ws.project_dir:
             self._explorer.update_data_status(
                 f"<b>Project:</b> {ws.project_dir.name}")

@@ -192,6 +192,22 @@ def count_locus_groups(var_names, locus_groups: Dict[str, str] = None,
     return counts
 
 
+def _remap_csr_columns_inplace(X, target, n_cols: int, chunk: int = 50_000_000) -> None:
+    """Map every column index of CSR ``X`` through ``target`` and sum
+    entries that land on the same (row, column). ``X`` ends up with
+    ``n_cols`` columns. Works on the existing index and data arrays;
+    the only transient allocation is scipy's trimmed copy after the sum.
+    """
+    idx = X.indices
+    for start in range(0, idx.size, chunk):
+        stop = min(start + chunk, idx.size)
+        idx[start:stop] = target[idx[start:stop]]
+    X._shape = (X.shape[0], int(n_cols))
+    X.has_sorted_indices = False
+    X.has_canonical_format = False
+    X.sum_duplicates()
+
+
 def harmonise_adata(adata, lookup: Dict[str, str] = None,
                     reasons: Dict[str, str] = None,
                     hgnc_path: str = None,
@@ -269,20 +285,29 @@ def harmonise_adata(adata, lookup: Dict[str, str] = None,
                       for name in duplicates]
 
         n_kept = len(kept_positions)
-        G = sp.csc_matrix(
-            (np.ones(adata.n_vars, dtype=np.float32),
-             (np.arange(adata.n_vars), target)),
-            shape=(adata.n_vars, n_kept))
         _progress(f"Merging {len(duplicates):,} duplicate symbols "
                   f"({adata.n_vars - n_kept:,} columns)...")
 
         def _merge(M):
+            """Relabel columns to their kept index and sum what lands together.
+
+            In place on a sparse matrix: the merge is only a change of
+            column index (secondary -> primary) followed by summing the
+            entries that now share a cell, which scipy does on the
+            existing arrays. Nothing the size of the matrix is
+            allocated -- on Reichart (881,081 cells, 1.35 billion
+            non-zeros) a product against a merge matrix needed the
+            original and the result live at once and exhausted 64 GB.
+            """
             if M is None:
                 return None
-            out = M @ G
-            if sp.issparse(out):
-                out = sp.csr_matrix(out)
-                out.sort_indices()
+            if sp.issparse(M):
+                M = M.tocsr() if not sp.isspmatrix_csr(M) else M
+                _remap_csr_columns_inplace(M, target, n_kept)
+                return M
+            dense = np.asarray(M)
+            out = np.zeros((dense.shape[0], n_kept), dtype=dense.dtype)
+            np.add.at(out, (slice(None), target), dense)
             return out
 
         kept_mask = np.zeros(adata.n_vars, dtype=bool)
