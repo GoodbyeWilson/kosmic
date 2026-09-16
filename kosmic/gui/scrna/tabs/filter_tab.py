@@ -695,6 +695,9 @@ class FilterTab(SidebarPage):
             ws = self.main_window
             if ws is not None and hasattr(ws, 'set_adata'):
                 ws.set_adata(adata_filtered, file_path=output_path)
+                # This tab's own reference would otherwise keep the parent
+                # alive next to the subset until the tab is next activated.
+                self.adata = adata_filtered
                 # Record the subset as a provenance stage on the new study,
                 # pointing back to the parent file it was derived from.
                 if hasattr(ws, 'record_provenance'):
