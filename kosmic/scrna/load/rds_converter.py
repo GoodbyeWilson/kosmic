@@ -11,7 +11,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -53,6 +53,17 @@ def find_r_executable() -> Optional[str]:
             return str(candidates[0])
 
     return None
+
+
+def _r_subprocess_env() -> Dict[str, str]:
+    """Environment for R subprocesses.
+
+    macOS: Seurat's dependencies commonly bundle a second OpenMP runtime,
+    which aborts the R process with "OMP: Error #15" unless this is set.
+    """
+    env = os.environ.copy()
+    env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+    return env
 
 
 # R script template (Issue #8 fix: uses commandArgs, no path interpolation)
@@ -525,7 +536,12 @@ def run_rds_to_intermediate(
     Returns
     -------
     Path or None
-        Path to the intermediate directory, or None on failure.
+        Path to the intermediate directory, or None if R itself isn't found.
+
+    Raises
+    ------
+    RuntimeError
+        If the R script runs but fails, with the captured R error output.
     """
 
     r_exe = find_r_executable()
@@ -556,6 +572,7 @@ def run_rds_to_intermediate(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=_r_subprocess_env(),
     )
 
     error_lines = []
@@ -579,7 +596,9 @@ def run_rds_to_intermediate(
     process.wait()
 
     if process.returncode != 0:
-        return None
+        detail = "\n".join(error_lines) if error_lines else (
+            f"R exited with code {process.returncode} and no error output.")
+        raise RuntimeError(f"R export failed:\n{detail}")
 
     return intermediate_dir
 
@@ -630,6 +649,7 @@ def load_rds_via_r(
             capture_output=True,
             text=True,
             timeout=1800,
+            env=_r_subprocess_env(),
         )
 
         output = result.stdout + result.stderr
