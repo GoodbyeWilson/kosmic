@@ -102,7 +102,14 @@ def run_qc_pipeline(adata, params: Optional[dict] = None):
           'max_genes' (int, default 0)   -- max genes/cell; 0 = disabled
           'min_counts' (int, default 0)  -- min total counts/cell
           'max_counts' (int, default 0)  -- max total counts/cell
-          'min_cells' (int, default 3)   -- min cells/gene
+          'min_cells' (int, default 0)   -- min cells/gene; 0 = disabled.
+                                           Off by default: a gene seen in
+                                           a handful of cells is a
+                                           measured near-zero, never an
+                                           HVG, and the DE gene filter
+                                           sets it aside per run; dropping
+                                           it here gives each study its
+                                           own gene list.
           'max_mt' (float, default 0)    -- max %MT; 0 = disabled
           'preserve_counts_layer' (bool, default True)
                                            -- keep raw counts in
@@ -132,7 +139,7 @@ def run_qc_pipeline(adata, params: Optional[dict] = None):
     max_genes = p.get('max_genes', 0)
     min_counts = p.get('min_counts', 0)
     max_counts = p.get('max_counts', 0)
-    min_cells = p.get('min_cells', 3)
+    min_cells = p.get('min_cells', 0)
     max_mt = p.get('max_mt', 0)
     preserve_counts_layer = p.get('preserve_counts_layer', True)
     signature_panels = p.get('signature_panels', None)

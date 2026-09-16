@@ -16,9 +16,9 @@ where count data reads properly.
 ## Filter
 
 Cells are removed, in this order: fewer than *Min genes* or more than
-*Max genes*; fewer than *Min counts* or more than *Max counts*; then
-genes seen in fewer than 3 cells are dropped; then cells over *Max MT %*
-on the recomputed metrics. The original counts are kept in
+*Max genes*; fewer than *Min counts* or more than *Max counts*; then,
+only if *Min cells / gene* is set, genes seen in fewer cells than that
+are dropped; then cells over *Max MT %* on the recomputed metrics. The original counts are kept in
 `layers['counts']` before anything is removed.
 
 | Setting | Default | What it catches |
@@ -27,6 +27,7 @@ on the recomputed metrics. The original counts are kept in
 | Max genes | 6,000 | likely doublets; 0 = off |
 | Min / Max counts | 0 (off) | the same, by depth; use when genes-per-cell is uninformative |
 | Max MT % | 20 | dying cells with leaky membranes |
+| Min cells / gene | 0 (off) | genes detected in almost no cells. Off because a gene seen in two of 600,000 nuclei is a measured near-zero, never an HVG, and the DE gene filter sets it aside per run; dropping it here gives each study its own gene list, which shrinks the genes the atlas and the meta-analysis have in common |
 
 A max bound of 0 is off, in the filter and in the histogram's
 pass/removed preview alike. Think before capping genes or counts in a
@@ -37,7 +38,8 @@ doublets. Scrublet (below) is the doublet filter.
 On a deposited dataset the authors have already filtered, set the floors
 at or below theirs and the caps off, so this step removes nothing but
 creates the counts layer and normalises; the number removed is reported
-and recorded, and should be near zero.
+and recorded, and should be near zero. The number of genes kept is
+reported beside the cells, so a change to the gene list is never silent.
 
 Two ways to set them:
 
