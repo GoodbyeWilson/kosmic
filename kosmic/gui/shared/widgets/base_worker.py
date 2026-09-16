@@ -93,3 +93,23 @@ class BaseWorker(QThread):
             self.failed.emit(f"{exc}\n{traceback.format_exc()}")
         else:
             self.finished_ok.emit(result)
+        finally:
+            self._release_inputs()
+
+    def _release_inputs(self) -> None:
+        """Drop references to any AnnData the worker was given.
+
+        Owners keep their last worker as an attribute so the QThread
+        stays alive, and the worker keeps the dataset it was handed. Once
+        the result has been emitted that dataset is dead weight: after a
+        subset the parent (16 GB on Reichart) stayed in memory because the
+        finished FilterWorker still pointed at it. The result object is
+        the caller's; only the inputs are released here.
+        """
+        try:
+            import anndata as ad
+        except ImportError:  # pragma: no cover
+            return
+        for name, value in list(vars(self).items()):
+            if isinstance(value, ad.AnnData):
+                setattr(self, name, None)
