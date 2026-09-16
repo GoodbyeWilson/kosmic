@@ -51,13 +51,17 @@ is the grouping to correct for:
 - On a **shared atlas** it is `study`. Without it the clusters will
   substantially *be* the studies. This is the one place Harmony is not
   optional.
-- Within **one study** it is the sample or donor column — useful when
-  samples were processed on different days and the UMAP shows it.
+- Within **one study** it is the sample or donor column. Every
+  multi-donor study has the donor as its dominant technical batch — each
+  donor is its own nuclei preparation and 10x lane — so Harmony is on by
+  default whenever a sample column is set, correcting on it.
 
 **Merge across** — an optional second variable, so its groups land in
-the same clusters. Set it to the condition column when you want one
-cardiomyocyte cluster rather than a diseased one and a healthy one.
-Leave it blank to keep disease-specific cell states separate.
+the same clusters. It is blank by default and stays blank unless you
+set it: putting the condition column here pulls disease and control
+cells into shared clusters, which hides disease-specific states in the
+embedding. Set it only when you want one cardiomyocyte cluster rather
+than a diseased one and a healthy one.
 
 This affects clustering and the UMAP only. Differential expression runs
 on the raw counts and never sees the corrected embedding — so Harmony
