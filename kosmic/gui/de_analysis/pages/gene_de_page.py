@@ -391,6 +391,23 @@ class GeneDEPage(SidebarTabbedPage):
         self.min_counts_spin.valueChanged.connect(self._on_min_counts_changed)
         filters_lay.addWidget(self.min_counts_spin)
 
+        # Gene universe: the shared atlas's gene list, when the project
+        # has one. The inner join that builds the atlas keeps only genes
+        # every study carries, so a mega-analysis on it tests that list;
+        # ticking this tests the per-study results over the same list.
+        self.atlas_genes_check = QCheckBox("Shared atlas genes only")
+        self.atlas_genes_check.setToolTip(
+            "Correct and report over the genes the project's shared atlas\n"
+            "holds (the genes every study carries), so this study's results\n"
+            "are tested over the same list as a mega-analysis on the atlas.\n\n"
+            "The DESeq2 fit still uses every gene -- size factors and the\n"
+            "dispersion trend want the whole transcriptome -- only the BH\n"
+            "denominator and the result table are restricted. The study's\n"
+            "own expression filter still applies within that list.")
+        self.atlas_genes_check.toggled.connect(self._on_atlas_genes_toggled)
+        filters_lay.addWidget(self.atlas_genes_check)
+        self._refresh_atlas_genes_option()
+
 
         # Built here, shown in the Advanced dialog rather than the sidebar:
         # all three are at standard values and an ordinary run never
@@ -1117,6 +1134,7 @@ class GeneDEPage(SidebarTabbedPage):
         self.batch_btn.setEnabled(has_data)
         self._ge_run_btn.setEnabled(has_data)
         self._refresh_study_control()
+        self._refresh_atlas_genes_option()
         self._refresh_dataset_card()
         self._refresh_filter_summary()
         self._refresh_card_summaries()
@@ -1194,6 +1212,7 @@ class GeneDEPage(SidebarTabbedPage):
             'detection_min_donor_frac': round(
                 self.detection_donor_frac_spin.value(), 4),
             'gene_filter_per_study': bool(self._per_study_filter_col()),
+            'gene_universe': self._gene_universe_record(),
             'counts_layer': self._selected_counts_layer() or 'raw',
             'indep_filter': self.indep_filter_check.isChecked(),
             'cooks_filter': self.cooks_filter_check.isChecked(),
@@ -1245,6 +1264,7 @@ class GeneDEPage(SidebarTabbedPage):
                 'detection_min_donor_frac': round(
                     self.detection_donor_frac_spin.value() / 100.0, 4),
                 'gene_filter_per_study': bool(self._per_study_filter_col()),
+                'gene_universe': self._gene_universe_record(),
                 'filter_min_count': self.filter_min_count_spin.value(),
                 'filter_min_samples': int(self.filter_min_samples_spin.value()),
                 'count_source': self._selected_counts_layer() or 'raw',
@@ -1449,6 +1469,57 @@ class GeneDEPage(SidebarTabbedPage):
 
     def _on_min_counts_changed(self, value):
         self.ws.min_counts = value
+        self._refresh_run_dirty()
+
+    # --- Gene universe (shared atlas) ---
+
+    def _atlas_h5ad(self):
+        """The project's shared atlas file, or None when there is none."""
+        from kosmic.paths import master_h5ad_path
+        study_dir = getattr(self.ws, 'project_dir', None)
+        if not study_dir:
+            return None
+        path = master_h5ad_path(Path(study_dir).parent)
+        return path if path.exists() else None
+
+    def _atlas_genes(self):
+        """Gene names of the shared atlas (read once per file)."""
+        path = self._atlas_h5ad()
+        if path is None:
+            return None
+        key = (str(path), path.stat().st_mtime_ns)
+        cached = getattr(self, '_atlas_genes_cache', None)
+        if cached and cached[0] == key:
+            return cached[1]
+        from kosmic.scrna.load.gene_overlap import read_var_names
+        genes = set(read_var_names(path))
+        self._atlas_genes_cache = (key, genes)
+        return genes
+
+    def _refresh_atlas_genes_option(self):
+        """Enable the option only when the project has an atlas; show its size."""
+        genes = self._atlas_genes()
+        self.atlas_genes_check.blockSignals(True)
+        if genes:
+            self.atlas_genes_check.setEnabled(True)
+            self.atlas_genes_check.setText(f"Shared atlas genes only ({len(genes):,})")
+            self.atlas_genes_check.setChecked(self.ws.gene_universe == 'shared_atlas')
+        else:
+            self.atlas_genes_check.setEnabled(False)
+            self.atlas_genes_check.setChecked(False)
+            self.atlas_genes_check.setText("Shared atlas genes only (no atlas in this project)")
+            self.ws.gene_universe = None
+        self.atlas_genes_check.blockSignals(False)
+
+    def _gene_universe_record(self):
+        """What the provenance says about the gene universe."""
+        if getattr(self.ws, 'gene_universe', None) == 'shared_atlas':
+            genes = self._atlas_genes()
+            return f"shared atlas ({len(genes):,} genes)" if genes else "shared atlas"
+        return "all genes"
+
+    def _on_atlas_genes_toggled(self, on: bool):
+        self.ws.gene_universe = 'shared_atlas' if on else None
         self._refresh_run_dirty()
 
     # --- Run DE ---
@@ -2186,13 +2257,21 @@ class GeneDEPage(SidebarTabbedPage):
         used to run discovery whatever mode was selected, because it
         never asked for this.
         """
-        if (getattr(self.ws, 'analysis_mode', None) != 'scoring'
-                or not self.ws.pathway_gene_sets):
-            return None
-        genes = set()
-        for members in self.ws.pathway_gene_sets.values():
-            genes.update(members)
-        return genes or None
+        genes = None
+        if (getattr(self.ws, 'analysis_mode', None) == 'scoring'
+                and self.ws.pathway_gene_sets):
+            genes = set()
+            for members in self.ws.pathway_gene_sets.values():
+                genes.update(members)
+            genes = genes or None
+        # The shared-atlas universe narrows the same denominator: alone in
+        # discovery mode, intersected with the committed sets in hypothesis
+        # mode.
+        if getattr(self.ws, 'gene_universe', None) == 'shared_atlas':
+            atlas = self._atlas_genes()
+            if atlas:
+                genes = atlas if genes is None else (genes & atlas)
+        return genes
 
     def _start_batch(self, cell_type_col, cell_types):
         gse_id = self.ws.gse_accession or (

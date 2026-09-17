@@ -104,6 +104,11 @@ class DEWorkspace(QWidget):
         # testable on the DCM master, against 12 at the config value).
         self.min_cells = DE_MIN_CELLS
         self.min_counts = DE_MIN_COUNTS   # summed transcripts per donor; 0 = off
+        # Gene universe for BH correction and the result table: None
+        # (every gene the fit kept) or 'shared_atlas' (the genes the
+        # project's shared atlas holds, so per-study results are tested
+        # over the same list as the mega-analysis on the atlas).
+        self.gene_universe = None
         self.de_method = 'deseq2'
         self.unit = 'sample'   # 'sample' (pseudobulk) or 'cell' (scanpy Wilcoxon)
         self.geneset_label = 'Metabolic -- Comprehensive (12 pathways)'
