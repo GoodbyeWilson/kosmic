@@ -100,7 +100,16 @@ def _read_obs_metadata(h5ad_path: Path) -> dict:
             idx_key = idx_key.decode('utf-8')
         if idx_key and idx_key in obs_group:
             n_obs = len(read_elem(obs_group[idx_key]))
-
+        # Cells the roles exclude: the codes array is one small int per
+        # cell, so this is cheap even for a million cells.
+        n_excluded = 0
+        if '_role' in obs_group:
+            try:
+                import pandas as pd
+                roles = pd.Series(read_elem(obs_group['_role'])).astype(str)
+                n_excluded = int((roles.str.lower() == 'exclude').sum())
+            except (OSError, KeyError, ValueError, AttributeError):
+                n_excluded = 0
         for col, item in obs_group.items():
             if col == idx_key:
                 continue
@@ -121,7 +130,8 @@ def _read_obs_metadata(h5ad_path: Path) -> dict:
             # uniqueness across millions of cells isn't worth it for
             # this UI (the role-mapping uses categorical cols anyway).
 
-    return {'columns': columns, 'values': values, 'n_obs': n_obs}
+    return {'columns': columns, 'values': values, 'n_obs': n_obs,
+            'n_excluded': n_excluded}
 
 
 def _pick_source_h5ad(study_dir: Path) -> Optional[Path]:
@@ -732,6 +742,7 @@ class CombineDialog(QDialog):
 
     def _refresh_estimates(self) -> None:
         cap = None if self._uncap_check.isChecked() else self._cap_spin.value()
+        drop_excluded = self._drop_excluded_check.isChecked()
         total_master_cells = 0
         n_selected = 0
         for row in range(self._study_table.rowCount()):
@@ -741,6 +752,10 @@ class CombineDialog(QDialog):
                 n_cells = int(n_cells_text)
             except ValueError:
                 n_cells = 0
+            if drop_excluded:
+                name_item = self._study_table.item(row, 1)
+                meta = self._study_obs.get(name_item.text() if name_item else '', {})
+                n_cells = max(0, n_cells - int(meta.get('n_excluded', 0)))
             if cb and cb.isChecked():
                 will_use = n_cells if cap is None else min(cap, n_cells)
                 total_master_cells += will_use
@@ -750,9 +765,10 @@ class CombineDialog(QDialog):
                 self._study_table.item(row, 5).setText("")
 
         cap_note = "all cells" if cap is None else f"cap {cap:,}"
+        excl_note = ", excluded cells left out" if drop_excluded else ""
         self._estimate_label.setText(
             f"Master will contain ~{total_master_cells:,} cells from "
-            f"{n_selected} stud{'y' if n_selected == 1 else 'ies'} ({cap_note}).")
+            f"{n_selected} stud{'y' if n_selected == 1 else 'ies'} ({cap_note}{excl_note}).")
 
         self._refresh_merge_asymmetry()
 
