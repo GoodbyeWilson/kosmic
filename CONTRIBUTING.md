@@ -246,5 +246,11 @@ Add a title for any new stage key to `_STAGE_TITLES` in
    from them.
 4. Open an issue first for anything non-trivial, so we can agree the
    approach before you spend time on it.
+5. No AI attribution in commit messages or PR descriptions — no
+   `Co-Authored-By: Claude …` trailer, no "Generated with Claude Code"
+   line. GitHub turns such trailers into a listed contributor. The CI
+   job *no AI attribution* refuses a PR that carries one, and the
+   committed `.claude/settings.json` turns the byline off for Claude
+   Code users; other assistants need the equivalent setting.
 
 Small, focused PRs get reviewed faster than large ones.
