@@ -203,3 +203,20 @@ def test_no_sex_designation_writes_no_sex_column(tmp_path):
     s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control"])
     m = ad.read_h5ad(concat_studies([s1, s2], tmp_path / "master.h5ad"))
     assert "sex" not in m.obs.columns
+
+
+def test_text_age_in_one_study_and_float_in_another_concatenate(tmp_path):
+    """Koenig recorded age as a categorical of strings ('68', ''), Chaffin
+    as float; mixed, the on-disk concat could not write the column."""
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad", ["disease", "control", "disease"])
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control", "control"])
+    a1 = ad.read_h5ad(s1)
+    a1.obs["age"] = pd.Categorical(["68", "", "53"])
+    a1.write_h5ad(s1)
+    a2 = ad.read_h5ad(s2)
+    a2.obs["age"] = [56.0, np.nan]
+    a2.write_h5ad(s2)
+    m = ad.read_h5ad(concat_studies([s1, s2], tmp_path / "master.h5ad"))
+    assert m.obs["age"].dtype.kind == "f"
+    vals = m.obs["age"].tolist()
+    assert vals[0] == 68.0 and np.isnan(vals[1]) and vals[2] == 53.0 and vals[3] == 56.0 and np.isnan(vals[4])
