@@ -21,6 +21,7 @@ from kosmic.reference.cell_type_focus import load_focus_presets
 from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
 from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
+from kosmic.scrna.annotate.cluster_qc import flag_clusters
 
 
 _FOCUS_PRESET_QSETTING_KEY = 'annotate/last_focus_preset'
@@ -904,6 +905,7 @@ class AnnotateTab(QWidget):
             Column("ORA p-val",    "ora_text",    "s", na_text="—"),
             Column("Confidence",   "conf",        "s"),
             Column("Runner-up",    "runner_text", "s"),
+            Column("Flags",        "flags_text",  "s"),
         ])
         header = self.cluster_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -1074,6 +1076,18 @@ class AnnotateTab(QWidget):
         cluster_counts = (
             self.adata.obs[cluster_col].value_counts().sort_index())
 
+        # Cluster-level quality signals (weak match, MT markers, doublet
+        # score, authors' unlabelled cells): the per-cell QC cannot see
+        # these, and every one of them was reported 'High' before.
+        try:
+            flags = flag_clusters(
+                self.adata, cluster_col=cluster_col,
+                type_col=ct_col or 'cell_type', author_col=author_col,
+                details=details)
+        except Exception as exc:  # flags are advisory; never block the table
+            self._on_status(f"Cluster flags unavailable: {exc}")
+            flags = {}
+
         author_labels = None
         if author_col:
             author_labels = author_label_series(self.adata.obs[author_col])
@@ -1143,6 +1157,8 @@ class AnnotateTab(QWidget):
                 'ora_text':    ora_text,
                 'conf':        conf_text,
                 'runner_text': runner_text,
+                'flags_text':  (flags[str(cluster)].text()
+                                if str(cluster) in flags else ""),
                 # Row-level flags for decorate (hidden from rendering)
                 '_m_found':    m_found if m_found is not None else -1,
                 '_has_fine':   has_fine,
@@ -1177,12 +1193,22 @@ class AnnotateTab(QWidget):
                     item.setForeground(green if p < DEFAULT_FDR else red)
             elif col_i == 7:
                 conf = row['conf']
-                if conf == "Ambiguous":
+                if conf in ("Ambiguous", "Weak"):
                     item.setForeground(yellow)
                 elif conf == "Below threshold":
                     item.setForeground(red)
                 elif conf == "High":
                     item.setForeground(green)
+            elif col_i == 9:
+                if row['flags_text']:
+                    item.setForeground(yellow)
+                    item.setToolTip(
+                        row['flags_text'].replace('; ', chr(10))
+                        + chr(10) * 2
+                        + "Look at this cluster before trusting its label: "
+                        "these are the signs of doublets or damaged cells, "
+                        "which the per-cell QC cannot see. Right-click to "
+                        "mark it Unknown if the markers confirm it.")
 
         self.cluster_table.set_data(df, decorate=_decorate)
 

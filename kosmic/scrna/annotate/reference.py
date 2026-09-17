@@ -25,6 +25,11 @@ from pathlib import Path
 
 REFERENCES_DIR = Path(str(files("kosmic.reference.atlases")))
 
+# Confidence tiers for a cluster's best correlation (see cluster_qc.py for
+# where these came from).
+AMBIGUOUS_MARGIN = 0.10   # best minus runner-up below this: 'Ambiguous'
+WEAK_SCORE = 0.85         # best correlation below this: 'Weak'
+
 # Built-in reference catalog. Empty on purpose: every '.json.gz' in
 # kosmic/reference/atlases/ -- the two shipped LV references included -- is
 # discovered by 'list_available_references' and describes itself (name,
@@ -248,12 +253,20 @@ def annotate_by_reference(adata, reference, cluster_col='leiden',
         best_type, best_corr = sorted_corr[0]
         runner_up, runner_up_corr = sorted_corr[1] if len(sorted_corr) > 1 else ('None', 0)
 
+        # 'High' used to mean a margin over 0.05. On the DCM studies every
+        # doublet and low-quality cluster cleared that (margins 0.06-0.38)
+        # and was reported High; clean clusters scored >= 0.85 with margins
+        # >= 0.17. The cluster-QC flags (cluster_qc.py) carry the other
+        # evidence; this tier only describes the correlation itself.
         if best_corr < min_correlation:
             assigned_type = 'Unknown'
             confidence = 'Low correlation'
-        elif best_corr - runner_up_corr < 0.05:
+        elif best_corr - runner_up_corr < AMBIGUOUS_MARGIN:
             assigned_type = best_type
             confidence = 'Ambiguous'
+        elif best_corr < WEAK_SCORE:
+            assigned_type = best_type
+            confidence = 'Weak'
         else:
             assigned_type = best_type
             confidence = 'High'

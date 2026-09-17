@@ -136,6 +136,32 @@ agree, and cells the authors left unlabelled are counted separately.
 **Use existing cell_type** keeps labels that came with the dataset and
 skips annotation.
 
+The **Flags** column is where to look first. The QC step filters cells
+one at a time, and a doublet or a damaged nucleus passes every per-cell
+threshold: a doublet has more genes than a real cell and ordinary
+mitochondrial content, and a stressed nucleus at 0.7% mitochondrial reads
+clears a 10% cut-off. They show up only after clustering, as a small
+cluster that matches no reference type well. A cluster is flagged, with
+the reasons in the cell and on hover, when any of these hold:
+
+- its best reference correlation is below 0.85, or the runner-up is
+  within 0.10 of it (**Confidence** says *Weak* or *Ambiguous* for the
+  same reasons);
+- three or more of its top ten marker genes are mitochondrial or
+  ribosomal;
+- a doublet-score column is present (the authors' Scrublet scores, or
+  KOSMIC's) and the cluster's median is at least twice the study's;
+- the authors of the deposit left most of its cells unlabelled, or their
+  labels are split (the dominant one covers under 60%).
+
+A higher gene count than the other clusters of the same type is added as
+supporting evidence but never flags on its own; two clusters of one type
+can differ in depth for honest reasons. On the five DCM studies these
+rules picked out every doublet and low-quality cluster (2–3% of cells
+per study) and nothing else. A flagged cluster is not removed for you:
+open Marker Check, and if the markers confirm it, right-click the row
+and mark it *Unknown* so it stays out of the per-cell-type analyses.
+
 Whatever the method, go to **Marker Check** next and look. Automated
 annotation is right often enough to be trusted and wrong often enough
 that you must not.
