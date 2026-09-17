@@ -83,6 +83,7 @@ def _read_obs_metadata(h5ad_path: Path) -> dict:
     arrays just to discover values.
     """
     import h5py
+    from anndata.io import read_elem
 
     columns: list[str] = []
     values: dict[str, list[str]] = {}
@@ -91,12 +92,14 @@ def _read_obs_metadata(h5ad_path: Path) -> dict:
         if 'obs' not in h:
             return {'columns': [], 'values': {}, 'n_obs': 0}
         obs_group = h['obs']
-        # n_obs: length of the index dataset.
+        # n_obs: length of the index. read_elem handles whatever encoding
+        # it was written with -- a raw '.shape[0]' breaks on pandas' now
+        # common nullable-string encoding, which stores it as a Group.
         idx_key = obs_group.attrs.get('_index')
         if isinstance(idx_key, bytes):
             idx_key = idx_key.decode('utf-8')
         if idx_key and idx_key in obs_group:
-            n_obs = int(obs_group[idx_key].shape[0])
+            n_obs = len(read_elem(obs_group[idx_key]))
 
         for col, item in obs_group.items():
             if col == idx_key:
