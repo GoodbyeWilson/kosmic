@@ -19,6 +19,7 @@ from typing import Callable, Optional, Sequence
 
 import anndata as ad
 import numpy as np
+import pandas as pd
 
 
 # obs columns carried from each study onto the master. The atlas labels
@@ -206,6 +207,15 @@ def concat_studies(
                 if c not in a.obs.columns:
                     a.obs[c] = np.nan if c == 'age' else ''
             a.obs = a.obs[[c for c in _OBS_KEEP_CANDIDATES if c in a.obs.columns]]
+            # One dtype per column across studies, or the on-disk concat
+            # cannot write it: age is numeric (a study that recorded it as
+            # text, '68' or '', becomes 68.0 / NaN), the rest are strings.
+            if 'age' in a.obs.columns:
+                a.obs['age'] = pd.to_numeric(
+                    a.obs['age'].astype(object).replace('', np.nan), errors='coerce').astype(float)
+            for c in a.obs.columns:
+                if c != 'age' and (isinstance(a.obs[c].dtype, pd.CategoricalDtype) or a.obs[c].dtype == object):
+                    a.obs[c] = a.obs[c].astype(object).where(a.obs[c].notna(), '').astype(str)
 
             temp_path = temp_dir / f"{accession}.h5ad"
             a.write_h5ad(temp_path)
