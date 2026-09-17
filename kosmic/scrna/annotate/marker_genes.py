@@ -31,6 +31,8 @@ def compute_cluster_marker_genes(
     cluster_col: str = 'leiden',
     method: str = 'wilcoxon',
     use_raw: Optional[bool] = None,
+    max_cells_per_cluster: Optional[int] = None,
+    seed: int = 0,
 ):
     """Compute per-cluster differential expression. Caches in 'uns'.
 
@@ -47,6 +49,16 @@ def compute_cluster_marker_genes(
         log-normalised, which is what the Wilcoxon test expects; '.raw'
         in KOSMIC files held raw counts, so ranking on it confounded
         every gene with sequencing depth.
+    max_cells_per_cluster : int, optional
+        Rank on at most this many cells from each cluster, drawn at
+        random with 'seed'. None (default) uses the configured
+        MARKER_MAX_CELLS_PER_CLUSTER; 0 uses every cell. The Wilcoxon
+        test ranks every cell for every gene, so its memory grows with
+        the cell count -- on a 400,000-nucleus study it needs about 14 GB
+        over the study itself, and a million-cell atlas does not fit.
+        A few thousand cells per cluster rank the same markers; the
+        result records 'max_cells_per_cluster' and 'n_cells_used' in
+        its 'params'.
 
     Returns
     -------
@@ -80,15 +92,57 @@ def compute_cluster_marker_genes(
 
     if use_raw is None:
         use_raw = False
+    if max_cells_per_cluster is None:
+        from kosmic import MARKER_MAX_CELLS_PER_CLUSTER
+        max_cells_per_cluster = MARKER_MAX_CELLS_PER_CLUSTER
 
-    sc.tl.rank_genes_groups(
-        adata,
-        groupby=cluster_col,
-        method=method,
-        use_raw=use_raw,
-        pts=True,
+    idx = _subsample_per_cluster(adata.obs[cluster_col], max_cells_per_cluster, seed)
+    if idx is None:
+        sc.tl.rank_genes_groups(
+            adata,
+            groupby=cluster_col,
+            method=method,
+            use_raw=use_raw,
+            pts=True,
+        )
+        return adata
+
+    # A small AnnData of the sampled rows; X rows are copied once (a few
+    # thousand cells per cluster), nothing else about 'adata' is touched.
+    import anndata as ad
+    sub = ad.AnnData(
+        X=adata.X[idx],
+        obs=adata.obs.iloc[idx][[cluster_col]].copy(),
+        var=pd.DataFrame(index=adata.var_names),
     )
+    sub.obs[cluster_col] = sub.obs[cluster_col].cat.remove_unused_categories()
+    sc.tl.rank_genes_groups(
+        sub, groupby=cluster_col, method=method, use_raw=False, pts=True)
+    result = sub.uns['rank_genes_groups']
+    result['params']['max_cells_per_cluster'] = int(max_cells_per_cluster)
+    result['params']['n_cells_used'] = int(len(idx))
+    adata.uns['rank_genes_groups'] = result
     return adata
+
+
+def _subsample_per_cluster(groups: pd.Series, cap: Optional[int], seed: int):
+    """Row indices with at most 'cap' cells per cluster, or None when no
+    cluster exceeds the cap (so the caller ranks on every cell)."""
+    if not cap or cap <= 0:
+        return None
+    counts = groups.value_counts()
+    if counts.max() <= cap:
+        return None
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    codes = groups.astype(str).values
+    keep = []
+    for label, n in counts.items():
+        rows = np.flatnonzero(codes == str(label))
+        if n > cap:
+            rows = rng.choice(rows, size=cap, replace=False)
+        keep.append(rows)
+    return np.sort(np.concatenate(keep))
 
 
 def get_top_marker_genes(
