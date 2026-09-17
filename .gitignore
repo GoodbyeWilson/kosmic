@@ -38,10 +38,7 @@ dev/simulations/Heart Logo/
 
 # Editor / assistant tooling (machine-local: launch.json hardcodes
 # an interpreter path, and the lock file is per-session state)
-# Claude Code: the shared project setting is committed (it turns off the
-# AI attribution byline for everyone); everything else in there is local.
-.claude/*
-!.claude/settings.json
+.claude/
 
 # IDE
 .vscode/
