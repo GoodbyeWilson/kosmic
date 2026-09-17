@@ -57,24 +57,52 @@ def fix_nan_in_sparse(adata):
     """
     from scipy import sparse as sp
 
+    # In place: 'nan_to_num' otherwise allocates a full copy of the data
+    # array, which on a large study is several GB for nothing.
     if sp.issparse(adata.X):
-        data = adata.X.data
-        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-        adata.X.data = data
+        np.nan_to_num(adata.X.data, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
     else:
-        adata.X = np.nan_to_num(adata.X, nan=0.0, posinf=0.0, neginf=0.0)
+        np.nan_to_num(adata.X, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
     return adata
+
+
+def cell_filter_mask(obs, *, min_genes=0, max_genes=0, min_counts=0,
+                     max_counts=0, max_mt=0.0) -> np.ndarray:
+    """Boolean mask of cells passing every enabled threshold (0 = off).
+
+    Reads the columns 'calculate_qc_metrics' writes: 'n_genes_by_counts',
+    'total_counts', 'pct_counts_mt'. A threshold whose column is missing
+    is ignored.
+    """
+    keep = np.ones(len(obs), dtype=bool)
+    if 'n_genes_by_counts' in obs.columns:
+        g = obs['n_genes_by_counts'].to_numpy()
+        if min_genes > 0:
+            keep &= g >= min_genes
+        if max_genes > 0:
+            keep &= g <= max_genes
+    if 'total_counts' in obs.columns:
+        c = obs['total_counts'].to_numpy()
+        if min_counts > 0:
+            keep &= c >= min_counts
+        if max_counts > 0:
+            keep &= c <= max_counts
+    if max_mt > 0 and 'pct_counts_mt' in obs.columns:
+        keep &= obs['pct_counts_mt'].to_numpy() < max_mt
+    return keep
 
 
 def run_qc_pipeline(adata, params: Optional[dict] = None):
     """Run the QC filter pipeline on a scRNA-seq AnnData.
 
-    Mutates 'adata' in place. 'sc.pp.filter_cells' /
-    'sc.pp.filter_genes' are already in-place; the 'max_counts' and
-    'max_mt' slicing steps create a new view-then-copy, so the
-    *returned* object may be a different instance than the input.
-    Callers should always rebind: 'adata, stats = run_qc_pipeline(adata, ...)'
-    and treat the original reference as invalid.
+    Mutates 'adata' in place and returns the same object; callers may
+    still rebind ('adata, stats = run_qc_pipeline(adata, ...)').
+
+    Memory: the study is never copied whole. Cell filters are applied
+    as one in-place row subset, and only when some cell fails; the
+    counts layer is made after filtering, from the rows that stay. The
+    earlier order (layer first, then view-and-copy per filter) peaked at
+    four times the size of the study.
 
     Filter steps run in this order so the user's thresholds compose
     predictably:
@@ -85,12 +113,13 @@ def run_qc_pipeline(adata, params: Optional[dict] = None):
          when 'n_genes_by_counts' / 'pct_counts_mt' are already in
          'obs' -- the GUI's histogram render path always populates
          them first, so the apply button doesn't pay for it twice).
-      4. (optional) preserve original counts in 'adata.layers['counts']'.
-      5. Filter cells by 'min_genes' / 'max_genes'.
-      6. Filter cells by 'min_counts' / 'max_counts'.
-      7. Filter genes by 'min_cells'.
-      8. Recompute QC metrics on the filtered set.
-      9. Filter cells by 'max_mt' (mitochondrial percent).
+      4. Filter cells by 'min_genes' / 'max_genes', 'min_counts' /
+         'max_counts' and 'max_mt', in one pass. The MT percentage is
+         the one computed on the full gene set, as it was before.
+      5. Filter genes by 'min_cells'; QC metrics are recomputed only
+         if genes were removed.
+      6. (optional) preserve the counts of the remaining cells in
+         'adata.layers['counts']'.
 
     Parameters
     ----------
@@ -168,28 +197,25 @@ def run_qc_pipeline(adata, params: Optional[dict] = None):
         sc.pp.calculate_qc_metrics(
             adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
 
-    # Preserve original counts before any per-cell filtering or later
+    # One row mask for every cell threshold, applied once and in place,
+    # and only if it removes anything.
+    keep = cell_filter_mask(adata.obs, min_genes=min_genes, max_genes=max_genes,
+                            min_counts=min_counts, max_counts=max_counts,
+                            max_mt=max_mt)
+    if not keep.all():
+        adata._inplace_subset_obs(keep)
+
+    if min_cells > 0:
+        n_before = adata.n_vars
+        sc.pp.filter_genes(adata, min_cells=min_cells)
+        if adata.n_vars != n_before and 'mt' in adata.var.columns:
+            sc.pp.calculate_qc_metrics(
+                adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
+
+    # Preserve the counts of the cells that stay, before any later
     # normalisation. Idempotent: only writes the layer if not present.
     if preserve_counts_layer and 'counts' not in adata.layers:
         adata.layers['counts'] = adata.X.copy()
-
-    if min_genes > 0:
-        sc.pp.filter_cells(adata, min_genes=min_genes)
-    if max_genes > 0:
-        sc.pp.filter_cells(adata, max_genes=max_genes)
-    if min_counts > 0:
-        sc.pp.filter_cells(adata, min_counts=min_counts)
-    if max_counts > 0:
-        adata = adata[adata.obs['total_counts'] <= max_counts, :].copy()
-    if min_cells > 0:
-        sc.pp.filter_genes(adata, min_cells=min_cells)
-
-    if 'mt' in adata.var.columns:
-        sc.pp.calculate_qc_metrics(
-            adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
-
-    if max_mt > 0 and 'pct_counts_mt' in adata.obs.columns:
-        adata = adata[adata.obs['pct_counts_mt'] < max_mt, :].copy()
 
     stats = {
         'n_cells_before': n_cells_before,
