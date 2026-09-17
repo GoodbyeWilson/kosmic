@@ -625,6 +625,11 @@ class MethodsPage(SimplePage):
         items.append(("Min cells per donor:", str(ws.min_cells)))
         if ws.min_counts:
             items.append(("Min transcripts per donor:", f"{ws.min_counts:,}"))
+        if getattr(ws, 'gene_universe', None) == 'shared_atlas':
+            items.append(("Gene universe:",
+                          "the genes of the project's shared atlas (those every "
+                          "study carries); the fit used every gene, the BH "
+                          "correction and the results were restricted to this list"))
         det = self._detection_pct_value()
         if det is not None:
             items.append((

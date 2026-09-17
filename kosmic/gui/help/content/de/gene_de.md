@@ -16,7 +16,21 @@ analysis is the donor / sample rather than the cell.
 | **EB moderation** | Limma-style variance shrinkage (t-test only). |
 | **Min cells per donor** | A donor contributing fewer cells is dropped. |
 | **Min transcripts per donor** | A donor whose cells sum to fewer transcripts is dropped. Off (0) by default. |
+| **Shared atlas genes only** | Correct and report over the gene list of the project's shared atlas. Enabled only when the project has an atlas; the label shows how many genes that is. |
 | **Filter genes within each study** | Atlas only -- see below. |
+
+## One gene universe for both arms
+
+The shared atlas is an inner join: it holds only the genes every study
+carries (on the DCM project 21,828 of a study's 32,000-36,000, the rest
+being unnamed loci one deposit lacks). A mega-analysis on the atlas is
+therefore tested over that list. With **Shared atlas genes only**
+ticked, each per-study run is corrected and reported over the same
+list, so the meta-analysis of the per-study results and the
+mega-analysis are comparable gene for gene. The DESeq2 fit still uses
+every gene the study has -- size factors and the dispersion trend want
+the whole transcriptome -- and the study's own expression filter still
+applies within the list. The methods text records the choice.
 
 ## The two filters
 
