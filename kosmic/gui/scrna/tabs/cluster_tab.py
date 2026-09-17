@@ -17,6 +17,8 @@ from typing import Optional
 import numpy as np
 import pyqtgraph as pg
 
+from kosmic import UI_EMBEDDING_MAX_POINTS
+
 from kosmic.gui.shared.theme import get_color, style_pg_plot, NoScrollComboBox, NoScrollSpinBox, NoScrollDoubleSpinBox
 from kosmic.gui.shared.plots import InteractivePlot
 from kosmic.gui.shared.widgets import (
@@ -533,6 +535,21 @@ def _viridis_color(t: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _label_sort_key(label):
+    """Numbered clusters first in numeric order, then names; 'nan' last.
+
+    A study whose excluded donors were never clustered carries NaN in
+    obs['leiden'], which reaches here as the string 'nan'. Mixing int and
+    str keys made sorted() raise and the plot never drew.
+    """
+    text = str(label)
+    if text.isdigit():
+        return (0, int(text), '')
+    if text.lower() in ('nan', 'none', ''):
+        return (2, 0, text)
+    return (1, 0, text)
+
+
 class _UMAPWidget(QWidget):
     """
     Interactive pyqtgraph scatter plot for UMAP/t-SNE embeddings.
@@ -677,12 +694,12 @@ class _UMAPWidget(QWidget):
         self._values = labels
         self._is_continuous = False
 
-        unique = sorted(set(labels), key=lambda x: int(x) if str(x).isdigit() else x)
+        label_arr = np.asarray(labels)
+        unique = sorted(set(label_arr.tolist()), key=_label_sort_key)
         n_categories = len(unique)
         label_to_idx = {lb: i for i, lb in enumerate(unique)}
 
-        # Build legend entries with per-group cell counts
-        label_arr = np.asarray(labels)
+        # Legend counts are over every cell, whatever is drawn below.
         self._legend_entries = [
             (_TAB20[i % len(_TAB20)],
              f"{lb}   ({int((label_arr == lb).sum()):,})")
@@ -690,38 +707,45 @@ class _UMAPWidget(QWidget):
         ]
         self._key_btn.setVisible(True)
 
+        n_total = len(coords)
+        # Shuffle draw order so no single label (e.g. whichever was concatenated
+        # last when the AnnData was built) systematically paints over the others
+        # in overlap/boundary regions. The same permutation also picks the
+        # displayed subset when the dataset is over the display cap.
+        order = self._draw_order(n_total)
+        n_shown = len(order)
+
         # Alpha scales down with cell count: opaque for small datasets, translucent
         # for large ones so overlapping points blend instead of fully occluding
         # whichever happens to be drawn last (which otherwise makes densely
         # overplotted regions look like arbitrary noise even when the underlying
         # clusters separate cleanly -- most visible above ~100k cells).
-        alpha = int(max(60, min(255, 3_000_000 / len(coords))))
+        alpha = int(max(60, min(255, 3_000_000 / n_shown)))
 
-        # Shuffle draw order so no single label (e.g. whichever was concatenated
-        # last when the AnnData was built) systematically paints over the others
-        # in overlap/boundary regions.
-        order = np.random.default_rng(0).permutation(len(coords))
-
-        spots = []
-        for i in order:
-            c_idx = label_to_idx[labels[i]]
-            color = pg.mkColor(_TAB20[c_idx % len(_TAB20)])
+        # One brush per category, shared by every point of that category:
+        # building a dict and a QBrush per cell was the slow part for
+        # atlas-sized studies.
+        brushes = []
+        for i in range(n_categories):
+            color = pg.mkColor(_TAB20[i % len(_TAB20)])
             color.setAlpha(alpha)
-            spots.append({
-                'pos': (float(coords[i, 0]), float(coords[i, 1])),
-                'brush': pg.mkBrush(color),
-                'data': labels[i],
-            })
+            brushes.append(pg.mkBrush(color))
+        shown_labels = label_arr[order].tolist()
+        idx = [label_to_idx[lb] for lb in shown_labels]
 
-        self._scatter.setData(spots)
+        self._scatter.setData(
+            x=coords[order, 0].astype(float), y=coords[order, 1].astype(float),
+            brush=[brushes[i] for i in idx],
+            data=shown_labels,
+        )
         self._plot.hide_unavailable_message()
         # Auto-size points for cell count
-        auto_size = max(1, min(4, 5000 / len(coords)))
+        auto_size = max(1, min(4, 5000 / n_shown))
         self._point_size = int(auto_size)
         self._scatter.setSize(self._point_size)
 
         if not info_text:
-            info_text = f"{len(coords):,} cells  |  {n_categories} groups"
+            info_text = f"{self._shown_text(n_shown, n_total)}  |  {n_categories} groups"
         self._info_label.setText(info_text)
         self._plot.update()
 
@@ -738,36 +762,64 @@ class _UMAPWidget(QWidget):
         self._legend_entries = []
         self._key_btn.setVisible(False)
 
+        values = np.asarray(values, dtype=float)
         vmin = np.nanmin(values)
         vmax = np.nanmax(values)
         rng = vmax - vmin if vmax > vmin else 1.0
 
+        n_total = len(coords)
+        shown = self._draw_order(n_total)
         # Sort so high values render on top
-        order = np.argsort(values)
+        shown = shown[np.argsort(values[shown], kind='stable')]
+        n_shown = len(shown)
         # See set_data_categorical for why alpha scales down with cell count.
-        alpha = int(max(60, min(255, 3_000_000 / len(coords))))
+        alpha = int(max(60, min(255, 3_000_000 / n_shown)))
 
-        spots = []
-        for i in order:
-            t = (values[i] - vmin) / rng
-            color = pg.mkColor(_viridis_color(t))
+        # Quantise the colour scale to 64 shared brushes instead of one per cell.
+        n_levels = 64
+        levels = (values[shown] - vmin) / rng * (n_levels - 1)
+        levels = np.clip(np.nan_to_num(levels, nan=0.0), 0, n_levels - 1).astype(np.int64)
+        brushes = []
+        for k in range(n_levels):
+            color = pg.mkColor(_viridis_color(k / (n_levels - 1)))
             color.setAlpha(alpha)
-            spots.append({
-                'pos': (float(coords[i, 0]), float(coords[i, 1])),
-                'brush': pg.mkBrush(color),
-                'data': float(values[i]),
-            })
+            brushes.append(pg.mkBrush(color))
 
-        self._scatter.setData(spots)
+        self._scatter.setData(
+            x=coords[shown, 0].astype(float), y=coords[shown, 1].astype(float),
+            brush=[brushes[k] for k in levels.tolist()],
+            data=values[shown].tolist(),
+        )
         self._plot.hide_unavailable_message()
-        auto_size = max(1, min(4, 5000 / len(coords)))
+        auto_size = max(1, min(4, 5000 / n_shown))
         self._point_size = int(auto_size)
         self._scatter.setSize(self._point_size)
 
         if not info_text:
-            info_text = (f"{len(coords):,} cells  |  "
+            info_text = (f"{self._shown_text(n_shown, n_total)}  |  "
                          f"range {vmin:.2f} \u2013 {vmax:.2f}")
         self._info_label.setText(info_text)
+
+    @staticmethod
+    def _draw_order(n_total: int) -> np.ndarray:
+        """Indices to draw, shuffled; a uniform random subset above the cap.
+
+        Every cell is still counted in the legend and the hover tooltip;
+        only the drawn points are capped, because pyqtgraph repaints every
+        point on each pan or zoom and an atlas-sized study made that
+        unusable. The seed is fixed so the same cells are drawn each time.
+        """
+        order = np.random.default_rng(0).permutation(n_total)
+        cap = int(UI_EMBEDDING_MAX_POINTS)
+        if cap > 0 and n_total > cap:
+            order = order[:cap]
+        return order
+
+    @staticmethod
+    def _shown_text(n_shown: int, n_total: int) -> str:
+        if n_shown < n_total:
+            return f"{n_shown:,} of {n_total:,} cells drawn"
+        return f"{n_total:,} cells"
 
     def clear_plot(self):
         self._scatter.clear()

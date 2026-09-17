@@ -54,6 +54,8 @@ marker_max_cells_per_cluster = 5000   # cells per cluster the Wilcoxon marker ra
 base_font_size = 11    # default plot/font base point size
 export_dpi     = 150   # default DPI for figure export
 font_scale     = 1.0   # extra multiplier on the app font ladder (1.0 = as designed)
+embedding_max_points = 100000  # cells drawn on the interactive UMAP/t-SNE; a random subset above this (0 = all).
+                               # Legend counts, hover and exported figures still use every cell.
 
 [de.independent_filtering]
 # Optional pct-cells filter on the enrichment page. OFF by default: it

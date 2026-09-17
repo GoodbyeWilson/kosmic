@@ -70,3 +70,4 @@ MARKER_MAX_CELLS_PER_CLUSTER = _cfg.get("scrna", {}).get("marker_max_cells_per_c
 DEFAULT_BASE_FONT_SIZE       = _cfg["ui"]["base_font_size"]
 UI_FONT_SCALE                = _cfg["ui"].get("font_scale", 1.0)
 DEFAULT_EXPORT_DPI           = _cfg["ui"]["export_dpi"]
+UI_EMBEDDING_MAX_POINTS      = _cfg["ui"].get("embedding_max_points", 100_000)

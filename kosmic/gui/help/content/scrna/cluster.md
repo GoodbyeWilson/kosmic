@@ -102,6 +102,12 @@ the cell-type level you want to annotate at. Two tools for choosing:
 Colour the UMAP by `study` or `sample` before you go further. If the
 clusters are the batches, fix that first.
 
+The interactive UMAP draws at most 100,000 cells (a fixed random subset
+when the study is larger; the caption says how many of how many). The
+legend counts, the hover tooltip and every exported figure still use
+every cell. The cap is `embedding_max_points` in `config.toml`; 0 draws
+everything.
+
 ## Annotate
 
 Gives each cluster a cell-type name, written to `obs['cell_type']`.
@@ -119,6 +125,14 @@ cluster, which is more robust than a raw score when a cluster is small.
 
 The cluster table underneath shows each cluster's assigned type and
 lets you change it by hand — pick from the dropdown, **Save Changes**.
+When the file came with the authors' own labels (kept in
+`obs['cell_type_author']`), the *Author Type* column shows the label
+that dominates each cluster and the share of the cluster's labelled
+cells it covers; hover for the full breakdown. The line above the table
+gives the overall figure: the percentage of author-labelled cells that
+carry their cluster's dominant label. It measures how cleanly the
+clustering reproduces the authors' partition, not whether the names
+agree, and cells the authors left unlabelled are counted separately.
 **Use existing cell_type** keeps labels that came with the dataset and
 skips annotation.
 
