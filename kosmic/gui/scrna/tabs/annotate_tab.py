@@ -20,6 +20,7 @@ from kosmic.paths import processed_h5ad_path
 from kosmic.reference.cell_type_focus import load_focus_presets
 from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
+from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
 
 
 _FOCUS_PRESET_QSETTING_KEY = 'annotate/last_focus_preset'
@@ -915,6 +916,12 @@ class AnnotateTab(QWidget):
         self.cluster_table.cellClicked.connect(self._on_cluster_row_clicked)
         self.cluster_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.cluster_table.customContextMenuRequested.connect(self._on_cluster_table_context_menu)
+        # How well the clusters line up with the labels the authors
+        # deposited, when the file carries any (cell_type_author).
+        self.author_agreement_label = HintLabel("")
+        self.author_agreement_label.setWordWrap(True)
+        self.author_agreement_label.setVisible(False)
+        summary_layout.addWidget(self.author_agreement_label)
         summary_layout.addWidget(self.cluster_table)
 
         hint_label = HintLabel(
@@ -1066,16 +1073,27 @@ class AnnotateTab(QWidget):
         cluster_counts = (
             self.adata.obs[cluster_col].value_counts().sort_index())
 
+        author_labels = None
+        if author_col:
+            author_labels = author_label_series(self.adata.obs[author_col])
+        n_labelled = n_agree = n_unlabelled = 0
+
         rows = []
         for cluster, count in cluster_counts.items():
             cluster_mask = self.adata.obs[cluster_col] == cluster
 
             author_text = ""
-            if author_col and cluster_mask.sum() > 0:
-                dominant_author = self.adata.obs.loc[
-                    cluster_mask, author_col].mode()
-                if len(dominant_author) > 0:
-                    author_text = str(dominant_author.iloc[0])
+            author_tip = ""
+            if author_labels is not None and cluster_mask.sum() > 0:
+                breakdown = author_breakdown(author_labels[cluster_mask.values])
+                if breakdown.n_labelled:
+                    top_label, top_n = breakdown.top
+                    author_text = (f"{top_label} "
+                                   f"({100 * top_n / breakdown.n_labelled:.0f}%)")
+                    author_tip = breakdown.describe()
+                    n_labelled += breakdown.n_labelled
+                    n_agree += top_n
+                n_unlabelled += breakdown.n_unlabelled
 
             ct_text = ""
             if ct_col and cluster_mask.sum() > 0:
@@ -1117,6 +1135,7 @@ class AnnotateTab(QWidget):
                 'cluster':     str(cluster),
                 'count':       int(count),
                 'author':      author_text,
+                '_author_tip': author_tip,
                 'assigned':    ct_text,
                 'score_text':  score_text,
                 'detail_text': detail_text,
@@ -1138,7 +1157,10 @@ class AnnotateTab(QWidget):
         red = Qt.GlobalColor.red
 
         def _decorate(item, row, col_i):
-            if col_i == 3:
+            if col_i == 2:
+                if row['_author_tip']:
+                    item.setToolTip(row['_author_tip'])
+            elif col_i == 3:
                 # Assigned Type is user-editable (context-menu renames and
                 # double-click cell edits both feed _on_cluster_table_cell_changed).
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -1162,6 +1184,17 @@ class AnnotateTab(QWidget):
                     item.setForeground(green)
 
         self.cluster_table.set_data(df, decorate=_decorate)
+
+        if author_labels is not None and n_labelled:
+            text = (f"Authors' labels ({author_col}): {100 * n_agree / n_labelled:.1f}% "
+                    f"of {n_labelled:,} labelled cells carry the label that is "
+                    f"dominant in their cluster")
+            if n_unlabelled:
+                text += f"; {n_unlabelled:,} cells have no author label"
+            self.author_agreement_label.setText(text + ".")
+            self.author_agreement_label.setVisible(True)
+        else:
+            self.author_agreement_label.setVisible(False)
 
         has_annotations = (ct_col is not None
                            and 'cell_type_auto' in self.adata.obs.columns)

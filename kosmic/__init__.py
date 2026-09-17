@@ -67,3 +67,4 @@ META_IF_FILTER_STAT          = _cfg["meta_analysis"]["independent_filtering"]["f
 DEFAULT_BASE_FONT_SIZE       = _cfg["ui"]["base_font_size"]
 UI_FONT_SCALE                = _cfg["ui"].get("font_scale", 1.0)
 DEFAULT_EXPORT_DPI           = _cfg["ui"]["export_dpi"]
+UI_EMBEDDING_MAX_POINTS      = _cfg["ui"].get("embedding_max_points", 100_000)
