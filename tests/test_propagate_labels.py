@@ -167,3 +167,39 @@ def test_a_custom_suffix_is_honoured(tmp_path):
     master = _master_from(tmp_path, [s1, s2])
     propagate_labels(master, s1, suffix="_v2")
     assert "cell_type_v2" in ad.read_h5ad(s1).obs.columns
+
+
+# --- obs columns that survive combining ---------------------------------------
+
+def test_atlas_labels_sex_and_age_are_carried_onto_a_rebuilt_master(tmp_path):
+    """After propagation a study holds cell_type_atlas; re-creating the
+    master (e.g. uncapped, for the mega-analysis DE) must keep it, and the
+    sex the Inspect step designated must arrive as one female/male column."""
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad",
+                ["disease", "control", "disease"])
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control", "control"])
+    a1 = ad.read_h5ad(s1)
+    a1.obs["cell_type_atlas"] = pd.Categorical(["CM", "Fib", "CM"])
+    a1.obs["leiden_atlas"] = pd.Categorical(["0", "1", "0"])
+    a1.obs["Sex"] = ["F", "M", "F"]              # recorded under a different name
+    a1.obs["age"] = [61.0, 45.0, 70.0]
+    a1.uns["sex_column"] = "Sex"
+    a1.write_h5ad(s1)
+    a2 = ad.read_h5ad(s2)
+    a2.obs["sex_inferred"] = pd.Categorical(["male", "female"])
+    a2.uns["sex_column"] = "sex_inferred"
+    a2.write_h5ad(s2)
+
+    m = ad.read_h5ad(concat_studies([s1, s2], tmp_path / "master.h5ad"))
+    assert list(m.obs["cell_type_atlas"].astype(str)[:3]) == ["CM", "Fib", "CM"]
+    assert list(m.obs["leiden_atlas"].astype(str)[:3]) == ["0", "1", "0"]
+    assert list(m.obs["sex"].astype(str)) == ["female", "male", "female", "male", "female"]
+    assert list(m.obs["age"][:3]) == [61.0, 45.0, 70.0]
+    assert "Sex" not in m.obs.columns and "sex_inferred" not in m.obs.columns
+
+
+def test_no_sex_designation_writes_no_sex_column(tmp_path):
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad", ["disease"])
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control"])
+    m = ad.read_h5ad(concat_studies([s1, s2], tmp_path / "master.h5ad"))
+    assert "sex" not in m.obs.columns

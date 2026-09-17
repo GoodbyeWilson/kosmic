@@ -62,7 +62,12 @@ which are unmapped.
   labels come back in step 5.
 
 Cells are named `<barcode>-<accession>` in the atlas, and an
-`obs['study']` column records which study each came from.
+`obs['study']` column records which study each came from. From each
+study's metadata the atlas keeps `sample`, `condition`, `_role`,
+`cell_type`, `age`, one `sex` column (female / male, from whichever
+column the study's Inspect step designated) and, if labels have already
+been propagated, `cell_type_atlas` and `leiden_atlas`. A column that
+only some studies have is blank for the others.
 
 ## 3. Cluster the atlas
 
@@ -123,7 +128,10 @@ worth understanding before you build on either.
 - **The atlas's `.X` is raw counts.** Combining promotes `.raw` so the
   atlas can be normalised and clustered from scratch.
 - **Re-creating the atlas overwrites it.** Any clustering or annotation
-  on it is lost; the source studies are unaffected.
+  on it is lost; the source studies are unaffected. Labels that were
+  already propagated come back in as `cell_type_atlas`, so an atlas
+  re-created after propagation — with every cell, for the mega-analysis
+  differential expression — is labelled without being clustered again.
 - **An atlas is not a substitute for per-study DE.** It gives you shared
   labels. Differential expression still runs per study on raw counts,
   which is what keeps a meta-analysis a meta-analysis.
