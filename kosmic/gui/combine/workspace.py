@@ -295,7 +295,7 @@ class CombineDialog(QDialog):
         super().__init__(parent or main_window)
         self.setWindowTitle("Combine studies")
         self.setModal(True)
-        self.resize(900, 700)
+        self.resize(900, 800)
         self.main_window = main_window
         self._worker: Optional[BaseWorker] = None
         self._scan_worker: Optional[BaseWorker] = None
@@ -351,6 +351,9 @@ class CombineDialog(QDialog):
         hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self._study_table.setColumnWidth(0, 30)
+        # ~5 rows: the variable-length gene-overlap warning below otherwise
+        # squeezes this to 1-2 rows in the stretch layout.
+        self._study_table.setMinimumHeight(220)
         layout.addWidget(self._study_table, 1)
 
         # Cap spinner
