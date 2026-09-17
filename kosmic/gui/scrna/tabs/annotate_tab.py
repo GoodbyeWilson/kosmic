@@ -23,6 +23,7 @@ from kosmic.gui.shared import dialogs, run_worker
 from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
 from kosmic.scrna.annotate.cluster_qc import flag_clusters
 from kosmic.scrna.annotate.labels import set_cell_type
+from kosmic.scrna.cluster.workset import apply_annotations, working_subset
 
 
 _FOCUS_PRESET_QSETTING_KEY = 'annotate/last_focus_preset'
@@ -51,6 +52,13 @@ class ReferenceAnnotationWorker(BaseWorker):
         from pathlib import Path
         from kosmic.scrna.annotate.reference import run_reference_annotation
 
+        # Annotation adds obs columns and uns entries; it never changes the
+        # matrix. Work on a light object that shares X with the study
+        # instead of a copy of the whole study (see workset.py), and write
+        # the columns back before saving.
+        self._full = self.adata
+        self.adata = working_subset(self._full)
+
         # Preserve author annotations before overwriting
         if 'cell_type' in self.adata.obs.columns and 'cell_type_author' not in self.adata.obs.columns:
             self.adata.obs['cell_type_author'] = self.adata.obs['cell_type'].copy()
@@ -73,10 +81,15 @@ class ReferenceAnnotationWorker(BaseWorker):
         self.adata.uns['cluster_annotation_details'] = annotation_details
         self.adata.obs['cell_type_auto'] = self.adata.obs['cell_type'].copy()
 
+        apply_annotations(self._full, self.adata)
+        self.adata = self._full
+
         self.progress.emit("Saving...")
         self.progress_pct.emit(95)
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        self.adata.write_h5ad(self.output_path)
+        tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
+        self.adata.write_h5ad(str(tmp))
+        os.replace(tmp, self.output_path)
 
         n_assigned = sum(1 for v in cluster_types.values() if v != 'Unknown')
         n_types = len(set(cluster_types.values()) - {'Unknown'})
@@ -109,6 +122,13 @@ class MarkerScoringWorker(BaseWorker):
         confidence_margin = self.params.get('confidence_margin', 0.05)
         skip_conversion = self.params.get('skip_gene_conversion', False)
         force_assignment = self.params.get('force_assignment', False)
+
+        # Annotation adds obs columns and uns entries; it never changes the
+        # matrix. Work on a light object that shares X with the study
+        # instead of a copy of the whole study (see workset.py), and write
+        # the columns back before saving.
+        self._full = self.adata
+        self.adata = working_subset(self._full)
 
         # Preserve author annotations before overwriting
         if 'cell_type' in self.adata.obs.columns and 'cell_type_author' not in self.adata.obs.columns:
@@ -261,10 +281,15 @@ class MarkerScoringWorker(BaseWorker):
         dist = self.adata.obs['cell_type'].value_counts()
         self.progress.emit(f"\nCell type distribution:\n{dist.head(10).to_string()}")
 
+        apply_annotations(self._full, self.adata)
+        self.adata = self._full
+
         self.progress.emit("Saving...")
         self.progress_pct.emit(95)
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        self.adata.write_h5ad(self.output_path)
+        tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
+        self.adata.write_h5ad(str(tmp))
+        os.replace(tmp, self.output_path)
 
         self.progress_pct.emit(100)
         cell_types = list(self.marker_dict.keys())
@@ -294,6 +319,13 @@ class CellTypistWorker(BaseWorker):
         except ImportError as e:
             raise RuntimeError(
                 "CellTypist is not installed. Install it with:\n  pip install celltypist") from e
+
+        # Annotation adds obs columns and uns entries; it never changes the
+        # matrix. Work on a light object that shares X with the study
+        # instead of a copy of the whole study (see workset.py), and write
+        # the columns back before saving.
+        self._full = self.adata
+        self.adata = working_subset(self._full)
 
         # Preserve author annotations before overwriting
         if 'cell_type' in self.adata.obs.columns and 'cell_type_author' not in self.adata.obs.columns:
@@ -370,10 +402,15 @@ class CellTypistWorker(BaseWorker):
 
             self.adata.uns['cluster_annotation_details'] = annotation_details
 
+        apply_annotations(self._full, self.adata)
+        self.adata = self._full
+
         self.progress.emit("Saving...")
         self.progress_pct.emit(95)
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        self.adata.write_h5ad(self.output_path)
+        tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
+        self.adata.write_h5ad(str(tmp))
+        os.replace(tmp, self.output_path)
 
         n_types = self.adata.obs['cell_type'].nunique()
         self.progress_pct.emit(100)
@@ -1657,7 +1694,7 @@ class AnnotateTab(QWidget):
             'min_markers': self.pdb_min_markers_spin.value(),
         }
 
-        self.marker_worker = MarkerScoringWorker(self.adata.copy(), marker_dict, output_path, annotation_params)
+        self.marker_worker = MarkerScoringWorker(self.adata, marker_dict, output_path, annotation_params)
         run_worker(
             self.marker_worker,
             on_finished=self._on_annotation_finished,
@@ -1712,7 +1749,7 @@ class AnnotateTab(QWidget):
         broad_labels = self.broad_labels_check.isChecked()
 
         self.celltypist_worker = CellTypistWorker(
-            self.adata.copy(), model_name, majority_voting, output_path,
+            self.adata, model_name, majority_voting, output_path,
             broad_labels=broad_labels,
         )
         run_worker(
@@ -1790,7 +1827,7 @@ class AnnotateTab(QWidget):
             'min_markers': self.cm2_min_markers_spin.value(),
         }
 
-        self.marker_worker = MarkerScoringWorker(self.adata.copy(), marker_dict, output_path, annotation_params)
+        self.marker_worker = MarkerScoringWorker(self.adata, marker_dict, output_path, annotation_params)
         run_worker(
             self.marker_worker,
             on_finished=self._on_annotation_finished,
@@ -1903,7 +1940,7 @@ class AnnotateTab(QWidget):
             self.progress_bar.setValue(0)
 
         self.ref_worker = ReferenceAnnotationWorker(
-            self.adata.copy(),
+            self.adata,
             ref_name,
             output_path,
             min_correlation=self.ref_min_corr_spin.value(),

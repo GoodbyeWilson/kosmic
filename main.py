@@ -1562,6 +1562,14 @@ class AppWindow(QMainWindow):
         self.settings.setValue("explorer_splitter", self._splitter.sizes())
         self.settings.setValue("output_splitter", self._vsplitter.sizes())
         event.accept()
+        # Closing the main window is closing KOSMIC. Qt only quits when
+        # the last window closes, and a message box ("Annotations saved
+        # to ...") or a dialog left open behind the window is a window,
+        # so the process stayed alive, invisible, holding the dataset.
+        app = QApplication.instance()
+        if app is not None:
+            app.closeAllWindows()
+            QTimer.singleShot(0, app.quit)
 
 
 def main():

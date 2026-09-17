@@ -129,3 +129,26 @@ def apply_results(full, work, mask: Optional[np.ndarray], *,
     for key in drop_uns:
         full.uns.pop(key, None)
     return full
+
+
+def apply_annotations(full, work) -> list[str]:
+    """Copy annotation outputs from ``work`` back onto ``full``.
+
+    An annotation step adds obs columns (labels, scores, per-type scores)
+    and uns entries (annotation details, parameters) and touches nothing
+    else, so every obs column of ``work`` that is new or differs from
+    ``full``'s is written across, and every uns entry of ``work`` is set
+    on ``full``. Returns the obs columns written. Both objects must have
+    the same cells in the same order.
+    """
+    if len(work.obs) != len(full.obs) or not work.obs_names.equals(full.obs_names):
+        raise ValueError("annotation results do not line up with the study's cells")
+    written = []
+    for col in work.obs.columns:
+        if col not in full.obs.columns or not full.obs[col].equals(work.obs[col]):
+            full.obs[col] = work.obs[col].values if not isinstance(
+                work.obs[col].dtype, pd.CategoricalDtype) else work.obs[col].copy().values
+            written.append(col)
+    for key, value in work.uns.items():
+        full.uns[key] = value
+    return written
