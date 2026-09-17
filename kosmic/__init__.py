@@ -63,6 +63,9 @@ META_IF_DEFAULT_PCT          = _cfg["meta_analysis"]["independent_filtering"]["d
 META_IF_ON_BY_DEFAULT        = _cfg["meta_analysis"]["independent_filtering"]["on_by_default"]
 META_IF_FILTER_STAT          = _cfg["meta_analysis"]["independent_filtering"]["filter_stat"]
 
+# scRNA processing
+MARKER_MAX_CELLS_PER_CLUSTER = _cfg.get("scrna", {}).get("marker_max_cells_per_cluster", 5000)
+
 # UI / typography
 DEFAULT_BASE_FONT_SIZE       = _cfg["ui"]["base_font_size"]
 UI_FONT_SCALE                = _cfg["ui"].get("font_scale", 1.0)

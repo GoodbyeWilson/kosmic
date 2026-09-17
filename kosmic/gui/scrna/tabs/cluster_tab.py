@@ -71,14 +71,10 @@ class PCAHarmonyWorker(BaseWorker):
     def _run(self):
         import scanpy as sc
         from scipy import sparse as sp
-        from kosmic.scrna.qc.normalize import normalize_adata
         from kosmic.scrna.cluster.hvg import find_hvg
         from kosmic.scrna.cluster.harmony import run_harmony
-
-        # Deep-copy on the worker thread, not the main one. Copying a
-        # 153k x 29k AnnData is several seconds; off-thread it doesn't
-        # freeze the UI.
-        from kosmic.scrna.inspect.roles import included_mask, scatter_results
+        from kosmic.scrna.cluster.workset import apply_results, working_subset
+        from kosmic.scrna.inspect.roles import included_mask
 
         # Cells marked '_role == exclude' are left out of the analysis but
         # not out of the file. Without this an excluded arm still drives
@@ -86,24 +82,29 @@ class PCAHarmonyWorker(BaseWorker):
         # the cells, from a cohort the DE contrast never touches.
         self._full = self.adata
         self._mask = included_mask(self.adata) if self.honour_roles else None
+
+        # --- Is this counts or already log-normalised? ------------------
+        X = self._full.X
+        if sp.issparse(X):
+            max_val = float(np.max(X.data)) if len(X.data) > 0 else 0
+        else:
+            max_val = float(np.max(X))
+        already_normalized = max_val < 20
+
+        # The step works on one matrix for the included cells and its own
+        # obs/var, never on a copy of the whole study (see workset.py). The
+        # matrix is shared when every cell is included and it is only read;
+        # counts that still need normalising get a private copy.
         if self._mask is not None:
             n_out = int((~self._mask).sum())
             self.progress.emit(
                 f"Excluding {n_out:,} cell(s) marked 'exclude' from the "
                 f"embedding ({int(self._mask.sum()):,} remain)...")
-            self.adata = self.adata[self._mask].copy()
         else:
-            # Deep-copy on the worker thread, not the main one.
-            self.progress.emit("Preparing dataset (copy)...")
-            self.adata = self.adata.copy()
+            self.progress.emit("Preparing dataset...")
+        self.adata = working_subset(
+            self._full, self._mask, copy_matrix=not already_normalized)
         self.progress_pct.emit(2)
-
-        # --- Is this counts or already log-normalised? ------------------
-        if sp.issparse(self.adata.X):
-            max_val = float(np.max(self.adata.X.data)) if len(self.adata.X.data) > 0 else 0
-        else:
-            max_val = float(np.max(self.adata.X))
-        already_normalized = max_val < 20
 
         # --- HVG ---------------------------------------------------------
         # Before normalisation, not after: 'seurat_v3' fits its
@@ -129,9 +130,15 @@ class PCAHarmonyWorker(BaseWorker):
 
         # --- Normalise (skip if already log-transformed) ----------------
         if not already_normalized:
-            self.progress.emit("Normalising counts...")
+            # Only the step's private matrix is normalised; the study keeps
+            # its counts in X. The QC tab's Normalise is the route that
+            # normalises the study itself.
+            self.progress.emit(
+                "X holds counts: normalising a private copy for the PCA "
+                "(the study is unchanged; run Normalise on the QC tab)...")
             self.progress_pct.emit(20)
-            normalize_adata(self.adata, target_sum=10000, log_transform=True)
+            sc.pp.normalize_total(self.adata, target_sum=10000)
+            sc.pp.log1p(self.adata)
         else:
             self.progress.emit("Data already normalised -- skipping")
             self.progress_pct.emit(20)
@@ -182,22 +189,27 @@ class PCAHarmonyWorker(BaseWorker):
         n_hvg_found = int(self.adata.var['highly_variable'].sum())
         excluded_msg = ""
 
-        # Put the analysis back on the full object so the excluded cells
-        # survive in the file. They keep their metadata and lose only the
-        # things the analysis never computed for them.
-        if self._mask is not None:
-            self.progress.emit("Writing results back onto the full dataset...")
-            self.adata.var['highly_variable'] = self.adata.var[
-                'highly_variable'].astype(bool)
-            self._full.var = self.adata.var.reindex(self._full.var_names)
-            scatter_results(
-                self._full, self.adata, self._mask,
-                obsm_keys=('X_pca', 'X_pca_harmony'),
-                uns_keys=('hvg', 'pca'),
-                obsp_keys=('connectivities', 'distances'))
-            self._full.uns.pop('neighbors', None)
+        # Put the analysis back on the full object. Excluded cells survive
+        # in the file with their metadata and NaN where the analysis never
+        # saw them. A new embedding invalidates any earlier graph.
+        self.progress.emit("Writing results back onto the dataset...")
+        self.adata.var['highly_variable'] = self.adata.var[
+            'highly_variable'].astype(bool)
+        self._full.var = self.adata.var.reindex(self._full.var_names)
+        apply_results(
+            self._full, self.adata, self._mask,
+            obsm_keys=('X_pca', 'X_pca_harmony'),
+            uns_keys=('hvg', 'pca'),
+            obsp_keys=('connectivities', 'distances'),
+            drop_uns=('neighbors',))
+        if 'X_pca_harmony' not in self.adata.obsm:
+            self._full.obsm.pop('X_pca_harmony', None)
+        if self._mask is None:
+            self._full.obsp.pop('connectivities', None)
+            self._full.obsp.pop('distances', None)
+        else:
             excluded_msg = f", {int((~self._mask).sum()):,} cells excluded"
-            self.adata = self._full
+        self.adata = self._full
 
         # Save inside the worker so the slot doesn't have to write_h5ad
         # on the main thread.
@@ -235,27 +247,31 @@ class ClusteringWorker(BaseWorker):
         from kosmic.scrna.cluster.leiden import cluster_leiden
         from kosmic.scrna.annotate.marker_genes import compute_cluster_marker_genes
 
-        # Deep-copy on the worker thread so the GUI doesn't freeze
-        # while a 150k-cell AnnData is duplicated.
-        self.progress.emit("Preparing dataset (copy)...")
+        self.progress.emit("Preparing dataset...")
         self.progress_pct.emit(2)
-        self.adata = self.adata.copy()
 
         n_pcs = self.params.get('n_pcs', 30)
         n_neighbors = self.params.get('n_neighbors', 15)
         resolution = self.params.get('resolution', 1.0)
         preserve_embeddings = self.params.get('preserve_embeddings', False)
 
-        from kosmic.scrna.inspect.roles import included_mask, scatter_results
+        from kosmic.scrna.cluster.workset import apply_results, working_subset
+        from kosmic.scrna.inspect.roles import included_mask
 
         # Same rule as the PCA step: an excluded arm must not shape the
         # graph or the clusters. The PCA step already left NaN rows in
         # X_pca for those cells, so they could not be clustered anyway.
+        # The step reads X (marker genes) and never writes it, so the
+        # matrix is shared rather than copied when every cell is included.
         full = self.adata
         mask = (included_mask(self.adata)
                 if self.params.get('honour_roles', True) else None)
+        self.adata = working_subset(
+            full, mask,
+            obsm_keys=('X_pca', 'X_pca_harmony', 'X_umap'),
+            uns_keys=('neighbors', 'pca', 'umap', 'log1p'),
+            obsp_keys=('connectivities', 'distances'))
         if mask is not None:
-            self.adata = self.adata[mask].copy()
             self.progress.emit(
                 f"Clustering {self.adata.n_obs:,} cells "
                 f"({int((~mask).sum()):,} excluded)...")
@@ -312,14 +328,13 @@ class ClusteringWorker(BaseWorker):
             sc.tl.umap(self.adata)
         self.progress_pct.emit(90)
 
-        if mask is not None:
-            self.progress.emit("Writing results back onto the full dataset...")
-            scatter_results(
-                full, self.adata, mask,
-                obsm_keys=('X_umap',), obs_cols=('leiden',),
-                uns_keys=('neighbors', 'rank_genes_groups', 'leiden'),
-                obsp_keys=('connectivities', 'distances'))
-            self.adata = full
+        self.progress.emit("Writing results back onto the dataset...")
+        apply_results(
+            full, self.adata, mask,
+            obsm_keys=('X_umap',), obs_cols=('leiden',),
+            uns_keys=('neighbors', 'rank_genes_groups', 'leiden', 'umap'),
+            obsp_keys=('connectivities', 'distances'))
+        self.adata = full
 
         self.progress.emit(f"Saving to {self.output_path}...")
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)

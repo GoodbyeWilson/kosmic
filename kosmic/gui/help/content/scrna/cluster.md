@@ -75,6 +75,18 @@ cannot create or remove a DE result.
 embeddings** skips recomputing the UMAP when you only changed the
 resolution.
 
+The step also ranks marker genes per cluster (Wilcoxon) for the
+Annotate and Marker Check tabs. Above 5,000 cells in a cluster the
+ranking uses a random 5,000 of them — ranking every cell of a large
+study needs more memory than the study itself — and the result records
+how many cells it used. `marker_max_cells_per_cluster` in `config.toml`
+changes the cap; 0 ranks every cell.
+
+Both the PCA and the clustering step work on one matrix for the
+included cells and write their results back onto the study, so a study
+costs its own size in memory plus the graph, not a second copy of
+itself.
+
 Resolution is the knob you will actually turn. Higher splits clusters,
 lower merges them; there is no right value, only the one that matches
 the cell-type level you want to annotate at. Two tools for choosing:
