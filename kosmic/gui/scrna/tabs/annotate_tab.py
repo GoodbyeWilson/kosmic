@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QMenu, QSizePolicy,
 )
 from PyQt6.QtCore import QSettings, Qt, pyqtSignal
+import os
 from pathlib import Path
 from typing import Optional
 import numpy as np
@@ -16,7 +17,6 @@ import pandas as pd
 
 from kosmic.gui.shared.theme import NoScrollComboBox, NoScrollDoubleSpinBox
 from kosmic.gui.shared.widgets import BaseWorker, Column, HintLabel, ResultsTable, SettingsGroup, StatusLabel
-from kosmic.paths import processed_h5ad_path
 from kosmic.reference.cell_type_focus import load_focus_presets
 from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
@@ -977,6 +977,24 @@ class AnnotateTab(QWidget):
         self.adata = adata
         self._update_status()
 
+    def _sync_adata(self) -> bool:
+        """Point the tab at the dataset the workspace has open right now.
+
+        The tab refreshes its reference lazily (on activation, by
+        version), so between a study switch and the next activation it
+        can still hold the previous study. Every action that writes a
+        file goes through here first, so what is analysed and saved is
+        always the workspace's current dataset. False when none is open.
+        """
+        current = getattr(self.main_window, 'current_adata', None)
+        if current is None:
+            return False
+        if self.adata is not current:
+            self.adata = current
+            self._last_adata_version = getattr(self.main_window, '_adata_version', 0)
+            self._populate_cluster_table()
+        return True
+
     def on_tab_activated(self):
         """Called when tab becomes visible — pull latest adata from workspace."""
         ws = self.main_window
@@ -1322,7 +1340,7 @@ class AnnotateTab(QWidget):
 
     def _apply_cluster_reannotation(self, row, new_type):
         """Apply a manual re-annotation for a specific cluster."""
-        if self.adata is None:
+        if not self._sync_adata():
             return
 
         cluster_item = self.cluster_table.item(row, 0)
@@ -1499,24 +1517,45 @@ class AnnotateTab(QWidget):
         return None
 
     def _save_annotations(self):
-        """Save current annotations to h5ad file."""
-        if self.adata is None:
-            return
+        """Write the workspace's current dataset to the workspace's current file.
 
-        if self.h5ad_path is None:
-            if hasattr(self.main_window, 'inspect_tab') and self.main_window.inspect_tab.h5ad_path:
-                self.h5ad_path = self.main_window.inspect_tab.h5ad_path
-            elif self.project_dir:
-                self.h5ad_path = processed_h5ad_path(self.project_dir, "annotated.h5ad")
-            else:
-                dialogs.warning(self, "No Path", "No save path available.")
-                return
+        Only that pairing is ever written. The tab keeps its own reference
+        to the dataset and refreshes it lazily, so after a study switch it
+        can still hold the previous study while the path already names the
+        new one; saving that pair once overwrote one study's file with
+        another's. The save is refused unless the tab's dataset is the
+        object the workspace holds, and the file is written to a temporary
+        name and renamed into place so a failure mid-write leaves the
+        original intact.
+        """
+        ws = self.main_window
+        current = getattr(ws, 'current_adata', None)
+        path = getattr(ws, 'current_h5ad_path', None)
+        if current is None or not path:
+            dialogs.warning(self, "No Path", "No dataset is open in the workspace.")
+            return
+        if self.adata is not current:
+            # Edits made to a stale object are not the workspace's data;
+            # refuse rather than write them, and resync so the next save
+            # (after the edits are redone) is the right pairing.
+            dialogs.warning(
+                self, "Not saved",
+                "The Annotate tab was showing a dataset that is not the one "
+                "the workspace has open, so saving would have written the "
+                "wrong study. The tab now shows the open dataset; make the "
+                "change again and save.")
+            self._sync_adata()
+            return
+        self.h5ad_path = path
 
         try:
-            Path(str(self.h5ad_path)).parent.mkdir(parents=True, exist_ok=True)
-            self.adata.write_h5ad(str(self.h5ad_path))
-            self._on_status(f"Annotations saved to {self.h5ad_path}")
-            dialogs.info(self, "Saved", f"Annotations saved to:\n{self.h5ad_path}")
+            target = Path(str(path))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + '.tmp')
+            current.write_h5ad(str(tmp))
+            os.replace(tmp, target)
+            self._on_status(f"Annotations saved to {target}")
+            dialogs.info(self, "Saved", f"Annotations saved to:\n{target}")
         except Exception as e:
             dialogs.warning(self, "Save Failed", f"Could not save: {str(e)}")
 
@@ -1569,6 +1608,7 @@ class AnnotateTab(QWidget):
 
     def _run_annotation(self):
         """Run marker-based cell type annotation using PanglaoDB markers."""
+        self._sync_adata()
         if self.adata is None:
             dialogs.warning(self, "No Data", "No data loaded. Run clustering first or load data in Inspect tab.")
             return
@@ -1649,6 +1689,7 @@ class AnnotateTab(QWidget):
 
     def _run_celltypist(self):
         """Run CellTypist cell type annotation."""
+        self._sync_adata()
         if self.adata is None:
             dialogs.warning(self, "No Data", "No data loaded. Run clustering first or load data in Inspect tab.")
             return
@@ -1701,6 +1742,7 @@ class AnnotateTab(QWidget):
 
     def _run_cellmarker2_annotation(self):
         """Run cell type annotation using CellMarker 2.0 markers."""
+        self._sync_adata()
         if self.adata is None:
             dialogs.warning(self, "No Data", "No data loaded. Run clustering first or load data in Inspect tab.")
             return
@@ -1819,6 +1861,7 @@ class AnnotateTab(QWidget):
 
     def _run_reference_annotation(self):
         """Run reference-based cell type annotation."""
+        self._sync_adata()
         if self.adata is None:
             dialogs.warning(self, "No Data", "No data loaded. Run clustering first.")
             return
