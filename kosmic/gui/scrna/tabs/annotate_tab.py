@@ -22,6 +22,7 @@ from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
 from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
 from kosmic.scrna.annotate.cluster_qc import flag_clusters
+from kosmic.scrna.annotate.labels import set_cell_type
 
 
 _FOCUS_PRESET_QSETTING_KEY = 'annotate/last_focus_preset'
@@ -1338,8 +1339,8 @@ class AnnotateTab(QWidget):
         else:
             return
 
-        mask = self.adata.obs[cluster_col] == cluster_id
-        self.adata.obs.loc[mask, 'cell_type'] = new_type
+        mask = (self.adata.obs[cluster_col].astype(str) == str(cluster_id)).to_numpy()
+        set_cell_type(self.adata.obs, mask, new_type)
 
         # Provenance: tag this cluster as a manual override so the
         # cluster table can show which calls came from auto vs. user.
@@ -1350,7 +1351,11 @@ class AnnotateTab(QWidget):
         self.main_window.current_adata = self.adata
         self.main_window._adata_version += 1
         self._last_adata_version = self.main_window._adata_version
-        self._on_status(f"Cluster {cluster_id} re-annotated as '{new_type}' ({mask.sum():,} cells)")
+        self._on_status(f"Cluster {cluster_id} re-annotated as '{new_type}' ({int(mask.sum()):,} cells)")
+        # The table shows what is in obs; redraw it so the change is visible
+        # at once, and enable Save so it can be written.
+        self._populate_cluster_table()
+        self.save_annot_btn.setEnabled(True)
 
     # ------------------------------------------------------------------
     # Top differential genes panel
