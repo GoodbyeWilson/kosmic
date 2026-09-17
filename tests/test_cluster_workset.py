@@ -149,7 +149,9 @@ def test_marker_genes_rank_on_a_per_cluster_subsample():
     from kosmic.scrna.annotate.marker_genes import compute_cluster_marker_genes
     a = _study(n=600, g=40)
     a.obs['leiden'] = pd.Categorical(['0'] * 400 + ['1'] * 150 + ['2'] * 50)
-    X = a.X.toarray(); X[:400, :5] += 3.0; a.X = sp.csr_matrix(X)   # cluster 0 markers G0..G4
+    X = a.X.toarray()
+    X[:400, :5] += 3.0                                     # cluster 0 markers G0..G4
+    a.X = sp.csr_matrix(X)
     X_before = a.X.copy()
     compute_cluster_marker_genes(a, max_cells_per_cluster=100)
     r = a.uns['rank_genes_groups']
