@@ -74,3 +74,15 @@ def test_building_a_large_plot_is_fast(app, monkeypatch):
     t0 = time.perf_counter()
     w.set_data_categorical(coords, labels)
     assert time.perf_counter() - t0 < 5.0
+
+
+def test_unclustered_cells_do_not_break_the_plot(app):
+    """Excluded donors carry NaN in obs['leiden'] -> label 'nan' beside '0'..'11'."""
+    from kosmic.gui.scrna.tabs.cluster_tab import _label_sort_key
+    w = _widget(app)
+    labels = np.array(['0'] * 5 + ['11'] * 3 + ['2'] * 2 + ['nan'] * 4, dtype=object)
+    w.set_data_categorical(np.random.default_rng(0).normal(size=(14, 2)), labels)
+    names = [e[1].split('   ')[0] for e in w._legend_entries]
+    assert names == ['0', '2', '11', 'nan']
+    assert sorted(['Fibroblast', 'nan', '3', 'Unknown', '10'], key=_label_sort_key) == \
+        ['3', '10', 'Fibroblast', 'Unknown', 'nan']

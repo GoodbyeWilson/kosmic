@@ -520,6 +520,21 @@ def _viridis_color(t: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _label_sort_key(label):
+    """Numbered clusters first in numeric order, then names; 'nan' last.
+
+    A study whose excluded donors were never clustered carries NaN in
+    obs['leiden'], which reaches here as the string 'nan'. Mixing int and
+    str keys made sorted() raise and the plot never drew.
+    """
+    text = str(label)
+    if text.isdigit():
+        return (0, int(text), '')
+    if text.lower() in ('nan', 'none', ''):
+        return (2, 0, text)
+    return (1, 0, text)
+
+
 class _UMAPWidget(QWidget):
     """
     Interactive pyqtgraph scatter plot for UMAP/t-SNE embeddings.
@@ -665,8 +680,7 @@ class _UMAPWidget(QWidget):
         self._is_continuous = False
 
         label_arr = np.asarray(labels)
-        unique = sorted(set(label_arr.tolist()),
-                        key=lambda x: int(x) if str(x).isdigit() else x)
+        unique = sorted(set(label_arr.tolist()), key=_label_sort_key)
         n_categories = len(unique)
         label_to_idx = {lb: i for i, lb in enumerate(unique)}
 

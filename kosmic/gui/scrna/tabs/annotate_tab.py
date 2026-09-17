@@ -228,7 +228,8 @@ class MarkerScoringWorker(BaseWorker):
             }
 
             self.progress.emit("\nCluster \u2192 Cell Type mapping:")
-            for cluster, ctype in sorted(cluster_types.items(), key=lambda x: int(x[0]) if x[0].isdigit() else x[0]):
+            for cluster, ctype in sorted(cluster_types.items(),
+                                         key=lambda x: (0, int(x[0]), '') if x[0].isdigit() else (1, 0, x[0])):
                 details = annotation_details.get(str(cluster), {})
                 n_cells = details.get('n_cells', 0)
                 best_score = details.get('best_score', 0)
