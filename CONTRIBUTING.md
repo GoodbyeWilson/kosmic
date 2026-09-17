@@ -248,8 +248,7 @@ Add a title for any new stage key to `_STAGE_TITLES` in
    approach before you spend time on it.
 5. No AI attribution in commit messages or PR descriptions: no
    assistant co-author trailer, no "generated with" line. GitHub turns
-   such trailers into a listed contributor. The CI job *no AI
-   attribution* refuses a PR that carries one; turn the byline off in
-   your own assistant's settings rather than stripping it by hand.
+   such trailers into a listed contributor. Turn the byline off in your
+   own assistant's settings rather than stripping it by hand.
 
 Small, focused PRs get reviewed faster than large ones.
