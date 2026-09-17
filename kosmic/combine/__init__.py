@@ -21,7 +21,51 @@ import anndata as ad
 import numpy as np
 
 
-_OBS_KEEP_CANDIDATES = ('sample', 'condition', 'cell_type', '_role')
+# obs columns carried from each study onto the master. The atlas labels
+# ('cell_type_atlas', 'leiden_atlas') are there so an atlas re-created
+# after propagation -- for example uncapped, as the container for the
+# mega-analysis DE -- still carries the shared labels; 'sex' and 'age' so
+# they are available as DE covariates.
+_OBS_KEEP_CANDIDATES = ('sample', 'condition', 'cell_type', '_role',
+                        'cell_type_atlas', 'leiden_atlas', 'sex', 'age')
+
+
+def _kept_columns_across(study_h5ad_paths) -> list[str]:
+    """The kept obs columns any of the studies has (obs read only, no X).
+
+    'sex' counts as present when the study designates a sex column in
+    uns['sex_column'] or carries a recognisable one, since _unify_sex_column
+    will write it.
+    """
+    import h5py
+    from kosmic.scrna.inspect.sex import SEX_COLUMN_CANDIDATES
+    found: set[str] = set()
+    for path in study_h5ad_paths:
+        with h5py.File(path, 'r') as h:
+            cols = set(h['obs'].keys()) if 'obs' in h else set()
+            found |= {c for c in _OBS_KEEP_CANDIDATES if c in cols}
+            has_designation = 'uns' in h and 'sex_column' in h['uns']
+            if has_designation or any(c in cols for c in SEX_COLUMN_CANDIDATES):
+                found.add('sex')
+    return [c for c in _OBS_KEEP_CANDIDATES if c in found]
+
+
+def _unify_sex_column(a, designated: Optional[str]) -> None:
+    """Write obs['sex'] as 'female' / 'male' (or '') from the designated column.
+
+    'designated' is the study's uns['sex_column'] -- the column the Inspect
+    step settled on ('sex_inferred' when the sex was called from XIST and
+    Y genes). With no designation, an existing recorded sex column is used,
+    normalised the same way; with neither, no column is written.
+    """
+    from kosmic.scrna.inspect.sex import normalise_sex_value, recorded_sex_column
+    col = designated
+    if not col or col not in a.obs.columns:
+        col = recorded_sex_column(a.obs)
+    if not col:
+        return
+    values = a.obs[col].astype(object).map(normalise_sex_value)
+    a.obs['sex'] = values.fillna('').astype(str).values
 
 
 def concat_studies(
@@ -94,6 +138,12 @@ def concat_studies(
     temp_files: list[Path] = []
     study_names: list[str] = []
 
+    # concat_on_disk joins obs columns by intersection, so a column that
+    # only some studies carry (age, or atlas labels on a study added
+    # later) would vanish. Every study gets the union of the kept
+    # columns, blank where it has none.
+    union_cols = _kept_columns_across(study_h5ad_paths)
+
     try:
         for path in study_h5ad_paths:
             path = Path(path)
@@ -103,6 +153,7 @@ def concat_studies(
                     f"Extracting raw counts: {accession} (from {path.parent.name}/)...")
 
             a = ad.read_h5ad(path)
+            sex_col = a.uns.get('sex_column') if isinstance(a.uns, dict) else None
             from kosmic.scrna.counts import counts_adata
             a = counts_adata(a, copy=False)
 
@@ -130,6 +181,10 @@ def concat_studies(
                 if len(keep) < a.n_vars:
                     a = a[:, keep].copy()
 
+            # One 'sex' column in female/male form, from whichever column
+            # the study's Inspect step designated (recorded or inferred).
+            _unify_sex_column(a, sex_col)
+
             # Strip per-study cruft; PCA/UMAP/etc. recomputed on master.
             a.obsm = None
             a.varm = None
@@ -147,6 +202,10 @@ def concat_studies(
 
             keep_cols = [c for c in _OBS_KEEP_CANDIDATES if c in a.obs.columns]
             a.obs = a.obs[keep_cols].copy()
+            for c in union_cols:
+                if c not in a.obs.columns:
+                    a.obs[c] = np.nan if c == 'age' else ''
+            a.obs = a.obs[[c for c in _OBS_KEEP_CANDIDATES if c in a.obs.columns]]
 
             temp_path = temp_dir / f"{accession}.h5ad"
             a.write_h5ad(temp_path)
