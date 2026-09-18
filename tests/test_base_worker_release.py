@@ -92,3 +92,12 @@ def test_every_worker_reports_memory_when_it_finishes(qapp_or_none=None):
     w.progress.connect(seen.append)
     w.run()
     assert any(m.startswith('W: memory') for m in seen), seen
+
+
+def test_memory_readout_works_without_psutil(monkeypatch):
+    """CI has no psutil; the operating system must answer instead."""
+    import sys
+    from kosmic.gui.shared.widgets import base_worker
+    monkeypatch.setitem(sys.modules, 'psutil', None)
+    got = base_worker._memory_gb()
+    assert got is not None and got[0] > 0

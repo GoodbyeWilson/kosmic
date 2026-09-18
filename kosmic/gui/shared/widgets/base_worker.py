@@ -99,8 +99,13 @@ def _memory_gb():
                             ('PeakPagefileUsage', ctypes.c_size_t)]
             pmc = _PMC()
             pmc.cb = ctypes.sizeof(_PMC)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()
-            if ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+            psapi = ctypes.windll.psapi
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+            if psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
                 return pmc.WorkingSetSize / 1e9, pmc.PeakWorkingSetSize / 1e9
         else:
             import resource
