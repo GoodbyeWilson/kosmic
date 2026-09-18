@@ -57,5 +57,12 @@ jobs:
       - name: Lint
         run: ruff check kosmic/ main.py tests/
 
+      # The two Meta-page GUI test files segfault on the Linux runner
+      # when they follow other GUI tests in the same process (pyqtgraph
+      # widget construction after another test's widgets are collected).
+      # They run in their own process; everything else runs together.
       - name: Test
-        run: pytest tests/ -q
+        run: pytest tests/ -q --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
+
+      - name: Test (Meta page GUI, own process)
+        run: pytest tests/test_ma_gene_search.py tests/test_meta_workflow_steps.py -q
