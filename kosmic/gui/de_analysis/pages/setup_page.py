@@ -22,6 +22,10 @@ from kosmic.gui.shared.widgets import BaseWorker
 from kosmic.gui.shared import dialogs, run_worker
 
 
+# A column with more distinct values than this is per cell, not per donor.
+SAMPLE_COLUMN_MAX_VALUES = 5000
+
+
 class _CountsLoadWorker(BaseWorker):
     """Load a study for DE: obs, var and the counts as X, nothing else.
 
@@ -552,7 +556,13 @@ class SetupPage(SimplePage):
                     or hasattr(series, 'cat')):
                 continue
             n_unique = series.nunique()
-            if n_unique < 2 or n_unique > 100:
+            # No upper cap on donors: a combined atlas has hundreds. The
+            # old cap of 100 dropped the atlas's 'sample' column (141
+            # donors) from the list, the fallback chose 'condition', and
+            # a run aggregated 285,000 cardiomyocytes into six
+            # "donors" -- one per condition string -- with no warning.
+            # The cap that matters is against per-cell columns.
+            if n_unique < 2 or n_unique > SAMPLE_COLUMN_MAX_VALUES:
                 continue
             if roles is not None:
                 # Every value of a real sample column sits in one arm.

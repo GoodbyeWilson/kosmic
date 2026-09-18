@@ -4,6 +4,7 @@
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 
 from kosmic.scrna.inspect.detection import detect_species, format_gene_for_species
 from kosmic.scrna.counts import count_source, count_var_names, counts_adata, has_counts_layer
@@ -206,36 +207,43 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
     depth_of = dict(zip(profiles['sample'], profiles['total_counts']))
     kept = set(profiles.loc[profiles['kept'], 'sample'])
 
-    for sample_id in profiles['sample']:
-        if sample_id not in kept:
-            continue
+    # One pass: an indicator matrix (samples x cells) times the counts
+    # gives every sample's sum without densifying anything. The earlier
+    # loop took each sample's rows with .toarray(); with the condition
+    # column mistaken for the sample column a "sample" was 110,000
+    # cardiomyocytes, 10 GB dense each, and the machine ran out.
+    kept_samples = [s for s in profiles['sample'] if s in kept]
+    sample_index = {s: i for i, s in enumerate(kept_samples)}
+    codes = adata_for_de.obs[sample_col].map(sample_index)
+    in_kept = codes.notna().to_numpy()
+    rows = codes[in_kept].astype(int).to_numpy()
+    cols = np.flatnonzero(in_kept)
+    indicator = sp.csr_matrix(
+        (np.ones(len(rows), dtype=np.float64), (rows, cols)),
+        shape=(len(kept_samples), adata_for_de.n_obs))
+    X_all = adata_for_de.X
+    sums = indicator @ X_all
+    sums = np.asarray(sums.todense() if sp.issparse(sums) else sums, dtype=np.float64)
+    n_per_sample = np.asarray(indicator.sum(axis=1)).ravel()
+    if aggregate != 'sum':
+        sums = sums / np.maximum(n_per_sample, 1)[:, None]
+
+    for i, sample_id in enumerate(kept_samples):
         mask = adata_for_de.obs[sample_col] == sample_id
-        sample_cells = adata_for_de[mask]
-
-        if hasattr(sample_cells.X, 'toarray'):
-            X = sample_cells.X.toarray()
-        else:
-            X = np.asarray(sample_cells.X)
-
-        if aggregate == 'sum':
-            expression = np.sum(X, axis=0)
-        else:
-            expression = np.mean(X, axis=0)
-
-        expression = np.asarray(expression).flatten()
-        pseudobulk_data.append(expression)
+        sample_cells = adata_for_de.obs[mask]
+        pseudobulk_data.append(sums[i])
 
         meta = {
             'sample': sample_id,
-            'condition': sample_cells.obs[condition_col].iloc[0],
-            'n_cells': sample_cells.n_obs,
+            'condition': sample_cells[condition_col].iloc[0],
+            'n_cells': int(n_per_sample[i]),
             'total_counts': int(depth_of[sample_id]),
         }
         if has_role:
-            meta['role'] = str(sample_cells.obs['_role'].iloc[0])
+            meta['role'] = str(sample_cells['_role'].iloc[0])
         for col in (covariates or ()):
-            if col in sample_cells.obs.columns:
-                values = sample_cells.obs[col].astype(str)
+            if col in sample_cells.columns:
+                values = sample_cells[col].astype(str)
                 # One value per sample or nothing: a covariate that
                 # differs between a sample's own cells is not a
                 # sample-level property.
@@ -1131,6 +1139,34 @@ def donors_meeting_min_cells(adata, sample_col, min_cells,
     return adata.obs[sample_col].isin(keep).to_numpy()
 
 
+def check_sample_column(obs, sample_col, condition_col) -> None:
+    """Refuse a sample column that is really the condition column.
+
+    Pseudobulk aggregates one profile per value of the sample column, so
+    a column with one value per condition turns a 159-donor atlas into
+    six "donors" and the model into a test with no replication. That
+    happened on the DCM atlas when the setup page's candidate list
+    dropped the real sample column; the run completed and wrote results
+    with nothing to say it was wrong. Raises ValueError with the reason.
+    """
+    if sample_col not in obs.columns or condition_col not in obs.columns:
+        return
+    if sample_col == condition_col:
+        raise ValueError(
+            f"The sample column and the condition column are both '{sample_col}'. "
+            "Pseudobulk needs one profile per donor; choose the donor / sample "
+            "column in Setup.")
+    samples = obs[sample_col].astype(str)
+    conditions = obs[condition_col].astype(str)
+    n_samples = samples.nunique()
+    if n_samples <= conditions.nunique():
+        raise ValueError(
+            f"'{sample_col}' has {n_samples} value(s), no more than the condition "
+            f"column '{condition_col}' ({conditions.nunique()}): it identifies "
+            "conditions, not donors. Pseudobulk needs one profile per donor; "
+            "choose the donor / sample column in Setup.")
+
+
 def run_de_pipeline(adata, sample_col, condition_col,
                     pathway_gene_sets, min_cells=DE_MIN_CELLS, min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES,
                     min_counts=DE_MIN_COUNTS,
@@ -1215,6 +1251,8 @@ def run_de_pipeline(adata, sample_col, condition_col,
     -------
     de_results, significant_genes, pathway_coverage, sample_df
     """
+    if unit == 'sample':
+        check_sample_column(adata.obs, sample_col, condition_col)
     if '_role' not in adata.obs.columns:
         # Reconstruct _role from a saved role_map if one exists (h5ad written
         # mid-flow may have role_map in uns but no materialised _role column).
