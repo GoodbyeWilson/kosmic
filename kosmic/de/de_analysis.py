@@ -133,6 +133,23 @@ def dropped_donor_message(profiles):
             + "; ".join(parts))
 
 
+def _indicator_sums(indicator, X, chunk_cells=25_000):
+    """``indicator @ X`` as a dense float64 array, in blocks of cells.
+
+    scipy upcasts a float32 count matrix to float64 to multiply it by a
+    float64 indicator -- a hidden full copy (5 GB on the atlas's
+    cardiomyocytes). Multiplying block by block keeps the copy to one
+    block and the accumulation exact in float64.
+    """
+    n_cells = X.shape[0]
+    out = np.zeros((indicator.shape[0], X.shape[1]), dtype=np.float64)
+    for start in range(0, n_cells, chunk_cells):
+        stop = min(start + chunk_cells, n_cells)
+        part = indicator[:, start:stop] @ X[start:stop]
+        out += np.asarray(part.todense() if sp.issparse(part) else part, dtype=np.float64)
+    return out
+
+
 def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_CELLS,
                       aggregate='mean', counts_layer=None, covariates=None,
                       min_counts=DE_MIN_COUNTS):
@@ -184,21 +201,26 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
     genes_used : list of str
         Gene names in the matrix (subset of 'genes' present in adata).
     """
-    # One count source (kosmic.scrna.counts), and only the requested
-    # genes are copied: the previous adata[:, genes].copy() duplicated X
-    # and every layer for those genes before swapping in the counts.
-    _, count_names, _ = count_source(adata, counts_layer)
-    present = set(count_names)
-    genes_used = [g for g in genes if g in present]
+    # One count source (kosmic.scrna.counts), read in place. Nothing of
+    # the count matrix is copied: the sums are taken over every gene and
+    # the requested genes are picked out of the small per-sample result.
+    # Subsetting the matrix by gene first (counts_adata(genes=...)) cost
+    # two copies of the cell type's counts -- 10 GB on the atlas's
+    # cardiomyocytes, for a gene list that was the whole genome.
+    X_all, count_names, _ = count_source(adata, counts_layer)
+    col_of = {g: i for i, g in enumerate(count_names)}
+    genes_used = [g for g in genes if g in col_of]
     if not genes_used:
         return np.array([]), pd.DataFrame(), []
-    adata_for_de = counts_adata(adata, genes=genes_used, counts_layer=counts_layer)
+    gene_cols = np.fromiter((col_of[g] for g in genes_used), dtype=np.int64,
+                            count=len(genes_used))
+    obs = adata.obs
 
     pseudobulk_data = []
     sample_metadata = []
 
     # All cells of one sample share the same role -- take the first cell's _role.
-    has_role = '_role' in adata_for_de.obs.columns
+    has_role = '_role' in obs.columns
 
     # Depth is summed over every gene of the source, not the subset in
     # 'adata_for_de', so the same donors are kept whatever genes a run asks for.
@@ -214,23 +236,21 @@ def create_pseudobulk(adata, genes, sample_col, condition_col, min_cells=DE_MIN_
     # cardiomyocytes, 10 GB dense each, and the machine ran out.
     kept_samples = [s for s in profiles['sample'] if s in kept]
     sample_index = {s: i for i, s in enumerate(kept_samples)}
-    codes = adata_for_de.obs[sample_col].map(sample_index)
+    codes = obs[sample_col].map(sample_index)
     in_kept = codes.notna().to_numpy()
     rows = codes[in_kept].astype(int).to_numpy()
     cols = np.flatnonzero(in_kept)
-    indicator = sp.csr_matrix(
+    indicator = sp.csc_matrix(
         (np.ones(len(rows), dtype=np.float64), (rows, cols)),
-        shape=(len(kept_samples), adata_for_de.n_obs))
-    X_all = adata_for_de.X
-    sums = indicator @ X_all
-    sums = np.asarray(sums.todense() if sp.issparse(sums) else sums, dtype=np.float64)
+        shape=(len(kept_samples), X_all.shape[0]))
+    sums = _indicator_sums(indicator, X_all)[:, gene_cols]
     n_per_sample = np.asarray(indicator.sum(axis=1)).ravel()
     if aggregate != 'sum':
         sums = sums / np.maximum(n_per_sample, 1)[:, None]
 
     for i, sample_id in enumerate(kept_samples):
-        mask = adata_for_de.obs[sample_col] == sample_id
-        sample_cells = adata_for_de.obs[mask]
+        mask = obs[sample_col] == sample_id
+        sample_cells = obs[mask]
         pseudobulk_data.append(sums[i])
 
         meta = {
@@ -1477,8 +1497,9 @@ def run_de_pipeline(adata, sample_col, condition_col,
     # "% cells expressing" separates real biological hits from sparse-noise
     # artefacts in snRNA-seq where dropout is brutal.
     _progress("Annotating cell-level expression rates...")
-    de_results = annotate_pct_expressing(de_results, adata)
-    significant_genes = annotate_pct_expressing(significant_genes, adata)
+    per_var = pct_expressing_per_var(adata) if '_role' in adata.obs.columns else None
+    de_results = annotate_pct_expressing(de_results, adata, per_var)
+    significant_genes = annotate_pct_expressing(significant_genes, adata, per_var)
 
     # Stash the pre-restriction genome-wide ranking so genome-wide consumers
     # (e.g. fgsea) are not limited to the hypothesis gene set.
@@ -1618,14 +1639,55 @@ def _run_cell_level_de_pipeline(adata, metabolic_genes, pathway_coverage,
     de_results, significant_genes = annotate_de_results(de_results, pathway_coverage)
 
     _progress("Annotating cell-level expression rates...")
-    de_results = annotate_pct_expressing(de_results, adata)
-    significant_genes = annotate_pct_expressing(significant_genes, adata)
+    per_var = pct_expressing_per_var(adata) if '_role' in adata.obs.columns else None
+    de_results = annotate_pct_expressing(de_results, adata, per_var)
+    significant_genes = annotate_pct_expressing(significant_genes, adata, per_var)
 
     return de_results, significant_genes, pathway_coverage, sample_df
 
 
-def annotate_pct_expressing(de_results, adata):
+def pct_expressing_per_var(adata, chunk_cells=10_000):
+    """Fraction of disease and of control cells with a non-zero value,
+    per gene of ``adata.X``: ``(pct_disease, pct_control)`` arrays.
+
+    Counted in row chunks so nothing the size of the matrix is
+    allocated: the previous ``(X != 0).astype(float32)`` then
+    ``binary[is_disease]`` made two copies of the cell type's counts
+    (8.7 GB on the atlas's cardiomyocytes), twice per run.
+    """
+    from scipy import sparse as sp
+    role = adata.obs['_role'].astype(str).values
+    is_disease = role == 'disease'
+    is_control = role == 'control'
+    n_d, n_c = int(is_disease.sum()), int(is_control.sum())
+    X = adata.X
+    n_cells, n_genes = X.shape
+    d_counts = np.zeros(n_genes, dtype=np.float64)
+    c_counts = np.zeros(n_genes, dtype=np.float64)
+    for start in range(0, n_cells, chunk_cells):
+        stop = min(start + chunk_cells, n_cells)
+        block = X[start:stop]
+        if sp.issparse(block):
+            block = block.tocsr()
+            nz = block.data != 0
+            # column of every stored non-zero, and the role of its row
+            row_of = np.repeat(np.arange(stop - start, dtype=np.int32), np.diff(block.indptr))
+            cols = block.indices[nz]
+            rows = row_of[nz]
+            d_counts += np.bincount(cols[is_disease[start:stop][rows]], minlength=n_genes)
+            c_counts += np.bincount(cols[is_control[start:stop][rows]], minlength=n_genes)
+        else:
+            nz = np.asarray(block) != 0
+            d_counts += nz[is_disease[start:stop]].sum(axis=0)
+            c_counts += nz[is_control[start:stop]].sum(axis=0)
+    return d_counts / max(n_d, 1), c_counts / max(n_c, 1)
+
+
+def annotate_pct_expressing(de_results, adata, per_var=None):
     """Add 'pct_disease' / 'pct_control' columns to a DE results frame.
+
+    ``per_var`` is the output of :func:`pct_expressing_per_var`, so one
+    pass over the matrix serves every frame annotated from it.
 
     Each value is the fraction of cells (cell-level, not pseudobulk) in
     that role group with a non-zero count for the gene. Vectorised over
@@ -1641,28 +1703,9 @@ def annotate_pct_expressing(de_results, adata):
     if 'names' not in de_results.columns:
         return de_results
 
-    from scipy import sparse as sp
-
-    is_disease = (adata.obs['_role'].astype(str) == 'disease').values
-    is_control = (adata.obs['_role'].astype(str) == 'control').values
-    n_d = int(is_disease.sum())
-    n_c = int(is_control.sum())
-
-    X = adata.X
-    if sp.issparse(X):
-        # (X != 0) on a sparse matrix returns sparse; sum over axis 0 gives per-gene counts.
-        binary = (X != 0).astype(np.float32)
-        d_counts = (np.asarray(binary[is_disease].sum(axis=0)).flatten()
-                    if n_d > 0 else np.zeros(X.shape[1]))
-        c_counts = (np.asarray(binary[is_control].sum(axis=0)).flatten()
-                    if n_c > 0 else np.zeros(X.shape[1]))
-    else:
-        X_arr = np.asarray(X)
-        d_counts = (X_arr[is_disease] > 0).sum(axis=0) if n_d > 0 else np.zeros(X_arr.shape[1])
-        c_counts = (X_arr[is_control] > 0).sum(axis=0) if n_c > 0 else np.zeros(X_arr.shape[1])
-
-    pct_d_per_var = d_counts / max(n_d, 1)
-    pct_c_per_var = c_counts / max(n_c, 1)
+    if per_var is None:
+        per_var = pct_expressing_per_var(adata)
+    pct_d_per_var, pct_c_per_var = per_var
 
     var_to_idx = {str(g): i for i, g in enumerate(adata.var_names)}
     names_arr = de_results['names'].astype(str).values

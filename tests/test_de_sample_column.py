@@ -100,3 +100,53 @@ def test_setup_page_combo_offers_a_sample_column_with_hundreds_of_donors(tmp_pat
     ws.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+def test_pseudobulk_takes_genes_in_the_requested_order_without_copying_the_matrix():
+    """The requested genes are picked out of the per-sample sums, so the
+    columns follow the request (not the matrix), genes absent from the
+    matrix are dropped, and the count matrix itself is untouched."""
+    import anndata as ad
+    import scipy.sparse as sp
+    from kosmic.de.de_analysis import create_pseudobulk
+    rng = np.random.default_rng(1)
+    n, g = 200, 30
+    obs = _obs(10, per=20)
+    X = sp.csr_matrix(rng.poisson(1.0, size=(n, g)).astype(np.float32))
+    a = ad.AnnData(X=X, obs=obs, var=pd.DataFrame(index=[f"G{j}" for j in range(g)]))
+    genes = ["G7", "G2", "NOT_A_GENE", "G29", "G0"]
+    pb, sdf, used = create_pseudobulk(a, genes, "sample", "condition", min_cells=1, aggregate="sum")
+    assert used == ["G7", "G2", "G29", "G0"]
+    dense = X.toarray()
+    for j, gname in enumerate(used):
+        col = int(gname[1:])
+        expected = [dense[(obs["sample"] == s).to_numpy(), col].sum() for s in sdf["sample"]]
+        assert np.allclose(pb[:, j], expected)
+    assert a.X is X                                     # no copy was made or swapped in
+
+
+def test_pct_expressing_per_var_is_chunked_and_exact():
+    """Row-chunked non-zero counts per gene equal the dense computation,
+    across chunk boundaries and with explicit zeros stored in the matrix."""
+    import anndata as ad
+    import scipy.sparse as sp
+    from kosmic.de.de_analysis import annotate_pct_expressing, pct_expressing_per_var
+    rng = np.random.default_rng(2)
+    n, g = 333, 12
+    obs = _obs(37, per=9)
+    dense = rng.poisson(0.7, size=(n, g)).astype(np.float32)
+    X = sp.csr_matrix(dense)
+    X.data[:5] = 0.0                                    # stored zeros must not count
+    dense = X.toarray()
+    a = ad.AnnData(X=X, obs=obs, var=pd.DataFrame(index=[f"G{j}" for j in range(g)]))
+    pd_, pc_ = pct_expressing_per_var(a, chunk_cells=50)
+    is_d = (obs["_role"] == "disease").to_numpy()
+    assert np.allclose(pd_, (dense[is_d] != 0).mean(axis=0))
+    assert np.allclose(pc_, (dense[~is_d] != 0).mean(axis=0))
+    de = pd.DataFrame({"names": ["G3", "G0", "MISSING"]})
+    out = annotate_pct_expressing(de, a, (pd_, pc_))
+    assert np.isclose(out.pct_disease[0], pd_[3]) and np.isclose(out.pct_control[1], pc_[0])
+    assert np.isnan(out.pct_disease[2])
+    dense_a = ad.AnnData(X=dense.copy(), obs=obs, var=a.var.copy())
+    pdd, pcd = pct_expressing_per_var(dense_a, chunk_cells=100)
+    assert np.allclose(pdd, pd_) and np.allclose(pcd, pc_)
