@@ -179,10 +179,7 @@ and loads every layer, so it costs the whole counts matrix. Code that
 needs only the cells, the shape or the gene names reads them through
 `kosmic/scrna/load/h5ad_meta.py` (`read_obs`, `read_shape`,
 `write_obs`) and `read_var_names` in `kosmic/scrna/load/gene_overlap.py`,
-which touch nothing else. Every worker reports its resident memory
-before and after, and the process peak, when it finishes
-(`kosmic/gui/shared/widgets/base_worker.py`), so the output panel
-records what each step cost.
+which touch nothing else.
 
 **The processed file holds the study's state.** Every workspace reads and writes
 the study's `processed_data/*.h5ad`. Metadata that other workspaces

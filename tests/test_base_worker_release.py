@@ -75,30 +75,3 @@ def test_inputs_released_after_failure(app):
     w.run()
     assert failures and "boom" in failures[0]
     assert w.adata is None
-
-
-def test_every_worker_reports_memory_when_it_finishes(qapp_or_none=None):
-    """The output panel always says what a step cost in memory."""
-    from kosmic.gui.shared.widgets.base_worker import BaseWorker, memory_report
-
-    class W(BaseWorker):
-        def _run(self):
-            return 1
-
-    text = memory_report('W', (1.0, 2.0), (1.5, 2.0))
-    assert text == 'W: memory 1.0 GB before, 1.5 GB after, process peak 2.0 GB'
-    w = W()
-    seen = []
-    w.progress.connect(seen.append)
-    w.run()
-    assert not any(m.startswith('W: memory') for m in seen)      # nothing extra from the thread
-    assert w.memory_line().startswith('W: memory')               # the owner reads it
-
-
-def test_memory_readout_works_without_psutil(monkeypatch):
-    """CI has no psutil; the operating system must answer instead."""
-    import sys
-    from kosmic.gui.shared.widgets import base_worker
-    monkeypatch.setitem(sys.modules, 'psutil', None)
-    got = base_worker._memory_gb()
-    assert got is not None and got[0] > 0

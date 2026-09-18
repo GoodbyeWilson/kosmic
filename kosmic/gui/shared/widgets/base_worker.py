@@ -57,85 +57,6 @@ import traceback
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
-def _memory_gb():
-    """(resident, peak resident) of this process in GB, or None.
-
-    psutil when present; otherwise the operating system directly
-    (/proc on Linux, GetProcessMemoryInfo on Windows, rusage on macOS),
-    so the readout does not depend on an optional package.
-    """
-    try:
-        import psutil
-        info = psutil.Process().memory_info()
-        peak = getattr(info, 'peak_wset', None)
-        return info.rss / 1e9, (peak / 1e9 if peak else None)
-    except Exception:
-        pass
-    try:
-        import sys
-        if sys.platform.startswith('linux'):
-            rss = peak = None
-            with open('/proc/self/status') as f:
-                for line in f:
-                    if line.startswith('VmRSS:'):
-                        rss = int(line.split()[1]) * 1024
-                    elif line.startswith('VmHWM:'):
-                        peak = int(line.split()[1]) * 1024
-            if rss is not None:
-                return rss / 1e9, (peak / 1e9 if peak else None)
-        elif sys.platform == 'win32':
-            import ctypes
-            from ctypes import wintypes
-
-            class _PMC(ctypes.Structure):
-                _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
-                            ('PeakWorkingSetSize', ctypes.c_size_t),
-                            ('WorkingSetSize', ctypes.c_size_t),
-                            ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-                            ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                            ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-                            ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                            ('PagefileUsage', ctypes.c_size_t),
-                            ('PeakPagefileUsage', ctypes.c_size_t)]
-            pmc = _PMC()
-            pmc.cb = ctypes.sizeof(_PMC)
-            kernel32 = ctypes.windll.kernel32
-            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-            psapi = ctypes.windll.psapi
-            psapi.GetProcessMemoryInfo.argtypes = [
-                wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
-            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
-            if psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
-                return pmc.WorkingSetSize / 1e9, pmc.PeakWorkingSetSize / 1e9
-        else:
-            import resource
-            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS
-            return peak / 1e9, peak / 1e9
-    except Exception:
-        pass
-    return None
-
-
-def memory_report(step: str, before, after=None) -> str:
-    """One line saying what a step cost: resident before, after, and the
-    process peak. The peak is per process, not per step, so it only moves
-    when a step sets a new high; the step's own cost is the difference
-    between after and before plus whatever transient the peak shows.
-
-    Every worker records these, and run_worker writes the line to the
-    output panel when the step completes, so the panel always says what
-    is in memory. Nothing else in KOSMIC did.
-    """
-    if after is None:
-        after = _memory_gb()
-    if before is None or after is None:
-        return f"{step}: memory not available"
-    text = f"{step}: memory {before[0]:.1f} GB before, {after[0]:.1f} GB after"
-    if after[1] is not None:
-        text += f", process peak {after[1]:.1f} GB"
-    return text
-
-
 class BaseWorker(QThread):
     """QThread with uniform success/error signal shape + exception safety.
 
@@ -166,27 +87,14 @@ class BaseWorker(QThread):
             f"{type(self).__name__} must override _run()")
 
     def run(self) -> None:  # final -- subclasses override _run() instead
-        # Memory before and after the step is recorded on the worker; the
-        # owner reads it on the GUI thread once the step has completed
-        # (run_worker does so). Nothing is emitted from this thread that
-        # the completion handlers did not already expect.
-        self.memory_before = _memory_gb()
         try:
             result = self._run()
         except Exception as exc:  # noqa: BLE001 -- by design
-            self.memory_after = _memory_gb()
             self.failed.emit(f"{exc}\n{traceback.format_exc()}")
         else:
-            self.memory_after = _memory_gb()
             self.finished_ok.emit(result)
         finally:
             self._release_inputs()
-
-    def memory_line(self) -> str:
-        """What this step cost, for the output panel; see memory_report."""
-        return memory_report(type(self).__name__,
-                             getattr(self, 'memory_before', None),
-                             getattr(self, 'memory_after', None))
 
     def _release_inputs(self) -> None:
         """Drop references to any AnnData the worker was given.
