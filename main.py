@@ -859,14 +859,11 @@ class AppWindow(QMainWindow):
         caller falls back to offering every study rather than refusing.
         """
         try:
-            import anndata as ad
-            backed = ad.read_h5ad(master_path, backed='r')
-            try:
-                if 'study' not in backed.obs.columns:
-                    return set()
-                return {str(v) for v in backed.obs['study'].unique()}
-            finally:
-                backed.file.close()
+            from kosmic.scrna.load.h5ad_meta import read_obs
+            obs = read_obs(master_path)
+            if 'study' not in obs.columns:
+                return set()
+            return {str(v) for v in obs['study'].unique()}
         except Exception:
             return set()
 

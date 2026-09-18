@@ -27,6 +27,11 @@ import pandas as pd
 # after propagation -- for example uncapped, as the container for the
 # mega-analysis DE -- still carries the shared labels; 'sex' and 'age' so
 # they are available as DE covariates.
+# Included cells absent from the master, as a fraction of the study's
+# included cells, above which they are projected by kNN (a cap was used)
+# rather than left unlabelled (the master's own QC removed a few).
+PROJECT_MIN_FRACTION = 0.01
+
 _OBS_KEEP_CANDIDATES = ('sample', 'condition', 'cell_type', '_role',
                         'cell_type_atlas', 'leiden_atlas', 'sex', 'age')
 
@@ -244,12 +249,9 @@ def concat_studies(
     _ensure_int64_sparse(output_path, progress_callback)
 
     if progress_callback:
-        a = ad.read_h5ad(output_path, backed='r')
-        try:
-            progress_callback(
-                f"Master: {a.n_obs:,} cells x {a.n_vars:,} genes")
-        finally:
-            a.file.close()
+        from kosmic.scrna.load.h5ad_meta import read_shape
+        n_obs, n_vars = read_shape(output_path)
+        progress_callback(f"Master: {n_obs:,} cells x {n_vars:,} genes")
 
     return output_path
 
@@ -293,16 +295,16 @@ def _ensure_int64_sparse(
     a.write_h5ad(path)
 
 
-def _write_label(study, col: str, values, suffix: str) -> None:
-    """Store an atlas label without clobbering the study's own.
+def _write_label(obs, col: str, values, suffix: str) -> None:
+    """Store an atlas label in an obs frame without clobbering the study's own.
 
     Always writes '<col><suffix>'. Also fills the plain column when the
     study does not already have one, so a study that was never annotated
     individually is still usable downstream.
     """
-    study.obs[f"{col}{suffix}"] = values
-    if col not in study.obs.columns:
-        study.obs[col] = values
+    obs[f"{col}{suffix}"] = values
+    if col not in obs.columns:
+        obs[col] = values
 
 
 def propagate_labels(
@@ -359,16 +361,16 @@ def propagate_labels(
     # Read master.obs only (no X) -- a few MB max.
     if progress_callback:
         progress_callback(f"Reading master labels for {accession}...")
-    master_backed = ad.read_h5ad(master_h5ad_path, backed='r')
-    try:
-        missing = [c for c in label_cols if c not in master_backed.obs.columns]
-        if missing:
-            raise ValueError(
-                f"Master obs is missing {missing}. Annotate before propagating.")
-        master_obs = master_backed.obs[list(label_cols)].copy()
-        master_obs_names = master_backed.obs_names.to_numpy()
-    finally:
-        master_backed.file.close()
+    # obs only: a backed read would load the master's counts layer.
+    from kosmic.scrna.load.h5ad_meta import read_obs, write_obs
+    _master_obs_full = read_obs(master_h5ad_path)
+    missing = [c for c in label_cols if c not in _master_obs_full.columns]
+    if missing:
+        raise ValueError(
+            f"Master obs is missing {missing}. Annotate before propagating.")
+    master_obs = _master_obs_full[list(label_cols)].copy()
+    master_obs_names = _master_obs_full.index.to_numpy()
+    del _master_obs_full
 
     # Cells in the master are indexed as '<original>-<accession>'
     # (concat_studies uses index_unique='-'). Recover the original
@@ -382,11 +384,16 @@ def propagate_labels(
         for n in master_obs_names
     ]
 
+    # Only obs is needed to join labels by barcode; the matrix stays on
+    # disk. A 590,000-cell study is a few hundred MB this way against
+    # 13 GB loaded whole -- which it was, until this was written.
     if progress_callback:
-        progress_callback(f"Loading {study_h5ad_path.name}...")
-    study = ad.read_h5ad(study_h5ad_path)
+        progress_callback(f"Reading cells of {study_h5ad_path.name}...")
+    study_obs = read_obs(study_h5ad_path)
+    study_n_obs = len(study_obs)
+    study_obs_names = study_obs.index
 
-    study_cells = set(study.obs_names)
+    study_cells = set(study_obs_names)
     master_cells_for_study = set(master_for_study.index)
     coverage = len(master_cells_for_study & study_cells) / max(1, len(study_cells))
 
@@ -397,36 +404,53 @@ def propagate_labels(
     # projecting them would invent labels -- from a space they were never
     # part of -- for cells you have already said are not part of the
     # analysis. Barcode-join what is there and leave the rest unlabelled.
-    uncovered = study.obs_names[~study.obs_names.isin(master_cells_for_study)]
-    excluded_only = False
-    if len(uncovered) and '_role' in study.obs.columns:
-        roles = study.obs.loc[uncovered, '_role'].astype(str).str.lower()
-        excluded_only = bool((roles == 'exclude').all())
-
-    if coverage >= 0.999 or excluded_only:
-        # Fast path: barcode join.
-        if progress_callback:
-            if excluded_only and coverage < 0.999:
-                progress_callback(
-                    f"Joining labels by barcode; {len(uncovered):,} excluded "
-                    f"cell(s) are not in the master and stay unlabelled...")
-            else:
-                progress_callback(
-                    f"Joining labels by barcode ({coverage*100:.1f}% match)...")
-        joined = master_for_study.reindex(study.obs_names)
-        for col in label_cols:
-            _write_label(study, col, joined[col].values, suffix)
+    uncovered = study_obs_names[~study_obs_names.isin(master_cells_for_study)]
+    if len(uncovered) and '_role' in study_obs.columns:
+        roles = study_obs.loc[uncovered, '_role'].astype(str).str.lower()
+        n_excluded = int((roles == 'exclude').sum())
     else:
-        # Fallback: sc.tl.ingest. Only triggered when a cap was applied.
+        n_excluded = 0
+    # Included cells that are not in the master: either a cap left them
+    # out (an arbitrary subsample, worth projecting) or the master's own
+    # QC removed a handful (not worth projecting -- and on the DCM atlas
+    # 390 such cells once sent a 590,000-cell study through sc.tl.ingest
+    # for two hours). Below the threshold they stay unlabelled.
+    leftover = uncovered[~uncovered.isin(
+        study_obs_names[(study_obs['_role'].astype(str).str.lower() == 'exclude')]
+        if '_role' in study_obs.columns else [])]
+    n_included = study_n_obs - (
+        int((study_obs['_role'].astype(str).str.lower() == 'exclude').sum())
+        if '_role' in study_obs.columns else 0)
+    project = len(leftover) > PROJECT_MIN_FRACTION * max(1, n_included)
+
+    # Every cell that is in the master gets its label by barcode.
+    if progress_callback:
+        msg = f"Joining labels by barcode ({coverage*100:.1f}% of cells are in the master"
+        if n_excluded:
+            msg += f"; {n_excluded:,} excluded cell(s) stay unlabelled"
+        if len(leftover) and not project:
+            msg += (f"; {len(leftover):,} included cell(s) are not in the master "
+                    f"-- removed by its QC -- and stay unlabelled")
+        progress_callback(msg + ")...")
+    joined = master_for_study.reindex(study_obs_names)
+    for col in label_cols:
+        _write_label(study_obs, col, joined[col].values, suffix)
+
+    if project:
+        # A cap was applied: project the absent included cells, and only
+        # those, into the master's PCA space by kNN (sc.tl.ingest).
         if progress_callback:
             progress_callback(
-                f"Master covers {coverage*100:.0f}% of cells; using sc.tl.ingest...")
+                f"{len(leftover):,} included cell(s) are not in the master "
+                f"(a cap was used); projecting them by kNN in the master's "
+                f"PCA space...")
         import scanpy as sc
+        study = ad.read_h5ad(study_h5ad_path)
         master = ad.read_h5ad(master_h5ad_path)
-        if 'X_pca' not in master.obsm:
+        if 'X_pca' not in master.obsm or 'PCs' not in master.varm:
             raise ValueError(
-                "Master h5ad has no 'X_pca' in obsm. Run PCA on the master "
-                "before propagating with a subsample cap.")
+                "Master h5ad has no PCA (obsm['X_pca'] and varm['PCs']). "
+                "Run PCA on the master before propagating with a subsample cap.")
         common = master.var_names.intersection(study.var_names)
         if len(common) < 100:
             raise ValueError(
@@ -434,16 +458,23 @@ def propagate_labels(
                 f"refusing to project.")
         common_list = list(common)
         master_sub = master[:, common_list].copy()
-        study_sub = study[:, common_list].copy()
+        del master
+        study_sub = study[leftover, common_list].copy()
+        del study
         sc.tl.ingest(study_sub, master_sub, obs=list(label_cols))
+        del master_sub
         for col in label_cols:
             if col in study_sub.obs.columns:
-                _write_label(study, col, study_sub.obs[col].values, suffix)
+                projected = joined[col].astype(object).copy()
+                projected.loc[study_sub.obs_names] = study_sub.obs[col].astype(object).values
+                _write_label(study_obs, col, projected.values, suffix)
 
+    # Write obs back in place: the matrix and layers are untouched, so the
+    # file is not rewritten.
     if progress_callback:
-        progress_callback(f"Writing {study_h5ad_path.name}...")
-    study.write_h5ad(study_h5ad_path)
-    return int(study.n_obs)
+        progress_callback(f"Writing labels into {study_h5ad_path.name}...")
+    write_obs(study_h5ad_path, study_obs)
+    return int(study_n_obs)
 
 
 __all__ = ['concat_studies', 'propagate_labels']

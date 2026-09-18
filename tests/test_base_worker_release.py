@@ -75,3 +75,20 @@ def test_inputs_released_after_failure(app):
     w.run()
     assert failures and "boom" in failures[0]
     assert w.adata is None
+
+
+def test_every_worker_reports_memory_when_it_finishes(qapp_or_none=None):
+    """The output panel always says what a step cost in memory."""
+    from kosmic.gui.shared.widgets.base_worker import BaseWorker, memory_report
+
+    class W(BaseWorker):
+        def _run(self):
+            return 1
+
+    text = memory_report('W', (1.0, 2.0))
+    assert text.startswith('W: memory 1.0 GB before,') and 'GB after' in text
+    w = W()
+    seen = []
+    w.progress.connect(seen.append)
+    w.run()
+    assert any(m.startswith('W: memory') for m in seen), seen

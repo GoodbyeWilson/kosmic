@@ -57,6 +57,35 @@ import traceback
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
+def _memory_gb():
+    """(resident, peak resident) of this process in GB, or None."""
+    try:
+        import psutil
+        info = psutil.Process().memory_info()
+        peak = getattr(info, 'peak_wset', None)
+        return info.rss / 1e9, (peak / 1e9 if peak else None)
+    except Exception:
+        return None
+
+
+def memory_report(step: str, before) -> str:
+    """One line saying what a step cost: resident before, after, and the
+    process peak. The peak is per process, not per step, so it only moves
+    when a step sets a new high; the step's own cost is the difference
+    between after and before plus whatever transient the peak shows.
+
+    Every worker emits this when it finishes, so the output panel always
+    says what is in memory. Nothing else in KOSMIC did.
+    """
+    after = _memory_gb()
+    if before is None or after is None:
+        return f"{step}: memory not available"
+    text = f"{step}: memory {before[0]:.1f} GB before, {after[0]:.1f} GB after"
+    if after[1] is not None:
+        text += f", process peak {after[1]:.1f} GB"
+    return text
+
+
 class BaseWorker(QThread):
     """QThread with uniform success/error signal shape + exception safety.
 
@@ -87,6 +116,7 @@ class BaseWorker(QThread):
             f"{type(self).__name__} must override _run()")
 
     def run(self) -> None:  # final -- subclasses override _run() instead
+        before = _memory_gb()
         try:
             result = self._run()
         except Exception as exc:  # noqa: BLE001 -- by design
@@ -95,6 +125,7 @@ class BaseWorker(QThread):
             self.finished_ok.emit(result)
         finally:
             self._release_inputs()
+            self.progress.emit(memory_report(type(self).__name__, before))
 
     def _release_inputs(self) -> None:
         """Drop references to any AnnData the worker was given.

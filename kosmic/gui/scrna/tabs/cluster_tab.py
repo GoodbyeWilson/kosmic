@@ -202,6 +202,7 @@ class PCAHarmonyWorker(BaseWorker):
         apply_results(
             self._full, self.adata, self._mask,
             obsm_keys=('X_pca', 'X_pca_harmony'),
+            varm_keys=('PCs',),
             uns_keys=('hvg', 'pca'),
             obsp_keys=('connectivities', 'distances'),
             drop_uns=('neighbors',))

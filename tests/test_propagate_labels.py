@@ -220,3 +220,48 @@ def test_text_age_in_one_study_and_float_in_another_concatenate(tmp_path):
     assert m.obs["age"].dtype.kind == "f"
     vals = m.obs["age"].tolist()
     assert vals[0] == 68.0 and np.isnan(vals[1]) and vals[2] == 53.0 and vals[3] == 56.0 and np.isnan(vals[4])
+
+
+def test_a_few_included_cells_missing_from_the_master_are_left_unlabelled(tmp_path, capsys):
+    """The master's own QC removed a handful of included cells (390 of a
+    million on the DCM atlas). That is not a cap: join by barcode, leave
+    them unlabelled, and never send the study through sc.tl.ingest."""
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad",
+                ["disease"] * 150 + ["exclude"] * 50)
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control"] * 20)
+    out = concat_studies([s1, s2], tmp_path / "master.h5ad", drop_excluded=True)
+    m = ad.read_h5ad(out)
+    m = m[~m.obs_names.isin(["cell0-S1"])].copy()          # the master's QC dropped one included cell
+    m.obs["leiden"] = pd.Categorical(["0"] * m.n_obs)
+    m.obs["cell_type"] = pd.Categorical(["TypeA"] * m.n_obs)
+    m.write_h5ad(out)
+
+    messages = []
+    propagate_labels(out, s1, progress_callback=messages.append)
+    a = ad.read_h5ad(s1)
+    assert a.obs.loc["cell1", "cell_type_atlas"] == "TypeA"
+    labelled = a.obs["cell_type_atlas"].notna()
+    assert labelled.sum() == 149                             # 150 included minus the one the master lost
+    assert not labelled.loc["cell0"]
+    assert not any("ingest" in msg or "projecting" in msg for msg in messages)
+    assert any("removed by its QC" in msg for msg in messages)
+
+
+def test_propagation_touches_obs_only(tmp_path):
+    """The matrix and layers of the study are neither loaded nor rewritten."""
+    import h5py
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad", ["disease", "control", "disease"])
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control", "control"])
+    a1 = ad.read_h5ad(s1)
+    a1.layers["counts"] = a1.X.copy()
+    a1.write_h5ad(s1)
+    out = _master_from(tmp_path, [s1, s2])
+    with h5py.File(s1) as h:
+        x_before = h["X"][()].copy() if isinstance(h["X"], h5py.Dataset) else h["X/data"][()].copy()
+    propagate_labels(out, s1)
+    a = ad.read_h5ad(s1)
+    assert (a.obs["cell_type_atlas"] == "Cardiomyocyte").all()
+    assert list(a.layers) == ["counts"] and (a.layers["counts"] != a.X).nnz == 0
+    with h5py.File(s1) as h:
+        x_after = h["X"][()] if isinstance(h["X"], h5py.Dataset) else h["X/data"][()]
+    assert np.array_equal(x_before, x_after)
