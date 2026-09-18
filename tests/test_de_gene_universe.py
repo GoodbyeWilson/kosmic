@@ -30,16 +30,33 @@ def _project(tmp_path, atlas_genes):
     return proj / 'S1'
 
 
-def _page(app, study_dir):
+@pytest.fixture
+def workspace(app):
+    """One DE workspace per test, destroyed before the next test starts.
+
+    A DEWorkspace is hundreds of widgets and dozens of pyqtgraph plots.
+    Left dangling, Python destroys it at an arbitrary later moment --
+    on the Linux runner that was while a later test was building its own
+    plots, and the process segfaulted.
+    """
+    from PyQt6.QtCore import QEvent
     from kosmic.gui.de_analysis.workspace import DEWorkspace
     ws = DEWorkspace()
-    ws.project_dir = study_dir
-    return ws, ws.gene_de_page
+    yield ws
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
-def test_option_reads_the_atlas_and_narrows_the_denominator(app, tmp_path):
+def _page(workspace, study_dir):
+    workspace.project_dir = study_dir
+    return workspace, workspace.gene_de_page
+
+
+def test_option_reads_the_atlas_and_narrows_the_denominator(workspace, tmp_path):
     study_dir = _project(tmp_path, ['TTN', 'MYH7', 'DCN'])
-    ws, page = _page(app, study_dir)
+    ws, page = _page(workspace, study_dir)
     page._refresh_atlas_genes_option()
     assert page.atlas_genes_check.isEnabled()
     assert '3' in page.atlas_genes_check.text()
@@ -52,10 +69,10 @@ def test_option_reads_the_atlas_and_narrows_the_denominator(app, tmp_path):
     assert ws.gene_universe is None and page._gene_universe_record() == 'all genes'
 
 
-def test_option_is_disabled_without_an_atlas(app, tmp_path):
+def test_option_is_disabled_without_an_atlas(workspace, tmp_path):
     study_dir = tmp_path / 'proj2' / 'S1'
     (study_dir / 'processed_data').mkdir(parents=True)
-    ws, page = _page(app, study_dir)
+    ws, page = _page(workspace, study_dir)
     ws.gene_universe = 'shared_atlas'
     page._refresh_atlas_genes_option()
     assert not page.atlas_genes_check.isEnabled() and ws.gene_universe is None
