@@ -168,12 +168,17 @@ class BaseWorker(QThread):
         try:
             result = self._run()
         except Exception as exc:  # noqa: BLE001 -- by design
+            self.progress.emit(memory_report(type(self).__name__, before))
             self.failed.emit(f"{exc}\n{traceback.format_exc()}")
         else:
+            # The memory line goes out before the completion signal:
+            # nothing may be emitted after finished_ok / failed, because
+            # the owner may tear its widgets down in that handler and a
+            # later emit from this thread would reach a dead receiver.
+            self.progress.emit(memory_report(type(self).__name__, before))
             self.finished_ok.emit(result)
         finally:
             self._release_inputs()
-            self.progress.emit(memory_report(type(self).__name__, before))
 
     def _release_inputs(self) -> None:
         """Drop references to any AnnData the worker was given.
