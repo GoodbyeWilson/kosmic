@@ -220,7 +220,6 @@ class _CombineWorker(BaseWorker):
         self._drop_excluded = bool(drop_excluded)
 
     def _run(self):
-        import anndata as ad
         concat_studies(
             self._study_paths,
             output_path=self._output_path,
@@ -230,12 +229,9 @@ class _CombineWorker(BaseWorker):
             drop_excluded=self._drop_excluded,
             progress_callback=lambda msg: self.progress.emit(msg),
         )
-        # Quick peek for the result payload; backed mode = cheap.
-        a = ad.read_h5ad(self._output_path, backed='r')
-        try:
-            n_cells, n_genes = int(a.n_obs), int(a.n_vars)
-        finally:
-            a.file.close()
+        # Shape only; a backed read would load the master's counts layer.
+        from kosmic.scrna.load.h5ad_meta import read_shape
+        n_cells, n_genes = read_shape(self._output_path)
         # Record what the master is, and in particular what was excluded
         # from it -- a dropped gene leaves no trace in the h5ad, so without
         # this there is no way to tell it was ever considered.

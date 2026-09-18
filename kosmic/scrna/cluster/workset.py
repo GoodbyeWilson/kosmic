@@ -94,6 +94,7 @@ def apply_results(full, work, mask: Optional[np.ndarray], *,
                   obsm_keys: Sequence[str] = (),
                   obs_cols: Sequence[str] = (),
                   var_cols: Sequence[str] = (),
+                  varm_keys: Sequence[str] = (),
                   uns_keys: Sequence[str] = (),
                   obsp_keys: Sequence[str] = (),
                   drop_uns: Sequence[str] = ()):
@@ -109,6 +110,11 @@ def apply_results(full, work, mask: Optional[np.ndarray], *,
     for col in var_cols:
         if col in work.var.columns:
             full.var[col] = work.var[col].reindex(full.var_names).values
+    # varm is per gene, so it needs no scattering: the PCA loadings
+    # ('PCs') are what label projection onto a capped atlas reads.
+    for key in varm_keys:
+        if key in work.varm:
+            full.varm[key] = np.asarray(work.varm[key])
     if mask is not None:
         scatter_results(full, work, mask, obsm_keys=obsm_keys,
                         obs_cols=obs_cols, uns_keys=uns_keys,

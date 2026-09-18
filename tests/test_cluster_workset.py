@@ -117,6 +117,7 @@ def test_pca_and_cluster_workers_leave_the_study_matrices_alone(app, tmp_path, e
     assert (a.X != X_before).nnz == 0 and (a.layers['counts'] != counts_before).nnz == 0
     assert 'X_pca' in a.obsm and a.obsm['X_pca'].shape == (60, 5)
     assert a.var['highly_variable'].sum() == 20
+    assert 'PCs' in a.varm and a.varm['PCs'].shape == (40, 5)     # loadings for label projection
     if excluded:
         assert np.isnan(a.obsm['X_pca'][0]).all() and not np.isnan(a.obsm['X_pca'][1]).any()
 

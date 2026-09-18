@@ -173,6 +173,14 @@ Differential expression is computed from those counts, never from the
 normalised matrix. DecontX writes its output to
 `adata.layers['decontX_counts']` and leaves the originals unchanged.
 
+Because the counts live in a layer, anndata's backed mode is not a cheap
+read of a study: `read_h5ad(path, backed='r')` keeps only `X` on disk
+and loads every layer, so it costs the whole counts matrix. Code that
+needs only the cells, the shape or the gene names reads them through
+`kosmic/scrna/load/h5ad_meta.py` (`read_obs`, `read_shape`,
+`write_obs`) and `read_var_names` in `kosmic/scrna/load/gene_overlap.py`,
+which touch nothing else.
+
 **The processed file holds the study's state.** Every workspace reads and writes
 the study's `processed_data/*.h5ad`. Metadata that other workspaces
 depend on — the sample and condition columns, the role of each
