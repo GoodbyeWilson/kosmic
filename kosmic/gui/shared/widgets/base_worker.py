@@ -58,14 +58,57 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 
 def _memory_gb():
-    """(resident, peak resident) of this process in GB, or None."""
+    """(resident, peak resident) of this process in GB, or None.
+
+    psutil when present; otherwise the operating system directly
+    (/proc on Linux, GetProcessMemoryInfo on Windows, rusage on macOS),
+    so the readout does not depend on an optional package.
+    """
     try:
         import psutil
         info = psutil.Process().memory_info()
         peak = getattr(info, 'peak_wset', None)
         return info.rss / 1e9, (peak / 1e9 if peak else None)
     except Exception:
-        return None
+        pass
+    try:
+        import sys
+        if sys.platform.startswith('linux'):
+            rss = peak = None
+            with open('/proc/self/status') as f:
+                for line in f:
+                    if line.startswith('VmRSS:'):
+                        rss = int(line.split()[1]) * 1024
+                    elif line.startswith('VmHWM:'):
+                        peak = int(line.split()[1]) * 1024
+            if rss is not None:
+                return rss / 1e9, (peak / 1e9 if peak else None)
+        elif sys.platform == 'win32':
+            import ctypes
+            from ctypes import wintypes
+
+            class _PMC(ctypes.Structure):
+                _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
+                            ('PeakWorkingSetSize', ctypes.c_size_t),
+                            ('WorkingSetSize', ctypes.c_size_t),
+                            ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                            ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                            ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                            ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                            ('PagefileUsage', ctypes.c_size_t),
+                            ('PeakPagefileUsage', ctypes.c_size_t)]
+            pmc = _PMC()
+            pmc.cb = ctypes.sizeof(_PMC)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            if ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
+                return pmc.WorkingSetSize / 1e9, pmc.PeakWorkingSetSize / 1e9
+        else:
+            import resource
+            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS
+            return peak / 1e9, peak / 1e9
+    except Exception:
+        pass
+    return None
 
 
 def memory_report(step: str, before) -> str:
