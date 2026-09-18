@@ -665,6 +665,32 @@ class AppWindow(QMainWindow):
 
         self._sync_de_sidebar_to_stack()
 
+    # One dataset in memory at a time. A study is tens of gigabytes; two
+    # workspaces each holding a different one is what emptied the machine
+    # when the atlas was opened for its DE while scRNA still held a study.
+    def _on_de_dataset_loaded(self, path: str):
+        scrna = self._scrna_workspace
+        if scrna is None or scrna.current_adata is None:
+            return
+        held = scrna.current_h5ad_path
+        if held and Path(held).resolve() != Path(path).resolve():
+            scrna.release_dataset(
+                f"Released {Path(held).name} from memory: DE loaded {Path(path).name}.")
+            self._output_panel.log(
+                f"Released {Path(held).name} from the scRNA workspace: "
+                f"DE loaded {Path(path).name}. One dataset is kept in memory at a time.")
+
+    def _on_scrna_dataset_loaded(self, path: str):
+        de = self._de_workspace
+        if de is None or de.current_adata is None or not getattr(de, '_manual_load', False):
+            return
+        held = getattr(de, 'h5ad_path', None)
+        if held and Path(held).resolve() != Path(path).resolve():
+            de.release_dataset()
+            self._output_panel.log(
+                f"Released {Path(held).name} from the DE workspace: "
+                f"scRNA loaded {Path(path).name}. One dataset is kept in memory at a time.")
+
     def _on_de_open_scrna_requested(self):
         """DE's Setup page asked to jump to scRNA -> Inspect (to assign
         condition roles, or to finish an earlier pipeline step)."""
@@ -769,6 +795,7 @@ class AppWindow(QMainWindow):
         workspace.step_completed.connect(self._refresh_sidebar_status)
         workspace.steps_reset.connect(self._on_steps_reset)
         workspace.tab_changed.connect(self._on_scrna_tab_changed)
+        workspace.dataset_loaded.connect(self._on_scrna_dataset_loaded)
 
         workspace.download_tab.data_status_changed.connect(
             self._output_panel.log)
@@ -804,6 +831,7 @@ class AppWindow(QMainWindow):
             workspace.mode_changed.connect(self._on_de_mode_changed)
             workspace.study_change_requested.connect(self.set_active_study)
             workspace.open_scrna_requested.connect(self._on_de_open_scrna_requested)
+            workspace.dataset_loaded.connect(self._on_de_dataset_loaded)
             self._de_workspace = workspace
 
             # Catch up if a study was activated before DE lazy-loaded.

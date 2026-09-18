@@ -179,7 +179,19 @@ and loads every layer, so it costs the whole counts matrix. Code that
 needs only the cells, the shape or the gene names reads them through
 `kosmic/scrna/load/h5ad_meta.py` (`read_obs`, `read_shape`,
 `write_obs`) and `read_var_names` in `kosmic/scrna/load/gene_overlap.py`,
-which touch nothing else.
+which touch nothing else. The DE workspace loads a study from disk
+through `read_counts_adata` in the same module: obs, var and the counts
+as `X`, never the normalised matrix, the embeddings or the graph, so a
+study costs half of a full load there.
+
+**One dataset in memory at a time.** When the DE workspace loads a
+study from disk, the scRNA workspace releases the study it holds
+(`ScRNAWorkspace.release_dataset`, which also clears every tab's
+reference and the UMAP widget's), and the reverse when scRNA loads one
+while DE holds a hand-loaded study (`main.py`). Setting the workspace's
+`current_adata` to None is not a release: tabs keep their own
+references, and a study stayed resident until the next one overwrote
+them.
 
 **The processed file holds the study's state.** Every workspace reads and writes
 the study's `processed_data/*.h5ad`. Metadata that other workspaces

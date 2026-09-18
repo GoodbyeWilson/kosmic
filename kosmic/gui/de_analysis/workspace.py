@@ -32,6 +32,7 @@ class DEWorkspace(QWidget):
     step_completed = pyqtSignal(int)
     tab_changed = pyqtSignal(int)
     project_directory_changed = pyqtSignal(str)
+    dataset_loaded = pyqtSignal(str)  # a study file was loaded here by hand (path)
     mode_changed = pyqtSignal(str)  # "scoring" or "discovery"
     study_change_requested = pyqtSignal(str)  # accession; AppWindow switches study
     open_scrna_requested = pyqtSignal()  # AppWindow switches to scRNA -> Inspect
@@ -273,6 +274,20 @@ class DEWorkspace(QWidget):
             uns=adata.uns, obsm=adata.obsm, varm=adata.varm,
             layers=adata.layers, raw=adata.raw,
         )
+
+    def release_dataset(self) -> bool:
+        """Drop the dataset this workspace holds so it can be freed.
+
+        Called when another workspace loads a different study: one
+        dataset in memory at a time. Results tables are small and stay.
+        """
+        import gc
+        had = self.current_adata is not None
+        self.current_adata = None
+        self.h5ad_path = None
+        self._manual_load = False
+        gc.collect()
+        return had
 
     def set_adata(self, adata):
         """Receive adata from the scRNA pipeline."""

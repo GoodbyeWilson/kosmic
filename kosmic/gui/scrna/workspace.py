@@ -74,6 +74,7 @@ class ScRNAWorkspace(QWidget):
     step_completed = pyqtSignal(int)
     steps_reset = pyqtSignal()  # emitted when all downstream steps are cleared (reload raw)
     tab_changed = pyqtSignal(int)  # emitted when active tab changes (0-based tab index)
+    dataset_loaded = pyqtSignal(str)  # a study file was loaded into this workspace (path)
 
     def __init__(self, embedded: bool = True, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -147,12 +148,7 @@ class ScRNAWorkspace(QWidget):
         if previous is not None and previous != directory:
             self._step_completed = {i: False for i in self._step_completed}
             if self.current_adata is not None:
-                self.current_adata = None
-                self.current_h5ad_path = None
-                self.raw_h5ad_path = None
-                self._adata_version += 1
-                self.status_message.emit(
-                    "Analysis folder changed - loaded dataset cleared.")
+                self.release_dataset("Analysis folder changed - loaded dataset cleared.")
 
         self.current_project_dir = directory
         self.settings.setValue("last_directory", directory)
@@ -184,6 +180,8 @@ class ScRNAWorkspace(QWidget):
         if file_path is not None:
             from pathlib import Path
             self.current_h5ad_path = str(Path(file_path))
+            if adata is not None:
+                self.dataset_loaded.emit(self.current_h5ad_path)
             # If no raw path set yet, this is the raw file
             if self.raw_h5ad_path is None:
                 self.raw_h5ad_path = self.current_h5ad_path
@@ -286,6 +284,37 @@ class ScRNAWorkspace(QWidget):
 
         self.switch_tab(0)
         self.mark_step_complete(0)
+
+    def release_dataset(self, message: str = "Dataset released from memory.") -> bool:
+        """Drop the loaded dataset everywhere it is held, so it can be freed.
+
+        Setting 'current_adata' to None was not enough: every tab keeps its
+        own reference (the QC, Cluster and Annotate tabs, the UMAP widget),
+        so a study stayed resident until the next one overwrote those
+        references. Two studies in memory was the norm, and with the atlas
+        open nothing else fitted. Each tab's reset_state drops its
+        references and stops its workers; the collector then runs.
+        Returns True when something was released.
+        """
+        import gc
+        had = self.current_adata is not None
+        self.current_adata = None
+        self.current_h5ad_path = None
+        self.raw_h5ad_path = None
+        self._adata_version += 1
+        for tab in [self.download_tab, self.gene_names_tab, self.inspect_tab,
+                    self.qc_tab, self.cluster_tab, self.annotate_tab,
+                    self.gene_group_tab, self.decontx_tab, self.filter_tab]:
+            reset = getattr(tab, 'reset_state', None)
+            if reset is not None:
+                try:
+                    reset()
+                except Exception:  # noqa: BLE001 -- releasing must not fail
+                    pass
+        gc.collect()
+        if had:
+            self.status_message.emit(message)
+        return had
 
     def notify_adata_changed(self):
         """

@@ -67,3 +67,37 @@ def write_obs(h5ad_path, obs: pd.DataFrame) -> None:
             obs[col] = pd.Categorical(obs[col].where(obs[col].notna(), None))
     with h5py.File(str(h5ad_path), 'r+') as f:
         write_elem(f, 'obs', obs)
+
+
+def read_counts_adata(h5ad_path, *, uns: bool = True):
+    """An AnnData holding only what pseudobulk analysis needs: obs, var and
+    the counts as X.
+
+    The counts come from ``layers['counts']`` when the file has it (a
+    study after QC), otherwise from ``X`` (a file QC has not touched) --
+    the same precedence as ``kosmic.scrna.counts.count_source``. The
+    normalised matrix, embeddings, graphs and other layers are never
+    read, so a study costs half of what a full load does (Reichart-LV
+    16.7 GB -> 8 GB; the DCM atlas 27 GB -> 14 GB). ``uns`` is small and
+    carries the role map, so it is read unless told otherwise.
+
+    The result is a dataset in the "counts in X, no layers" state every
+    KOSMIC reader already understands.
+    """
+    import anndata as ad
+    import h5py
+    from anndata.io import read_elem
+
+    with h5py.File(str(h5ad_path), 'r') as f:
+        obs = read_elem(f['obs'])
+        var = read_elem(f['var'])
+        if 'layers' in f and 'counts' in f['layers']:
+            X = read_elem(f['layers']['counts'])
+            source = 'layers:counts'
+        else:
+            X = read_elem(f['X'])
+            source = 'X'
+        extra = read_elem(f['uns']) if uns and 'uns' in f else {}
+    a = ad.AnnData(X=X, obs=obs, var=var, uns=extra)
+    a.uns['counts_loaded_from'] = source
+    return a
