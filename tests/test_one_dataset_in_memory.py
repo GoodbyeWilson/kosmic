@@ -117,3 +117,91 @@ def test_de_setup_releases_before_it_loads(app, tmp_path, monkeypatch):
     ws.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+def test_scrna_auto_load_waits_until_the_workspace_is_on_screen(app, tmp_path, monkeypatch):
+    """Activating a study while another workspace is in front must not load
+    the full study behind it (the atlas sat at 27 GB behind DE's 14 GB copy).
+    The load happens when the scRNA workspace is opened."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.scrna.workspace import ScRNAWorkspace
+    from kosmic.paths import processed_data_dir
+    study = tmp_path / 'study'
+    processed_data_dir(study).mkdir(parents=True)
+    _study(processed_data_dir(study) / 's.h5ad')
+    ws = ScRNAWorkspace(embedded=True)
+    loads = []
+    monkeypatch.setattr(ws.download_tab, '_load_and_set_adata', lambda p: loads.append(p))
+
+    ws.set_project_directory(str(study))                    # hidden: activated from elsewhere
+    assert loads == []
+    assert 'loads when this workspace is opened' in ws.download_tab._tab_status_label.text()
+
+    ws.show()                                               # what _activate_scrna does
+    ws.download_tab.on_tab_activated()
+    assert [os.path.basename(p) for p in loads] == ['s.h5ad']
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
+def _fake_start(started, worker):
+    """Record the load without running it; the worker counts as running
+    until wait() is called, as a real thread does at completion time."""
+    started.append(worker.h5ad_path)
+    worker.isRunning = lambda: worker._fake_running
+    worker.wait = lambda *a: setattr(worker, '_fake_running', False)
+    worker._fake_running = True
+    return worker
+
+
+def test_de_discards_a_load_that_finishes_after_the_study_changed(app, tmp_path, monkeypatch):
+    """A second load request is ignored while one runs, so a study switch
+    mid-load used to land the previous study's file as the new study's
+    dataset (and its DE results in the new study's folder)."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.de_analysis import pages
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    from kosmic.paths import processed_data_dir
+    for name in ('a', 'b'):
+        processed_data_dir(tmp_path / name).mkdir(parents=True)
+        _study(processed_data_dir(tmp_path / name) / f'{name}.h5ad')
+    ws = DEWorkspace()
+    ws.set_project_directory(str(tmp_path / 'a'))
+    started = []
+    monkeypatch.setattr(pages.setup_page, 'run_worker', lambda w, **kw: _fake_start(started, w))
+    ws.setup_page._start_load(str(processed_data_dir(tmp_path / 'a') / 'a.h5ad'))
+    ws.set_project_directory(str(tmp_path / 'b'))            # switch while 'a' is in flight
+    payload = (ad.read_h5ad(processed_data_dir(tmp_path / 'a') / 'a.h5ad'), started[0], 'a')
+    ws.setup_page._on_loaded(payload)
+    assert ws.current_adata is None                          # 'a' was not adopted for study 'b'
+    assert [os.path.basename(p) for p in started] == ['a.h5ad', 'b.h5ad']
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
+def test_scrna_discards_a_load_that_finishes_after_the_study_changed(app, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.scrna.tabs import download_tab as dt
+    from kosmic.gui.scrna.workspace import ScRNAWorkspace
+    from kosmic.paths import processed_data_dir
+    for name in ('a', 'b'):
+        processed_data_dir(tmp_path / name).mkdir(parents=True)
+        _study(processed_data_dir(tmp_path / name) / f'{name}.h5ad')
+    ws = ScRNAWorkspace(embedded=True)
+    ws.show()
+    started = []
+    monkeypatch.setattr(dt, 'run_worker', lambda w, **kw: _fake_start(started, w))
+    ws.set_project_directory(str(tmp_path / 'a'))            # visible: auto-load starts
+    ws.set_project_directory(str(tmp_path / 'b'))            # switch while 'a' is in flight
+    payload = (ad.read_h5ad(processed_data_dir(tmp_path / 'a') / 'a.h5ad'), started[0], '30 cells')
+    ws.download_tab._on_h5ad_loaded(payload)
+    assert ws.current_adata is None
+    assert [os.path.basename(p) for p in started] == ['a.h5ad', 'b.h5ad']
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
