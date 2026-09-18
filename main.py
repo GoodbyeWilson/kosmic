@@ -546,6 +546,12 @@ class AppWindow(QMainWindow):
                 PAGE_SCRNA, ws, ws.WORKFLOW_STEPS,
                 on_step_clicked=ws.on_sidebar_step):
             return
+        # A study activated while another workspace was on screen is not
+        # loaded until now (download_tab._run_auto_detect defers it), so
+        # one dataset is in memory at a time. Re-detect with the workspace
+        # visible and the deferred load starts.
+        if ws.current_adata is None and ws.current_project_dir:
+            ws.download_tab.on_tab_activated()
         active_tab = ws.stack.currentIndex()
         self._explorer.set_active_step(active_tab)
         self._update_sidebar_status(active_tab)
@@ -1437,9 +1443,11 @@ class AppWindow(QMainWindow):
 
         The cascade through ``ScRNAWorkspace.set_project_directory`` ends
         in ``download_tab._run_auto_detect``, which auto-loads the most
-        recent h5ad via its own background ``_H5adLoadWorker``. No
-        AppWindow-level loader -- a second thread would just double the
-        IO contention on the same file.
+        recent h5ad via its own background ``_H5adLoadWorker`` -- but only
+        while the scRNA workspace is on screen. Activated from elsewhere
+        (the Project page, DE's study combo), the load waits for
+        ``_activate_scrna``; otherwise the full study sat in memory behind
+        the workspace the user was actually using.
         """
         if study_path is None or self._scrna_workspace is None:
             return

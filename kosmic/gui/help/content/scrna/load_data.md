@@ -5,8 +5,12 @@ data *into* a study happens on the Project page ([Data](../project/data.md));
 this step is where you look at what arrived and confirm it is what you
 think it is.
 
-When you open a study, KOSMIC loads its working h5ad in the background.
-The hero card says *Loading…* until it is in; then the panels fill.
+When you open a study in this workspace, KOSMIC loads its working h5ad
+in the background. The hero card says *Loading…* until it is in; then
+the panels fill. A study activated while another workspace is in front
+(from the Project page, or from the study selector in Differential
+Expression) is not loaded here until you open this workspace, so only
+one dataset is held in memory at a time.
 
 ![Load Data with a dataset loaded: hero card with cells, genes and file size; Data overview, Data source and Data quality panels](img/load_data.png)
 

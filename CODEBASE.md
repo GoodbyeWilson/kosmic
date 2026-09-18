@@ -191,7 +191,11 @@ reference and the UMAP widget's), and the reverse when scRNA loads one
 while DE holds a hand-loaded study (`main.py`). Setting the workspace's
 `current_adata` to None is not a release: tabs keep their own
 references, and a study stayed resident until the next one overwrote
-them.
+them. Activating a study only loads it into the workspace that is on
+screen: the scRNA Load Data step defers its automatic load while the
+workspace is hidden (`download_tab._run_auto_detect`), and
+`_activate_scrna` starts it when the workspace is opened; the DE
+Dataset page does the same through its `on_activated` hook.
 
 **The processed file holds the study's state.** Every workspace reads and writes
 the study's `processed_data/*.h5ad`. Metadata that other workspaces

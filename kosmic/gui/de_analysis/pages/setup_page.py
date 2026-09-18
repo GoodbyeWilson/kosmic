@@ -57,6 +57,7 @@ class SetupPage(SimplePage):
         super().__init__()
         self.ws = workspace
         self._load_worker = None
+        self._load_study_dir = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -485,6 +486,7 @@ class SetupPage(SimplePage):
         # Counts, obs and var only: differential expression never reads
         # the normalised matrix, the embeddings or the graph, and loading
         # them doubled the memory of every study (the atlas did not fit).
+        self._load_study_dir = self.ws.project_dir
         self._load_worker = _CountsLoadWorker(path)
         run_worker(
             self._load_worker,
@@ -494,6 +496,22 @@ class SetupPage(SimplePage):
 
     def _on_loaded(self, payload) -> None:
         adata, path, _message = payload
+        # The active study can change while a load is in flight (a
+        # second load request is ignored while one runs). The file that
+        # arrives then belongs to the previous study; keeping it would
+        # write its DE results into the new study's folder. Drop it and
+        # load the study that is active now.
+        if self.ws.project_dir != self._load_study_dir:
+            self.ws.log_message.emit(
+                f"Discarded {Path(path).name}: the active study changed to "
+                f"{getattr(self.ws.project_dir, 'name', '?')} while it was loading.")
+            del adata
+            # 'finished_ok' is emitted from inside the thread's run(), so
+            # the thread may still count as running here and the next
+            # load would be skipped; it is returning, so wait() is short.
+            self._load_worker.wait()
+            self._auto_load_registered_dataset()
+            return
         adata.obs_names_make_unique()
         adata.var_names_make_unique()
         # Same coercion as DEWorkspace.set_adata: numeric condition

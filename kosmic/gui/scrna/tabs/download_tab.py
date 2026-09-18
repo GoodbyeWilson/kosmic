@@ -44,6 +44,7 @@ class DownloadTab(TabbedPage):
         self.project_dir = None
         self.extract_worker = None
         self._load_worker = None
+        self._load_study_dir = None
         self.convert_worker = None
         self.extract_convert_worker = None
         self._batch_total_files = 0
@@ -702,6 +703,7 @@ class DownloadTab(TabbedPage):
         self._import_section.show()
 
         # Load in background thread
+        self._load_study_dir = self.project_dir
         self._load_worker = _H5adLoadWorker(h5ad_path)
         run_worker(
             self._load_worker,
@@ -718,6 +720,19 @@ class DownloadTab(TabbedPage):
         if self.progress_bar:
             self.progress_bar.setMaximum(100)
             self.progress_bar.setValue(100)
+
+        # The active study can change while a load is in flight (a
+        # second load request is ignored while one runs). The dataset
+        # that arrives then belongs to the previous study; keeping it
+        # would save the previous study's data over the new study's
+        # file. Drop it and re-detect the study that is active now.
+        if self.project_dir != self._load_study_dir:
+            self._log(f"Discarded {file_name}: the active study changed to "
+                      f"{Path(self.project_dir).name if self.project_dir else '?'} while it was loading.")
+            del adata
+            self._load_worker.wait()          # see _on_loaded in the DE Setup page
+            self._run_auto_detect()
+            return
 
         self._log(f"Loaded: {message}")
         if self.status_label:
@@ -1131,10 +1146,21 @@ class DownloadTab(TabbedPage):
                 # management lives on the Project page.
                 self._loaded_frame.show()
                 self._import_section.hide()
-            else:
+            elif self.main_window.isVisible():
                 # Load the most recent h5ad; _on_h5ad_loaded finishes the UI
                 most_recent = max(detected['files'], key=lambda f: f.stat().st_mtime)
                 self._load_and_set_adata(str(most_recent))
+            else:
+                # The workspace is not on screen (a study was activated
+                # from the Project page or from DE). Loading now would put
+                # the full study in memory behind another workspace that
+                # is loading its own copy: the atlas sat at 27 GB while DE
+                # needed 14. AppWindow._activate_scrna re-runs this when
+                # the workspace is opened, and the load happens then.
+                self._loaded_frame.hide()
+                self._import_section.hide()
+                self._tab_status_label.setText(
+                    f"Ready: {file_names} (loads when this workspace is opened)")
         else:
             desc = f"{detected['format_name']} — {detected['description']}"
             self.data_status_changed.emit(f"<b>Convertible:</b> {desc}")
