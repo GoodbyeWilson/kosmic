@@ -669,27 +669,29 @@ class AppWindow(QMainWindow):
     # workspaces each holding a different one is what emptied the machine
     # when the atlas was opened for its DE while scRNA still held a study.
     def _on_de_dataset_loaded(self, path: str):
+        # Same study or not: DE reads its own counts-only copy from disk,
+        # so whatever scRNA holds is redundant from here on. (The same
+        # file was the case that reached 48 GB: the atlas in scRNA plus
+        # its counts in DE.)
         scrna = self._scrna_workspace
         if scrna is None or scrna.current_adata is None:
             return
-        held = scrna.current_h5ad_path
-        if held and Path(held).resolve() != Path(path).resolve():
-            scrna.release_dataset(
-                f"Released {Path(held).name} from memory: DE loaded {Path(path).name}.")
-            self._output_panel.log(
-                f"Released {Path(held).name} from the scRNA workspace: "
-                f"DE loaded {Path(path).name}. One dataset is kept in memory at a time.")
+        held = scrna.current_h5ad_path or "its dataset"
+        scrna.release_dataset(
+            f"Released {Path(held).name} from memory: DE is loading {Path(path).name}.")
+        self._output_panel.log(
+            f"Released {Path(held).name} from the scRNA workspace: DE is loading "
+            f"{Path(path).name}. One dataset is kept in memory at a time.")
 
     def _on_scrna_dataset_loaded(self, path: str):
         de = self._de_workspace
         if de is None or de.current_adata is None or not getattr(de, '_manual_load', False):
             return
-        held = getattr(de, 'h5ad_path', None)
-        if held and Path(held).resolve() != Path(path).resolve():
-            de.release_dataset()
-            self._output_panel.log(
-                f"Released {Path(held).name} from the DE workspace: "
-                f"scRNA loaded {Path(path).name}. One dataset is kept in memory at a time.")
+        held = getattr(de, 'h5ad_path', None) or "its dataset"
+        de.release_dataset()
+        self._output_panel.log(
+            f"Released {Path(held).name} from the DE workspace: scRNA loaded "
+            f"{Path(path).name}. One dataset is kept in memory at a time.")
 
     def _on_de_open_scrna_requested(self):
         """DE's Setup page asked to jump to scRNA -> Inspect (to assign
@@ -831,6 +833,7 @@ class AppWindow(QMainWindow):
             workspace.mode_changed.connect(self._on_de_mode_changed)
             workspace.study_change_requested.connect(self.set_active_study)
             workspace.open_scrna_requested.connect(self._on_de_open_scrna_requested)
+            workspace.dataset_loading.connect(self._on_de_dataset_loaded)
             workspace.dataset_loaded.connect(self._on_de_dataset_loaded)
             self._de_workspace = workspace
 

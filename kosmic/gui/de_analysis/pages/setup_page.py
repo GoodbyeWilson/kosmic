@@ -476,6 +476,12 @@ class SetupPage(SimplePage):
         self._config_frame.hide()
         self._set_study_status(f"Loading {Path(path).name}...", 'info')
         self.ws.status_message.emit(f"DE: loading {Path(path).name}...")
+        # Whatever another workspace holds is released before this study
+        # is read, not after: with the atlas open in scRNA (27 GB) and its
+        # counts read here (14 GB) the machine peaked at 48 GB before the
+        # release ran. Our own previous dataset goes the same way.
+        self.ws.dataset_loading.emit(str(path))
+        self.ws.release_dataset()
         # Counts, obs and var only: differential expression never reads
         # the normalised matrix, the embeddings or the graph, and loading
         # them doubled the memory of every study (the atlas did not fit).
