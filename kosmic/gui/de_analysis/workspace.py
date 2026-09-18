@@ -33,6 +33,7 @@ class DEWorkspace(QWidget):
     tab_changed = pyqtSignal(int)
     project_directory_changed = pyqtSignal(str)
     dataset_loaded = pyqtSignal(str)  # a study file was loaded here by hand (path)
+    dataset_loading = pyqtSignal(str)  # about to load a study file by hand (path): release others first
     mode_changed = pyqtSignal(str)  # "scoring" or "discovery"
     study_change_requested = pyqtSignal(str)  # accession; AppWindow switches study
     open_scrna_requested = pyqtSignal()  # AppWindow switches to scRNA -> Inspect

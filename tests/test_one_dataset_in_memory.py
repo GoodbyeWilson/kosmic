@@ -92,3 +92,28 @@ def test_de_workspace_release(app):
     ws.close()
     ws.deleteLater()
     app.processEvents()
+
+
+def test_de_setup_releases_before_it_loads(app, tmp_path, monkeypatch):
+    """The previous dataset (ours and other workspaces') is released before
+    the new file is read, so two studies are never resident together."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.de_analysis import pages
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    _study(tmp_path / 'new.h5ad')
+    ws = DEWorkspace()
+    ws.current_adata = ad.AnnData(X=np.ones((3, 2), dtype=np.float32))
+    ws.h5ad_path = 'old.h5ad'
+    ws._manual_load = True
+    order = []
+    ws.dataset_loading.connect(lambda p: order.append(('loading', ws.current_adata is None)))
+    started = {}
+    monkeypatch.setattr(pages.setup_page, 'run_worker', lambda w, **kw: started.setdefault('worker', w) or w)
+    ws.setup_page._start_load(str(tmp_path / 'new.h5ad'))
+    assert order == [('loading', False)]          # signal fires while the old one is still held...
+    assert ws.current_adata is None                 # ...then it is released, before the read starts
+    assert 'worker' in started
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
