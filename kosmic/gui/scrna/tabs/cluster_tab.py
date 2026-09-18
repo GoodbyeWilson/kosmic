@@ -828,6 +828,7 @@ class _UMAPWidget(QWidget):
         self._info_label.setText("No data \u2014 run clustering to see preview")
         self._coords = None
         self._values = None
+        self._adata = None          # the widget must not keep the study alive
         self._legend_entries = []
         self._key_btn.setVisible(False)
         if self._legend_overlay is not None:

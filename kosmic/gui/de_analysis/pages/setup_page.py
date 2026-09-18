@@ -18,7 +18,27 @@ from kosmic.gui.shared.widgets import (
     SecondaryButton,
 )
 from kosmic.paths import list_studies, processed_data_dir, study_status
+from kosmic.gui.shared.widgets import BaseWorker
 from kosmic.gui.shared import dialogs, run_worker
+
+
+class _CountsLoadWorker(BaseWorker):
+    """Load a study for DE: obs, var and the counts as X, nothing else.
+
+    Emits 'finished_ok' with '(adata, path, message)' like the intake
+    loader, so the Setup page's handler is shared.
+    """
+
+    def __init__(self, h5ad_path: str):
+        super().__init__()
+        self.h5ad_path = h5ad_path
+
+    def _run(self):
+        from kosmic.scrna.load.h5ad_meta import read_counts_adata
+        adata = read_counts_adata(self.h5ad_path)
+        msg = (f"{adata.n_obs:,} cells x {adata.n_vars:,} genes "
+               f"(counts from {adata.uns.get('counts_loaded_from', '?')})")
+        return (adata, self.h5ad_path, msg)
 
 
 class SetupPage(SimplePage):
@@ -444,7 +464,6 @@ class SetupPage(SimplePage):
         self._start_load(str(path))
 
     def _start_load(self, path: str) -> None:
-        from kosmic.gui.intake.workers import _H5adLoadWorker
         if self._load_worker is not None and self._load_worker.isRunning():
             return
         self._study_card.show()
@@ -453,7 +472,10 @@ class SetupPage(SimplePage):
         self._config_frame.hide()
         self._set_study_status(f"Loading {Path(path).name}...", 'info')
         self.ws.status_message.emit(f"DE: loading {Path(path).name}...")
-        self._load_worker = _H5adLoadWorker(path)
+        # Counts, obs and var only: differential expression never reads
+        # the normalised matrix, the embeddings or the graph, and loading
+        # them doubled the memory of every study (the atlas did not fit).
+        self._load_worker = _CountsLoadWorker(path)
         run_worker(
             self._load_worker,
             on_finished=self._on_loaded,
@@ -474,6 +496,7 @@ class SetupPage(SimplePage):
         # a dataset loaded from it must not be silently replaced by
         # whatever scRNA happens to hold in memory.
         self.ws._manual_load = True
+        self.ws.dataset_loaded.emit(str(path))
 
         # Reset stale state from previous dataset
         self.ws.de_results = None
