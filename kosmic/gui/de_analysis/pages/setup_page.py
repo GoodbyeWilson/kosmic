@@ -589,13 +589,17 @@ class SetupPage(SimplePage):
         self.sample_col_combo.clear()
         self.condition_col_combo.clear()
 
+        # Condition columns have a handful of values; sample columns can
+        # have hundreds of donors (the atlas: 141). The old single cap of
+        # 100 kept the atlas's 'sample' out of the sample combo, and the
+        # fallback picked 'condition'.
         sample_candidates = self._sample_column_candidates(adata)
         for col in adata.obs.columns:
             n_unique = adata.obs[col].nunique()
             if n_unique <= 100:
                 self.condition_col_combo.addItem(col)
-                if col in sample_candidates:
-                    self.sample_col_combo.addItem(col)
+            if col in sample_candidates:
+                self.sample_col_combo.addItem(col)
 
         # Restore previous selection if workspace already has one,
         # otherwise auto-select from candidates

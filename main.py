@@ -624,10 +624,22 @@ class AppWindow(QMainWindow):
             ws.show_scrna_not_ready(reason)
             return
 
-        if hasattr(scrna, 'current_h5ad_path'):
-            ws.h5ad_path = scrna.current_h5ad_path
-        ws.set_adata(scrna.current_adata)
+        # The processed file is the source of truth (ADR-001) and every
+        # step has saved to it, so DE reads its own counts-only copy from
+        # disk (obs, var, counts: half the study) and scRNA releases the
+        # full object -- one dataset in memory. Sharing scRNA's object
+        # kept both matrices resident: the atlas sat at 27 GB in DE where
+        # 14 GB is what it needs. Without a file, share as before.
+        path = getattr(scrna, 'current_h5ad_path', None)
         ws._last_scrna_adata_version = scrna._adata_version
+        if path and Path(path).exists() and hasattr(ws, 'setup_page'):
+            self._output_panel.log(
+                f"DE: reading the counts of {Path(path).name} from disk; the scRNA "
+                f"workspace releases its copy. Switching back to scRNA reloads it.")
+            ws.setup_page._start_load(str(path))
+            return
+        ws.h5ad_path = path
+        ws.set_adata(scrna.current_adata)
 
     def _sync_de_sidebar_to_stack(self):
         ws = self._de_workspace

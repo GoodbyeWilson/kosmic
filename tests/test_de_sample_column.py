@@ -75,3 +75,28 @@ def test_pseudobulk_sparse_aggregation_matches_the_dense_loop():
     assert (sdf["n_cells"] == 20).all()
     pb_mean, _, _ = create_pseudobulk(a, genes, "sample", "condition", min_cells=1, aggregate="mean")
     assert np.allclose(pb_mean, expected / 20)
+
+
+def test_setup_page_combo_offers_a_sample_column_with_hundreds_of_donors(tmp_path):
+    """Both the candidate rule and the combo loop must admit it."""
+    import os
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    import anndata as ad
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtWidgets import QApplication
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    app = QApplication.instance() or QApplication([])
+    obs = _obs(141)
+    a = ad.AnnData(X=np.ones((len(obs), 3), dtype=np.float32), obs=obs)
+    for c in ("sample", "condition", "_role"):
+        a.obs[c] = a.obs[c].astype("category")
+    ws = DEWorkspace()
+    ws.current_adata = a
+    ws.setup_page._refresh_from_adata()
+    items = [ws.setup_page.sample_col_combo.itemText(i) for i in range(ws.setup_page.sample_col_combo.count())]
+    assert "sample" in items
+    assert ws.sample_col == "sample"
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
