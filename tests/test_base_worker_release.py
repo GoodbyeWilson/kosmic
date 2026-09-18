@@ -85,13 +85,14 @@ def test_every_worker_reports_memory_when_it_finishes(qapp_or_none=None):
         def _run(self):
             return 1
 
-    text = memory_report('W', (1.0, 2.0))
-    assert text.startswith('W: memory 1.0 GB before,') and 'GB after' in text
+    text = memory_report('W', (1.0, 2.0), (1.5, 2.0))
+    assert text == 'W: memory 1.0 GB before, 1.5 GB after, process peak 2.0 GB'
     w = W()
     seen = []
     w.progress.connect(seen.append)
     w.run()
-    assert any(m.startswith('W: memory') for m in seen), seen
+    assert not any(m.startswith('W: memory') for m in seen)      # nothing extra from the thread
+    assert w.memory_line().startswith('W: memory')               # the owner reads it
 
 
 def test_memory_readout_works_without_psutil(monkeypatch):

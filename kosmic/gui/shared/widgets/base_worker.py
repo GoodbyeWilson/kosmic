@@ -116,16 +116,18 @@ def _memory_gb():
     return None
 
 
-def memory_report(step: str, before) -> str:
+def memory_report(step: str, before, after=None) -> str:
     """One line saying what a step cost: resident before, after, and the
     process peak. The peak is per process, not per step, so it only moves
     when a step sets a new high; the step's own cost is the difference
     between after and before plus whatever transient the peak shows.
 
-    Every worker emits this when it finishes, so the output panel always
-    says what is in memory. Nothing else in KOSMIC did.
+    Every worker records these, and run_worker writes the line to the
+    output panel when the step completes, so the panel always says what
+    is in memory. Nothing else in KOSMIC did.
     """
-    after = _memory_gb()
+    if after is None:
+        after = _memory_gb()
     if before is None or after is None:
         return f"{step}: memory not available"
     text = f"{step}: memory {before[0]:.1f} GB before, {after[0]:.1f} GB after"
@@ -164,21 +166,27 @@ class BaseWorker(QThread):
             f"{type(self).__name__} must override _run()")
 
     def run(self) -> None:  # final -- subclasses override _run() instead
-        before = _memory_gb()
+        # Memory before and after the step is recorded on the worker; the
+        # owner reads it on the GUI thread once the step has completed
+        # (run_worker does so). Nothing is emitted from this thread that
+        # the completion handlers did not already expect.
+        self.memory_before = _memory_gb()
         try:
             result = self._run()
         except Exception as exc:  # noqa: BLE001 -- by design
-            self.progress.emit(memory_report(type(self).__name__, before))
+            self.memory_after = _memory_gb()
             self.failed.emit(f"{exc}\n{traceback.format_exc()}")
         else:
-            # The memory line goes out before the completion signal:
-            # nothing may be emitted after finished_ok / failed, because
-            # the owner may tear its widgets down in that handler and a
-            # later emit from this thread would reach a dead receiver.
-            self.progress.emit(memory_report(type(self).__name__, before))
+            self.memory_after = _memory_gb()
             self.finished_ok.emit(result)
         finally:
             self._release_inputs()
+
+    def memory_line(self) -> str:
+        """What this step cost, for the output panel; see memory_report."""
+        return memory_report(type(self).__name__,
+                             getattr(self, 'memory_before', None),
+                             getattr(self, 'memory_after', None))
 
     def _release_inputs(self) -> None:
         """Drop references to any AnnData the worker was given.

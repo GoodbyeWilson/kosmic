@@ -47,8 +47,20 @@ def run_worker(
         worker.progress.connect(on_progress)
     if on_progress_pct is not None:
         worker.progress_pct.connect(on_progress_pct)
+
+    # The memory line is written on the GUI thread, from the completion
+    # handlers, so the worker thread emits nothing beyond its own signals.
+    def _memory(*_):
+        if on_progress is not None:
+            try:
+                on_progress(worker.memory_line())
+            except Exception:  # noqa: BLE001 -- a log line must never break a handler
+                pass
+
+    worker.finished_ok.connect(_memory)
     worker.finished_ok.connect(on_finished)
     if on_failed is not None:
+        worker.failed.connect(_memory)
         worker.failed.connect(on_failed)
     worker.start()
     return worker
