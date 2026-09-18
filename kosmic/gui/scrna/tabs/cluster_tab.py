@@ -157,15 +157,16 @@ class PCAHarmonyWorker(BaseWorker):
 
         # --- PCA ---------------------------------------------------------
         n_pcs = min(self.n_pcs, self.adata.n_obs - 1, self.adata.n_vars - 1)
-        # Default centred PCA densifies the matrix (n_cells x n_genes
-        # floats). At ~500K+ cells that runs out of RAM; switch to the
-        # sparse-native zero_center=False path used by atlas pipelines.
-        large = self.adata.n_obs > 500_000
-        self.progress.emit(
-            f"Running PCA ({n_pcs} components"
-            f"{', sparse mode' if large else ''})...")
+        # Centred PCA on every study, whatever its size. scanpy centres a
+        # sparse matrix implicitly, without densifying it, so the old
+        # switch to an uncentred SVD above 500,000 cells bought nothing
+        # and cost the elbow: in an uncentred decomposition the first
+        # component is the mean expression profile and takes a third of
+        # the variance, the knee lands at PC 2, and clustering fell back
+        # to the 10-PC floor on the DCM atlas.
+        self.progress.emit(f"Running PCA ({n_pcs} components)...")
         self.progress_pct.emit(40)
-        sc.tl.pca(self.adata, n_comps=n_pcs, zero_center=not large)
+        sc.tl.pca(self.adata, n_comps=n_pcs, zero_center=True)
         self.progress_pct.emit(70)
 
         # --- Harmony (optional) ------------------------------------------

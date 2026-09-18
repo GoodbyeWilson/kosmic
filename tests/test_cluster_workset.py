@@ -160,3 +160,38 @@ def test_marker_genes_rank_on_a_per_cluster_subsample():
     assert (a.X != X_before).nnz == 0 and a.n_obs == 600
     compute_cluster_marker_genes(a, max_cells_per_cluster=0)   # every cell
     assert 'n_cells_used' not in a.uns['rank_genes_groups']['params']
+
+
+def test_reference_annotation_worker_does_not_copy_the_study(app, tmp_path, monkeypatch):
+    """Annotation adds obs columns and uns entries; the worker must work on
+    an object that shares X with the study and write the columns back."""
+    from kosmic.gui.scrna.tabs import annotate_tab
+    from kosmic.gui.scrna.tabs.annotate_tab import ReferenceAnnotationWorker
+
+    a = _study(n=90, g=40)
+    a.obs['leiden'] = pd.Categorical(['0'] * 30 + ['1'] * 30 + ['2'] * 30)
+    a.obs['cell_type'] = pd.Categorical(['authors'] * 90)
+    X_id = id(a.X)
+
+    seen = {}
+
+    def fake_run(adata, ref, min_correlation=0.3, progress_callback=None, **kw):
+        seen['X_is_shared'] = adata.X is a.X
+        seen['no_layers'] = not adata.layers
+        adata.obs['cell_type'] = pd.Categorical(['CM'] * 30 + ['Fib'] * 30 + ['EC'] * 30)
+        adata.obs['cell_type_score'] = 0.9
+        return adata, {'0': 'CM', '1': 'Fib', '2': 'EC'}, {'0': {'best_score': 0.9}}
+
+    import kosmic.scrna.annotate.reference as ref_mod
+    monkeypatch.setattr(ref_mod, 'run_reference_annotation', fake_run)
+    out = tmp_path / 's.h5ad'
+    full, msg = ReferenceAnnotationWorker(a, 'any', str(out))._run()
+    assert seen == {'X_is_shared': True, 'no_layers': True}
+    assert full is a and id(a.X) == X_id
+    assert list(a.obs['cell_type'].astype(str)[:1]) == ['CM']
+    assert (a.obs['cell_type_author'] == 'authors').all()
+    assert a.obs['cell_type_score'].iloc[0] == 0.9
+    assert a.uns['cluster_annotation_details'] == {'0': {'best_score': 0.9}}
+    assert 'counts' in a.layers                                  # untouched
+    assert out.exists() and not (tmp_path / 's.h5ad.tmp').exists()
+    assert 'annotate_tab' in str(annotate_tab)
