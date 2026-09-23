@@ -85,6 +85,19 @@ def test_plan_lists_both_cell_types_as_eligible():
                for p in plans)
 
 
+def test_plan_skips_unlabelled_cells():
+    """Cells with no cell-type label are not planned as a cell type.
+
+    Under pandas 3, astype(str) leaves a missing label as NaN rather than
+    'nan', and sorting it with the real labels raised a TypeError.
+    """
+    adata = _adata()
+    labels = adata.obs['cell_type'].astype('category')
+    adata.obs['cell_type'] = labels.where(np.arange(adata.n_obs) % 7 != 0)
+    plans = B.plan_cell_types(adata, 'cell_type', 'donor', min_cells=10)
+    assert [p.cell_type for p in plans] == ['Endothelial', 'Fibroblast']
+
+
 def test_plan_ignores_excluded_cells():
     """The excluded arm must not inflate cell or donor counts."""
     adata = _adata(cells_per_donor=30)

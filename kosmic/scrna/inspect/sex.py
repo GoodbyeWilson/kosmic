@@ -160,7 +160,9 @@ def compare_with_recorded(table: pd.DataFrame, obs, sample_col: str,
     per = (pd.DataFrame({'sample': obs[sample_col].astype(str).values,
                          'sex': obs[sex_col].map(normalise_sex_value).values})
            .groupby('sample', observed=True)['sex']
-           .agg(lambda s: sorted(set(x for x in s if x is not None))))
+           # pd.notna, not 'is not None': pandas 3 turns the None from
+           # the normaliser into NaN.
+           .agg(lambda s: sorted(set(x for x in s if pd.notna(x)))))
     recorded, check = [], []
     for sample, call in zip(out.index, out['sex_inferred']):
         values = per.get(sample, [])
