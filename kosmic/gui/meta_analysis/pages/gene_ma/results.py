@@ -1,4 +1,6 @@
 # Results tab: per-gene consensus table, sig-count label, panel summary.
+# A checkbox limits the table to genes whose studies disagree in
+# direction ('direction_conflict', see kosmic.meta_analysis.direction).
 #
 # Parent drives via 'populate'; 'gene_selected' fires on row click.
 from __future__ import annotations
@@ -8,11 +10,12 @@ from typing import Optional
 import pandas as pd
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from kosmic import DEFAULT_FDR
 from kosmic.gui.shared.widgets import Column, ResultsTable, SecondaryLabel
+from kosmic.meta_analysis.direction import count_significant_conflicts
 
 
 _PANEL_HEADERS = {
@@ -28,6 +31,7 @@ class ResultsTab(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._df: Optional[pd.DataFrame] = None
         self._build_ui()
 
     # -- UI construction -----------------------------------------------
@@ -42,6 +46,17 @@ class ResultsTab(QWidget):
         self.sig_label = SecondaryLabel("")
         self.sig_label.setTextInteractionFlags(_selectable)
         lay.addWidget(self.sig_label)
+
+        self.conflict_only_cb = QCheckBox(
+            "Show only genes with opposite-direction effects")
+        self.conflict_only_cb.setToolTip(
+            "Genes that are significant (study FDR < 0.05) with a positive "
+            "log2FC in at least one study and a negative log2FC in "
+            "another. P-value methods such as Fisher's can call these "
+            "genes significant because they do not use the sign.")
+        self.conflict_only_cb.toggled.connect(self._apply_filter)
+        self.conflict_only_cb.setEnabled(False)
+        lay.addWidget(self.conflict_only_cb)
 
         self.table = ResultsTable()
         self.table.setSelectionBehavior(
@@ -85,6 +100,7 @@ class ResultsTab(QWidget):
     ) -> None:
         """Build the schema + load rows from the consensus result."""
         if meta_df is None:
+            self._df = None
             self.table.setRowCount(0)
             return
 
@@ -116,6 +132,17 @@ class ResultsTab(QWidget):
         cols.append(Column('Consensus FDR', 'fdr', '.2e'))
         cols.append(Column('k', 'n_studies', 'd'))
 
+        has_direction = 'direction_conflict' in df.columns
+        if has_direction:
+            cols += [
+                Column('Up', 'n_up', 'd',
+                       tooltip='Studies with study FDR < 0.05 and log2FC > 0'),
+                Column('Down', 'n_down', 'd',
+                       tooltip='Studies with study FDR < 0.05 and log2FC < 0'),
+                Column('Conflict', 'direction_conflict', 'bool',
+                       tooltip='Significant up in one study and down in another'),
+            ]
+
         # Panel-membership cols (added by translational annotation
         # before populate is called) -- present only if shipped.
         for panel_col, header in _PANEL_HEADERS.items():
@@ -123,12 +150,29 @@ class ResultsTab(QWidget):
                 cols.append(Column(header, panel_col, 'bool'))
 
         self.table.set_schema(cols)
-        self.table.set_data(df)
+        self._df = df
+        self.conflict_only_cb.setEnabled(has_direction)
+        if not has_direction:
+            self.conflict_only_cb.setChecked(False)
+        self._apply_filter()
 
-        sig_count = int((df['fdr'].astype(float) < DEFAULT_FDR).sum()) \
-            if 'fdr' in df.columns else 0
-        self.sig_label.setText(
-            f"{sig_count} consensus genes / {len(df)} total (FDR < 0.05)")
+        sig_count, n_conflict = count_significant_conflicts(
+            df, fdr=DEFAULT_FDR)
+        text = f"{sig_count} consensus genes / {len(df)} total (FDR < 0.05)"
+        if n_conflict:
+            text += (f"; {n_conflict} with opposite-direction effects "
+                     f"across studies")
+        self.sig_label.setText(text)
+
+    def _apply_filter(self) -> None:
+        """Load the table, limited to direction conflicts if ticked."""
+        if self._df is None:
+            return
+        df = self._df
+        if (self.conflict_only_cb.isChecked()
+                and 'direction_conflict' in df.columns):
+            df = df[df['direction_conflict'].fillna(False).astype(bool)]
+        self.table.set_data(df)
 
     def clear(self) -> None:
         """
@@ -136,6 +180,7 @@ class ResultsTab(QWidget):
         as a placeholder (the parent updates it via
         'set_panel_summary').
         """
+        self._df = None
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
         self.sig_label.setText("")

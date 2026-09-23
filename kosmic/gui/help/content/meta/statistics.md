@@ -75,6 +75,34 @@ in its t-distribution and finds nothing, and the rank methods have
 almost no resolution. Two studies is the minimum that runs; five or
 more is where the method choice starts to matter.
 
+### Direction of effect across studies
+
+Fisher's method, SumRank and gwOP combine per-study p-values or ranks
+without using the sign of the fold change. A gene that is significantly
+up-regulated in one study and significantly down-regulated in another
+can therefore be called significant by these methods, although the
+studies disagree about what happens to it. Stouffer's method uses the
+sign, and DerSimonian–Laird and REML pool the signed effect, so such a
+gene is less likely to reach significance with them, but it is not
+excluded.
+
+Every pooled table (gene and pathway) therefore carries three columns:
+
+- `n_up` — the number of studies in which the gene has a study-level
+  FDR below 0.05 and a positive log2 fold change;
+- `n_down` — the same for a negative log2 fold change;
+- `direction_conflict` — true when both counts are above zero.
+
+The counts use each study's adjusted p-value (`pvals_adj`) as written
+by the study's DE step. The DESeq2 + VIF pathway summaries carry only a
+pooled log2 fold change and a VIF-adjusted standard error per study, so
+for them each study's p-value is a two-sided Wald test of log2FC / SE,
+adjusted by Benjamini–Hochberg across that study's pathways. A study
+whose results table has no adjusted p-value is not counted, and the
+output panel names it when the run starts. When no study has adjusted
+p-values the columns are omitted rather than reported as zero. A significant gene with `direction_conflict` set should be read
+as a disagreement between studies, not as a consistent change.
+
 ## Permutation calibration
 
 Analytical p-values from pooled single-cell DE are anticonservative
