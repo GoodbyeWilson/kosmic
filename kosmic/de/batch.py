@@ -160,8 +160,9 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
     depths = cell_depths(adata, counts_layer) if min_counts else None
 
     included = included_roles(roles)
+    # Unlabelled cells: 'nan' under pandas 2's astype(str), NaN under pandas 3.
     observed = [t for t in pd.unique(labels[included])
-                if t not in ('nan', 'None')]
+                if pd.notna(t) and t not in ('nan', 'None')]
     wanted = list(cell_types) if cell_types is not None else sorted(observed)
 
     plans: list[CellTypePlan] = []
