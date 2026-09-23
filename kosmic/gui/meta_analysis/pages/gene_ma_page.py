@@ -1142,6 +1142,7 @@ class GeneMAPage(SidebarTabbedPage):
         if self.progress_bar:
             self.progress_bar.setRange(0, 0)  # indeterminate spinner
 
+        self._warn_unadjusted(de_dfs)
         self._worker = GeneMAWorker(de_dfs, labels, params)
         run_worker(
             self._worker,
@@ -1149,6 +1150,13 @@ class GeneMAPage(SidebarTabbedPage):
             on_failed=self._on_failed,
             on_progress=self._on_progress,
         )
+
+    def _warn_unadjusted(self, de_dfs):
+        """Name the studies left out of the direction counts."""
+        from kosmic.meta_analysis.direction import unadjusted_warning
+        warning = unadjusted_warning(de_dfs)
+        if warning:
+            self.log_message.emit(f"Warning: {warning}")
 
     def _on_progress(self, message):
         self._status_label.setText(message)
@@ -1193,6 +1201,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._status_label.setText(message)
         self.log_message.emit(message)
         self._meta_df = data['meta_df']
+        self._log_direction_summary()
         self._method_dfs = data['method_dfs']
         self._method_keys = data['method_keys']
 
@@ -1231,6 +1240,17 @@ class GeneMAPage(SidebarTabbedPage):
                 self._show_gene_forest(last)
                 self._results_tab.select_gene(last)
         self.analysis_complete.emit()
+
+    def _log_direction_summary(self):
+        """Report how many significant genes have opposite-direction effects."""
+        from kosmic.meta_analysis.direction import count_significant_conflicts
+        n_sig, n_conflict = count_significant_conflicts(
+            self._meta_df, fdr=DEFAULT_FDR)
+        if n_conflict is None:
+            return
+        self.log_message.emit(
+            f"{n_sig:,} significant (FDR < {DEFAULT_FDR:g}), {n_conflict:,} "
+            f"with opposite-direction effects across studies")
 
     def _apply_translational_annotation(self):
         """
@@ -2011,6 +2031,24 @@ class GeneMAPage(SidebarTabbedPage):
         self._tabs.setCurrentIndex(0)
 
     # --- Auto-save ---
+    def _direction_params(self):
+        """Significant and opposite-direction counts for provenance."""
+        from kosmic.meta_analysis.direction import (
+            count_significant_conflicts, studies_without_adjusted_p)
+        if self._meta_df is None:
+            return {}
+        n_sig, n_conflict = count_significant_conflicts(
+            self._meta_df, fdr=DEFAULT_FDR)
+        if n_conflict is None:
+            return {}
+        return {
+            'n_significant': n_sig,
+            'n_significant_direction_conflict': n_conflict,
+            'direction_study_fdr': DEFAULT_FDR,
+            'direction_studies_without_adjusted_p': studies_without_adjusted_p(
+                getattr(self, '_last_consensus_de_dfs', None) or []),
+        }
+
     def _record_meta_provenance(self, stage):
         """Record the meta-analysis pooling step into a project-level sidecar so
         the combined cross-study methods view can show it. Best-effort."""
@@ -2036,6 +2074,7 @@ class GeneMAPage(SidebarTabbedPage):
                 'studies': [d.get('name', '?') for d in (self._datasets or [])],
                 'study_tokens': tokens,
             }
+            params.update(self._direction_params())
             # Through the shared recorder, so this keeps only the
             # latest run like every other meta stage. Calling
             # record_stage directly here bypassed that and kept
@@ -2111,6 +2150,8 @@ class GeneMAPage(SidebarTabbedPage):
                 'n_genes_tested': len(self._meta_df),
                 'n_significant':  n_sig,
                 'fdr_threshold':  DEFAULT_FDR,
+                'n_significant_direction_conflict': self._direction_params().get(
+                    'n_significant_direction_conflict'),
             },
         )
 
@@ -2336,6 +2377,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._last_consensus_de_dfs = de_dfs
         self._last_consensus_labels = labels
 
+        self._warn_unadjusted(de_dfs)
         self._worker = GeneMAWorker(de_dfs, labels, params)
         run_worker(
             self._worker,
