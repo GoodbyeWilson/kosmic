@@ -312,6 +312,9 @@ class PathwayMAPage(SidebarPage):
         self._datasets = []
         self._gene_datasets = []  # for finding pseudobulk paths
         self._project_folder = None
+        self._output_selection = None  # folder under meta_analysis/ (ADR-007)
+        self._run_output_selection = None
+        self._run_study_names = []
         self._meta_df = None  # pooled pathway-level DataFrame from the most recent run
         self._method_keys = []  # active method keys for the current run
         self._scatter_data = None
@@ -483,7 +486,9 @@ class PathwayMAPage(SidebarPage):
     # ------------------------------------------------------------------
 
     def set_datasets(self, datasets: list, gene_datasets=None,
-                     project_folder=None, pathway_gene_sets=None):
+                     project_folder=None, pathway_gene_sets=None,
+                     output_selection=None):
+        self._output_selection = output_selection
         self._datasets = datasets
         self._gene_datasets = gene_datasets or []
         self._project_folder = project_folder
@@ -550,6 +555,9 @@ class PathwayMAPage(SidebarPage):
             f"Pathway MA: {len(self._datasets)} studies, "
             f"pooling={pooling_key}, scoring={scoring}")
 
+        # Fixed at launch: the selection may change while it runs.
+        self._run_output_selection = self._output_selection
+        self._run_study_names = [d.get('name', '?') for d in (self._datasets or [])]
         self._worker = PathwayMAWorker(
             self._datasets, self._gene_datasets, self._project_folder,
             method_keys, min_studies,
@@ -603,8 +611,8 @@ class PathwayMAPage(SidebarPage):
             }
             params = {
                 'pooling_method': self._pooling_combo.currentData() or 'reml',
-                'n_studies': len(self._datasets or []),
-                'studies': [d.get('name', '?') for d in (self._datasets or [])],
+                'n_studies': len(self._run_study_names),
+                'studies': list(self._run_study_names),
                 'n_pathway_sets': len(self._pathway_gene_sets or {}),
                 'study_tokens': tokens,
             }
@@ -618,7 +626,8 @@ class PathwayMAPage(SidebarPage):
             # Shared recorder: keeps the latest run, as every meta
             # stage does. A direct record_stage call appends one entry
             # per Run click.
-            record_meta_stage(self._project_folder, stage, params)
+            record_meta_stage(self._project_folder, stage, params,
+                              selection=self._run_output_selection)
         except Exception as e:
             self.log_message.emit(f"Could not record pathway meta provenance: {e}")
 
@@ -656,7 +665,8 @@ class PathwayMAPage(SidebarPage):
         self._tabs.setCurrentIndex(0)  # Plots tab
 
     def _auto_save(self, meta_df, method_keys):
-        """Save the pooled DataFrame + settings sidecar to {project}/meta_analysis/.
+        """Save the pooled DataFrame + settings sidecar to the selection's folder
+        under {project}/meta_analysis/ (ADR-007).
 
         Both files are keyed by the pooling method, so re-running with
         the same method overwrites the pair (settings stay in sync with
@@ -666,7 +676,8 @@ class PathwayMAPage(SidebarPage):
         if not self._project_folder or meta_df is None or meta_df.empty:
             return
         try:
-            output_dir = meta_output_dir(self._project_folder)
+            output_dir = meta_output_dir(self._project_folder,
+                                         self._run_output_selection)
             output_dir.mkdir(parents=True, exist_ok=True)
             method = method_keys[0] if method_keys else 'pool'
             stem = f'pathway_ma_{method}'
@@ -678,8 +689,14 @@ class PathwayMAPage(SidebarPage):
             self._write_settings_sidecar(json_path, meta_df, method_keys)
 
             self.log_message.emit(
-                f"Pathway MA results saved: {csv_path.name} + {json_path.name}"
+                f"Pathway MA results saved to "
+                f"{output_dir.relative_to(self._project_folder).as_posix()}: "
+                f"{csv_path.name} + {json_path.name}"
             )
+            from kosmic.meta_analysis.io import mixed_selection_warning
+            warning = mixed_selection_warning(self._run_output_selection)
+            if warning:
+                self.log_message.emit(warning)
         except Exception as exc:
             self.log_message.emit(f"Pathway MA auto-save failed: {exc}")
 

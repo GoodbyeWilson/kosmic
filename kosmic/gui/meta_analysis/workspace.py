@@ -17,6 +17,7 @@ from kosmic.meta_analysis.io import (
     load_de_results,
     require_se,
     discover_de_results,
+    meta_selection_folder,
     split_cell_types,
 )
 
@@ -840,12 +841,12 @@ class MetaAnalysisWorkspace(QWidget):
                 f"{n_all} entries found · none selected. Pooling is only "
                 f"meaningful within one cell type, so choose one in the "
                 f"Cell type box.")
-        elif n_sel == n_all:
-            self._select_summary.setText(
-                f"{n_all} studies available for meta-analysis · all selected")
         else:
+            head = (f"{n_all} studies available for meta-analysis · all selected"
+                    if n_sel == n_all
+                    else f"{n_sel} of {n_all} available entries selected")
             self._select_summary.setText(
-                f"{n_sel} of {n_all} available entries selected")
+                f"{head} · results go to meta_analysis/{self.output_selection}/")
         self.status_message.emit(f"{n_sel} of {n_all} dataset(s) selected")
 
 
@@ -872,6 +873,22 @@ class MetaAnalysisWorkspace(QWidget):
     def project_folder(self) -> str:
         """Currently selected parent folder containing study subfolders."""
         return self._project_folder
+
+    @property
+    def output_selection(self) -> str:
+        """Folder under meta_analysis/ for the current selection (ADR-007).
+
+        Named after the selected project results' cell type; external
+        imports have none and do not count.
+        """
+        return meta_selection_folder(
+            [d.get('cell_type') for d in self.datasets if not d.get('external')])
+
+    @property
+    def selected_study_folders(self) -> list:
+        """Study folders of the selected project results, for the Methods step."""
+        return sorted({d['study'] for d in self.datasets
+                       if not d.get('external') and d.get('study')})
 
     @property
     def consensus_mode(self) -> str:
@@ -1050,13 +1067,16 @@ class MetaAnalysisWorkspace(QWidget):
             # Re-read on every visit: stages are written as they run, and
             # a study may have been reprocessed in another workspace.
             self._methods_page.set_project(
-                self._project_folder, self.dataset_labels)
+                self._project_folder, self.selected_study_folders,
+                selection=self.output_selection)
         elif stack_page == self.PAGE_ENRICHMENT:
             self._enrichment_page.progress_bar = self.progress_bar
-            self._enrichment_page.set_project_folder(self._project_folder)
+            self._enrichment_page.set_project_folder(
+                self._project_folder, selection=self._run_selection())
         elif stack_page == self.PAGE_VALIDATION:
             self._validation_page.progress_bar = self.progress_bar
-            self._validation_page.set_project_folder(self._project_folder)
+            self._validation_page.set_project_folder(
+                self._project_folder, selection=self._run_selection())
             self._validation_page.set_studies(self.datasets)
         elif stack_page == self.PAGE_PATHWAY_MA:
             pw_gene_sets = getattr(self._pathway_explorer,
@@ -1065,7 +1085,8 @@ class MetaAnalysisWorkspace(QWidget):
                 self.pathway_datasets,
                 gene_datasets=self.datasets,
                 project_folder=self._project_folder,
-                pathway_gene_sets=pw_gene_sets)
+                pathway_gene_sets=pw_gene_sets,
+                output_selection=self.output_selection)
         elif stack_page == self.PAGE_GENE_MA:
             self._gene_ma_page.progress_bar = self.progress_bar
             # In hypothesis mode, also pass the pathway MA results so the
@@ -1078,7 +1099,8 @@ class MetaAnalysisWorkspace(QWidget):
             self._gene_ma_page.set_datasets(
                 self.datasets, self.dataset_labels, self._project_folder,
                 pathway_ma_results=pw_results,
-                pathway_gene_sets=pw_gene_sets)
+                pathway_gene_sets=pw_gene_sets,
+                output_selection=self.output_selection)
             if self._consensus_mode:
                 self._gene_ma_page.set_mode(self._consensus_mode)
         elif stack_page == self.PAGE_METHODS_CMP:
@@ -1102,6 +1124,10 @@ class MetaAnalysisWorkspace(QWidget):
             self._methods_comparison_results_page.set_method_results(
                 method_results, project_folder=self._project_folder,
                 loo_results=loo_results)
+
+    def _run_selection(self):
+        """Output folder of the last pooling run, else the current selection."""
+        return self._gene_ma_page.run_output_selection or self.output_selection
 
     def _on_pathway_explorer_changed(self, pathways_dict):
         """Forward selected pathways to the consensus page."""
