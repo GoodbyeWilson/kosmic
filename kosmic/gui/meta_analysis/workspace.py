@@ -1,13 +1,13 @@
 # Meta-analysis workspace: 8-page workflow embedded in AppWindow's stack.
 
 from pathlib import Path
-from kosmic import DEFAULT_FDR
+from kosmic import DEFAULT_FDR, MIN_STUDIES
 from kosmic.gui.shared import dialogs
 from kosmic.gui.shared.widgets import CaptionLabel, PrimaryButton, SecondaryButton
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QCheckBox, QFileDialog, QLineEdit,
+    QLabel, QPushButton, QCheckBox, QComboBox, QFileDialog,
     QFrame, QScrollArea, QStackedWidget,
 )
 from PyQt6.QtCore import QSettings, Qt, pyqtSignal
@@ -17,7 +17,13 @@ from kosmic.meta_analysis.io import (
     load_de_results,
     require_se,
     discover_de_results,
+    split_cell_types,
 )
+
+# Choices in the Select Studies cell-type box that are not cell types.
+_ALL_ENTRIES = '__all__'
+_WHOLE_STUDY = '__whole__'
+_EXTERNAL = '__external__'
 
 
 class MetaAnalysisWorkspace(QWidget):
@@ -337,6 +343,11 @@ class MetaAnalysisWorkspace(QWidget):
         data_title.setProperty("role", "panel_title")
         head_row.addWidget(data_title)
         head_row.addStretch()
+        self._rescan_btn = SecondaryButton("Rescan")
+        self._rescan_btn.setToolTip(
+            "Look for DE results again, e.g. after running DE on a study.")
+        self._rescan_btn.clicked.connect(self._rescan_project)
+        head_row.addWidget(self._rescan_btn)
         self.add_btn = SecondaryButton("Import external result...")
         self.add_btn.setToolTip("Add a DE results CSV from outside this project.")
         self.add_btn.clicked.connect(self._add_datasets)
@@ -346,19 +357,20 @@ class MetaAnalysisWorkspace(QWidget):
         # A per-cell-type run writes one accession per cell type, so this
         # list went from a handful of studies to a couple of dozen rows.
         # Ticking them by hand, or worse leaving them all ticked, is how
-        # you end up pooling fibroblasts with endothelium.
+        # you end up pooling fibroblasts with endothelium. Choosing a cell
+        # type selects that type in every study and nothing else.
         tools_row = QHBoxLayout()
         tools_row.setSpacing(6)
-        self._study_filter = QLineEdit()
-        self._study_filter.setPlaceholderText("Filter, e.g. Fibroblast")
-        self._study_filter.setClearButtonEnabled(True)
-        self._study_filter.setToolTip(
-            "Show only entries whose name contains this text.\n"
-            "The buttons beside it act on what is shown, so filtering to\n"
-            "one cell type and clicking Select all is the quick way to\n"
-            "pool that cell type across studies.")
-        self._study_filter.textChanged.connect(self._apply_study_filter)
-        tools_row.addWidget(self._study_filter, 1)
+        tools_row.addWidget(QLabel("Cell type:"))
+        self._cell_type_combo = QComboBox()
+        self._cell_type_combo.setToolTip(
+            "Choose a cell type to select it in every study that has it.\n"
+            "Pooling is only meaningful within one cell type. Types found\n"
+            f"in fewer than {MIN_STUDIES} studies cannot be pooled and are "
+            "greyed out.")
+        self._cell_type_combo.currentIndexChanged.connect(
+            self._on_cell_type_chosen)
+        tools_row.addWidget(self._cell_type_combo, 1)
 
         self._select_all_btn = SecondaryButton("Select all")
         self._select_all_btn.clicked.connect(lambda: self._set_all_shown(True))
@@ -439,6 +451,7 @@ class MetaAnalysisWorkspace(QWidget):
             return
 
         discovered = discover_de_results(Path(self._project_folder))
+        self._scan_signature = self._results_signature(discovered)
         if not discovered:
             self._log(f"No DE results found in {self._project_folder}")
             self.status_message.emit("No DE results found")
@@ -507,10 +520,19 @@ class MetaAnalysisWorkspace(QWidget):
                     if valid_mod.any():
                         df.loc[valid_mod, 'se'] = df.loc[valid_mod, 'se_moderated']
                 name = entry["accession"]
-                self._all_gene_datasets.append({'path': filepath, 'name': name, 'df': df})
+                self._all_gene_datasets.append({
+                    'path': filepath, 'name': name, 'df': df,
+                    'study': entry['analysis_folder']})
                 self._log(f"Loaded: {name} ({len(df)} genes)")
             except Exception as e:
                 self._log(f"Failed to load {filepath}: {e}")
+        by_folder: dict[str, list] = {}
+        for entry in to_load:
+            by_folder.setdefault(entry['analysis_folder'], []).append(
+                entry['accession'])
+        cell_types = split_cell_types(by_folder)
+        for d in self._all_gene_datasets:
+            d['cell_type'] = cell_types.get(d['name'])
         self._all_gene_datasets.extend(externals)
 
         # Load pathway DE datasets separately
@@ -545,6 +567,32 @@ class MetaAnalysisWorkspace(QWidget):
         self._log(f"Scanned {self._project_folder}: "
                   f"{len(self._all_gene_datasets)} dataset(s) from "
                   f"{len(by_accession)} studies")
+
+    @staticmethod
+    def _results_signature(discovered) -> frozenset:
+        """Which result files exist and when each last changed."""
+        sig = set()
+        for e in discovered:
+            try:
+                sig.add((str(e['path']), e['path'].stat().st_mtime_ns))
+            except OSError:
+                continue
+        return frozenset(sig)
+
+    def on_activated(self):
+        """Rescan when DE results were added or rewritten since the last scan.
+
+        DE run in this session writes its results while the Meta workspace
+        is off screen; without this, Select Studies still says it found
+        none. A rescan reloads every result table, so it runs only when the
+        set of files or their modification times changed.
+        """
+        if not self._project_folder:
+            return
+        discovered = discover_de_results(Path(self._project_folder))
+        if self._results_signature(discovered) != getattr(
+                self, '_scan_signature', None):
+            self._rescan_project()
 
     def set_project_directory_external(self, folder: str):
         """Set project directory from AppWindow.project_changed."""
@@ -641,6 +689,7 @@ class MetaAnalysisWorkspace(QWidget):
                 lambda checked, n=d['name']:
                 self._on_study_check_toggled(n, checked))
             row.setProperty("study_name", d['name'])
+            row.setProperty("group", self._group_of(d))
             row_layout.addWidget(cb)
             row_layout.addStretch()
             if d.get('external'):
@@ -652,6 +701,69 @@ class MetaAnalysisWorkspace(QWidget):
             self._study_checks_layout.addWidget(row)
 
         self._no_eligible_label.setVisible(not self._all_gene_datasets)
+        self._populate_cell_type_combo()
+        self._apply_study_filter()
+
+    @staticmethod
+    def _group_of(d) -> str:
+        """The cell-type box choice an entry belongs to."""
+        if d.get('external'):
+            return _EXTERNAL
+        return d.get('cell_type') or _WHOLE_STUDY
+
+    def _populate_cell_type_combo(self):
+        """Offer each cell type once, with the number of studies that have it.
+
+        Keeps the current choice across a rescan when it still exists.
+        Choices found in fewer than MIN_STUDIES studies are shown but
+        disabled, since the pooling step would refuse them.
+        """
+        combo = self._cell_type_combo
+        previous = combo.currentData()
+        counts: dict[str, int] = {}
+        for d in self._all_gene_datasets:
+            g = self._group_of(d)
+            counts[g] = counts.get(g, 0) + 1
+
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(f"All entries ({len(self._all_gene_datasets)})",
+                      _ALL_ENTRIES)
+        special = {_WHOLE_STUDY: "Whole study", _EXTERNAL: "External imports"}
+        order = ([g for g in (_WHOLE_STUDY,) if g in counts]
+                 + sorted(g for g in counts if g not in special)
+                 + [g for g in (_EXTERNAL,) if g in counts])
+        model = combo.model()
+        for g in order:
+            n = counts[g]
+            unit = "study" if n == 1 else "studies"
+            if g == _EXTERNAL:
+                unit = "result" if n == 1 else "results"
+            combo.addItem(f"{special.get(g, g)}  ({n} {unit})", g)
+            if g != _EXTERNAL and n < MIN_STUDIES:
+                model.item(combo.count() - 1).setEnabled(False)
+        idx = combo.findData(previous)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _on_cell_type_chosen(self, _index=None):
+        """Show the chosen group and select exactly it."""
+        group = self._cell_type_combo.currentData()
+        if group not in (None, _ALL_ENTRIES):
+            self._selection_touched = True
+            self._excluded_studies = {
+                d['name'] for d in self._all_gene_datasets
+                if self._group_of(d) != group}
+            for i in range(self._study_checks_layout.count()):
+                w = self._study_checks_layout.itemAt(i).widget()
+                if w is None:
+                    continue
+                for cb in w.findChildren(QCheckBox):
+                    cb.blockSignals(True)
+                    cb.setChecked(w.property("study_name")
+                                  not in self._excluded_studies)
+                    cb.blockSignals(False)
+            self._apply_study_selection()
         self._apply_study_filter()
 
     def _visible_study_rows(self):
@@ -665,36 +777,29 @@ class MetaAnalysisWorkspace(QWidget):
             rows.append((w, str(w.property("study_name") or "")))
         return rows
 
-    def _apply_study_filter(self, _text=None):
-        """Hide rows that do not match the filter, and relabel the buttons.
+    def _apply_study_filter(self, _index=None):
+        """Show only the chosen cell type's rows, and relabel the buttons.
 
-        The buttons act on what is shown rather than on everything: with
-        two dozen entries the useful gesture is 'filter to Fibroblast,
-        select all', and a Select-all that quietly ticked hidden rows
-        would pool cell types together.
+        The buttons act on what is shown rather than on everything, so a
+        Select all never quietly ticks rows of another cell type.
         """
-        needle = (self._study_filter.text() or "").strip().lower()
+        group = self._cell_type_combo.currentData()
+        filtered = group not in (None, _ALL_ENTRIES)
         n_shown = 0
         for i in range(self._study_checks_layout.count()):
             item = self._study_checks_layout.itemAt(i)
             w = item.widget() if item else None
             if w is None:
                 continue
-            name = str(w.property("study_name") or "")
-            match = needle in name.lower() if needle else True
+            match = not filtered or w.property("group") == group
             w.setVisible(match)
             n_shown += int(match)
 
-        filtered = bool(needle)
         self._select_all_btn.setText(
             "Select shown" if filtered else "Select all")
         self._select_none_btn.setText("Clear shown" if filtered else "Clear")
         for btn in (self._select_all_btn, self._select_none_btn):
             btn.setEnabled(n_shown > 0)
-        if filtered:
-            self.status_message.emit(
-                f"{n_shown} of {len(self._all_gene_datasets)} entries match "
-                f"'{needle}'")
 
     def _set_all_shown(self, checked: bool):
         """Tick or untick every row currently visible."""
@@ -733,8 +838,8 @@ class MetaAnalysisWorkspace(QWidget):
         elif n_sel == 0:
             self._select_summary.setText(
                 f"{n_all} entries found · none selected. Pooling is only "
-                f"meaningful within one cell type, so filter to the one you "
-                f"want and click Select shown.")
+                f"meaningful within one cell type, so choose one in the "
+                f"Cell type box.")
         elif n_sel == n_all:
             self._select_summary.setText(
                 f"{n_all} studies available for meta-analysis · all selected")
