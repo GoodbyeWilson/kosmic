@@ -337,3 +337,77 @@ def test_no_control_demands_a_wildly_oversized_card(enrich):
                     f"in a {budget}px card")
     finally:
         enrich.hide()
+
+
+# -- Select Studies: choose a cell type, rescan on activation ---------
+
+def _write_de(project, study, accession):
+    from kosmic.paths import de_stats_dir
+    d = de_stats_dir(project / study)
+    d.mkdir(parents=True, exist_ok=True)
+    genes = [f"G{i}" for i in range(20)]
+    pd.DataFrame({"names": genes, "logfoldchanges": 0.5, "se": 0.2,
+                  "pvals": 0.01, "pvals_adj": 0.05}).to_csv(
+        d / f"{accession}_DE_deseq2.csv", index=False)
+
+
+@pytest.fixture
+def per_cell_type_project(tmp_path):
+    """Three studies with Endothelial_Cell and CD8_T_Cell; Rare in one."""
+    for study in ("Chaffin", "Guo", "Koenig"):
+        _write_de(tmp_path, study, f"{study}_Endothelial_Cell")
+        _write_de(tmp_path, study, f"{study}_CD8_T_Cell")
+    _write_de(tmp_path, "Koenig", "Koenig_Rare")
+    return tmp_path
+
+
+def _scanned(project):
+    # Set the folder directly: set_project_directory_external would save
+    # it to the user's QSettings.
+    ws = MetaAnalysisWorkspace()
+    ws._project_folder = str(project)
+    ws._rescan_project()
+    return ws
+
+
+def _choices(ws):
+    combo = ws._cell_type_combo
+    return {combo.itemData(i): (combo.itemText(i),
+                                combo.model().item(i).isEnabled())
+            for i in range(combo.count())}
+
+
+def test_cell_types_are_offered_with_study_counts(app, per_cell_type_project):
+    choices = _choices(_scanned(per_cell_type_project))
+    assert choices["Endothelial_Cell"] == ("Endothelial_Cell  (3 studies)", True)
+    assert choices["CD8_T_Cell"][1] is True
+    # One study cannot be pooled.
+    assert choices["Rare"] == ("Rare  (1 study)", False)
+
+
+def test_choosing_a_cell_type_selects_it_in_every_study(app, per_cell_type_project):
+    ws = _scanned(per_cell_type_project)
+    combo = ws._cell_type_combo
+    combo.setCurrentIndex(combo.findData("Endothelial_Cell"))
+    assert sorted(ws.dataset_labels) == [
+        "Chaffin_Endothelial_Cell", "Guo_Endothelial_Cell",
+        "Koenig_Endothelial_Cell"]
+    shown = [name for _w, name in ws._visible_study_rows()]
+    assert sorted(shown) == sorted(ws.dataset_labels)
+
+
+def test_activation_rescans_only_when_results_changed(app, per_cell_type_project,
+                                                      monkeypatch):
+    ws = _scanned(per_cell_type_project)
+    calls = []
+    real = ws._rescan_project
+    monkeypatch.setattr(ws, "_rescan_project", lambda: (calls.append(1), real()))
+
+    ws.on_activated()
+    assert calls == []
+
+    _write_de(per_cell_type_project, "Youness", "Youness_Endothelial_Cell")
+    ws.on_activated()
+    assert calls == [1]
+    assert "Endothelial_Cell  (4 studies)" in {
+        text for text, _ok in _choices(ws).values()}

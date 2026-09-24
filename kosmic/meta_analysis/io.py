@@ -11,6 +11,9 @@
 # * 'load_pseudobulk_set' — load a list of pseudobulk CSVs into the
 #   dict structure consumed by 'cc_permutation' and consensus LOO.
 #
+# 'split_cell_types' names the cell type of each per-cell-type result, so
+# the Select Studies page can offer one cell type across studies.
+#
 # Plus 'require_se' — small validator for "is this DataFrame usable
 # for meta-analysis pooling?" Fails loudly with a helpful remediation
 # message rather than silently fabricating weights.
@@ -177,6 +180,42 @@ def select_de_entries(entries: Sequence[dict],
         chosen.append(match)
 
     return chosen, fallback, skipped
+
+
+def split_cell_types(accessions_by_folder: dict[str, Sequence[str]]
+                     ) -> dict[str, Optional[str]]:
+    """Name the cell type of each accession, or None for a whole-study result.
+
+    Per-cell-type DE writes '{accession}_{cell type}' beside the study's
+    own result ('kosmic.de.batch'), and cell-type names contain
+    underscores themselves ('CD8_T_Cell'), so the name cannot be split on
+    '_'. Within one study folder, an accession is a cell type of that
+    study when it is the folder name, or another accession of the same
+    folder, followed by '_'; the longest such prefix wins.
+
+    Parameters
+    ----------
+    accessions_by_folder : dict
+        '{study folder name: [accession, ...]}', as 'discover_de_results'
+        reports them ('analysis_folder' and 'accession').
+
+    Returns
+    -------
+    dict
+        '{accession: cell type or None}'.
+    """
+    out: dict[str, Optional[str]] = {}
+    for folder, accessions in accessions_by_folder.items():
+        prefixes = {folder, *accessions}
+        for acc in accessions:
+            owners = [p for p in prefixes
+                      if p != acc and acc.startswith(p + '_')]
+            if owners:
+                owner = max(owners, key=len)
+                out[acc] = acc[len(owner) + 1:]
+            else:
+                out[acc] = None
+    return out
 
 
 # Per-study DE CSV loader

@@ -9,7 +9,7 @@ selected accessions.
 """
 from __future__ import annotations
 
-from kosmic.meta_analysis.io import select_de_entries
+from kosmic.meta_analysis.io import select_de_entries, split_cell_types
 
 
 def _entry(accession, method, file_type='de_results'):
@@ -102,3 +102,35 @@ def test_chosen_is_ordered_by_accession():
 
 def test_empty_input():
     assert select_de_entries([], ['deseq2']) == ([], [], [])
+
+
+# --- naming the cell type of each result ------------------------------
+
+def test_cell_type_is_the_part_after_the_study():
+    out = split_cell_types({'Koenig': ['Koenig', 'Koenig_Fibroblast',
+                                       'Koenig_CD8_T_Cell']})
+    assert out == {'Koenig': None, 'Koenig_Fibroblast': 'Fibroblast',
+                   'Koenig_CD8_T_Cell': 'CD8_T_Cell'}
+
+
+def test_accession_that_differs_from_the_folder_name():
+    """A study run under its GEO accession still splits by that accession."""
+    out = split_cell_types({'Koenig': ['GSE183852', 'GSE183852_Endothelial_Cell']})
+    assert out == {'GSE183852': None,
+                   'GSE183852_Endothelial_Cell': 'Endothelial_Cell'}
+
+
+def test_per_cell_type_results_without_a_whole_study_result():
+    out = split_cell_types({'Guo': ['Guo_Mast_Cell', 'Guo_Pericyte']})
+    assert out == {'Guo_Mast_Cell': 'Mast_Cell', 'Guo_Pericyte': 'Pericyte'}
+
+
+def test_longest_owner_wins():
+    """'A_B' is a study's accession, so 'A_B_Fib' is Fib, not 'B_Fib'."""
+    out = split_cell_types({'A': ['A_B', 'A_B_Fib']})
+    assert out['A_B_Fib'] == 'Fib'
+
+
+def test_unrelated_name_is_a_whole_study_result():
+    out = split_cell_types({'Folder': ['Other']})
+    assert out == {'Other': None}
