@@ -35,10 +35,7 @@ license-files = ["LICENSE", "NOTICE.md"]
 dependencies = [
     "PyQt6>=6.5",
     "numpy>=1.24",
-    # Below 3 until the code is audited for pandas 3: its string dtype
-    # keeps missing values as NaN through astype(str), where pandas 2
-    # gave 'nan', and copy-on-write changes chained assignment.
-    "pandas>=2.0,<3",
+    "pandas>=2.0",
     "scipy>=1.10",
     "scanpy>=1.10",
     # scanpy delegates seurat_v3 HVG selection's loess fit to this;
