@@ -108,6 +108,11 @@ class GeneMAPage(SidebarTabbedPage):
         self._datasets = []
         self._labels = []
         self._project_folder = None
+        # Output folder of the selection (ADR-007): set with the datasets,
+        # and frozen per run so Enrichment and Validation record beside it.
+        self._output_selection = None
+        self._run_output_selection = None
+        self._pending_output_selection = None
         self._meta_df = None
         self._method_dfs = None
         self._method_keys = None
@@ -139,7 +144,8 @@ class GeneMAPage(SidebarTabbedPage):
         self._setup_ui()
 
     def set_datasets(self, datasets, labels, project_folder,
-                     pathway_ma_results=None, pathway_gene_sets=None):
+                     pathway_ma_results=None, pathway_gene_sets=None,
+                     output_selection=None):
         """
         Called when page becomes visible.
 
@@ -152,7 +158,21 @@ class GeneMAPage(SidebarTabbedPage):
             {pathway_name: [gene_list]} -- the gene sets that were tested
             at the pathway level.  Used to map significant pathways back
             to their constituent genes.
+        output_selection : str, optional
+            Folder under meta_analysis/ for this selection's results and
+            methods record (ADR-007).
         """
+        if (list(labels or []) != list(self._labels)
+                or project_folder != self._project_folder):
+            # Another selection: results pooled from the previous one (and
+            # the per-method and per-mode caches of them) no longer describe
+            # it, and would otherwise stay on screen under the new cell type.
+            if self._meta_df is not None:
+                self._clear_results()
+            self._method_cache = {}
+            self._results_by_mode = dict.fromkeys(self._results_by_mode)
+            self._run_output_selection = None
+        self._output_selection = output_selection
         self._datasets = datasets or []
         self._labels = labels or []
         self._project_folder = project_folder
@@ -1143,6 +1163,9 @@ class GeneMAPage(SidebarTabbedPage):
             self.progress_bar.setRange(0, 0)  # indeterminate spinner
 
         self._warn_unadjusted(de_dfs)
+        # The folder is fixed when the run starts: the selection may
+        # change while it runs (ADR-007).
+        self._pending_output_selection = self._output_selection
         self._worker = GeneMAWorker(de_dfs, labels, params)
         run_worker(
             self._worker,
@@ -1220,6 +1243,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._populate_volcano()
         self._results_tab.populate(self._meta_df, self._method_keys)
         self._update_gene_completer()
+        self._run_output_selection = self._pending_output_selection
         self._auto_save()
         self._record_meta_provenance('meta_gene')
 
@@ -2070,8 +2094,8 @@ class GeneMAPage(SidebarTabbedPage):
                 'mode': getattr(self, '_mode', None),
                 'min_studies': self._min_studies_spin.value(),
                 'independent_filter': if_active,
-                'n_studies': len(self._datasets or []),
-                'studies': [d.get('name', '?') for d in (self._datasets or [])],
+                'n_studies': len(self._run_study_names()),
+                'studies': self._run_study_names(),
                 'study_tokens': tokens,
             }
             params.update(self._direction_params())
@@ -2079,7 +2103,8 @@ class GeneMAPage(SidebarTabbedPage):
             # latest run like every other meta stage. Calling
             # record_stage directly here bypassed that and kept
             # appending one entry per Run click.
-            record_meta_stage(self._project_folder, stage, params)
+            record_meta_stage(self._project_folder, stage, params,
+                              selection=self._run_output_selection)
         except Exception as e:
             self.log_message.emit(f"Could not record meta provenance: {e}")
 
@@ -2093,7 +2118,8 @@ class GeneMAPage(SidebarTabbedPage):
         if not self._project_folder or self._meta_df is None:
             return
         try:
-            output_dir = meta_output_dir(self._project_folder)
+            output_dir = meta_output_dir(self._project_folder,
+                                         self._run_output_selection)
             output_dir.mkdir(parents=True, exist_ok=True)
             keys_str = '_'.join(self._method_keys) if self._method_keys else 'consensus'
             cal = ('cc' if self._cal_combo.currentIndex() == 1
@@ -2109,8 +2135,13 @@ class GeneMAPage(SidebarTabbedPage):
             self._write_settings_sidecar(json_path)
 
             self.log_message.emit(
-                f"Results saved: {csv_path.name} + {json_path.name}"
+                f"Results saved to {output_dir.relative_to(self._project_folder).as_posix()}: "
+                f"{csv_path.name} + {json_path.name}"
             )
+            from kosmic.meta_analysis.io import mixed_selection_warning
+            warning = mixed_selection_warning(self._run_output_selection)
+            if warning:
+                self.log_message.emit(warning)
         except Exception as e:
             self.log_message.emit(f"Auto-save failed: {e}")
 
@@ -2131,8 +2162,8 @@ class GeneMAPage(SidebarTabbedPage):
             'stat':      META_IF_FILTER_STAT if if_active else None,
         }
         params['mode'] = getattr(self, '_mode', None)
-        params['n_studies_input'] = len(self._datasets) if self._datasets else 0
-        params['study_names'] = [d.get('name', '?') for d in (self._datasets or [])]
+        params['n_studies_input'] = len(self._run_study_names())
+        params['study_names'] = self._run_study_names()
         if hasattr(self, '_pathway_gene_sets') and self._pathway_gene_sets:
             params['n_pathways_in_geneset'] = len(self._pathway_gene_sets)
 
@@ -2156,6 +2187,18 @@ class GeneMAPage(SidebarTabbedPage):
         )
 
     # --- Enrichment (exploratory mode) ---
+    def _run_study_names(self):
+        """Studies of the last run, as launched; the selection may since
+        have changed (ADR-007)."""
+        if self._last_consensus_labels is not None:
+            return list(self._last_consensus_labels)
+        return [d.get('name', '?') for d in (self._datasets or [])]
+
+    @property
+    def run_output_selection(self):
+        """Output folder of the last pooling run (ADR-007), or None."""
+        return self._run_output_selection
+
     def cache_loo_result(self, result):
         """Store a LOO result produced by the Validation step.
 
@@ -2378,6 +2421,9 @@ class GeneMAPage(SidebarTabbedPage):
         self._last_consensus_labels = labels
 
         self._warn_unadjusted(de_dfs)
+        # The folder is fixed when the run starts: the selection may
+        # change while it runs (ADR-007).
+        self._pending_output_selection = self._output_selection
         self._worker = GeneMAWorker(de_dfs, labels, params)
         run_worker(
             self._worker,

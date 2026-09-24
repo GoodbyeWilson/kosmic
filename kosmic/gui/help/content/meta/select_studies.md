@@ -35,6 +35,22 @@ For the cell types to line up across studies, run DE by cell type on
 the same label column in every study, such as `cell_type_atlas` after
 propagating labels from a shared atlas.
 
+## Where the results are saved
+
+Each selection saves its results in its own folder under the project's
+`meta_analysis/` folder, named after what was pooled, so running the
+same method on another cell type does not replace earlier results:
+
+- one cell type across studies: `meta_analysis/Endothelial_Cell/`;
+- whole-study results: `meta_analysis/all_cells/`;
+- more than one cell type: `meta_analysis/mixed/`, with a warning in
+  the output panel.
+
+The folder holds the result tables, their settings files, and the
+record the Methods step renders for that selection. The line under the
+page title shows the folder for the current selection. Externally
+imported results do not change the folder name.
+
 ## DE method filter
 
 When a result exists for more than one DE method, the method chosen in

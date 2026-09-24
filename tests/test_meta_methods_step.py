@@ -245,3 +245,55 @@ def test_methods_page_renders_and_enables_copy(app, project):
     page.set_project(project, ["STUDY_A"])
     assert page._copy_btn.isEnabled()
     assert "Gene meta-analysis" in page._view.toPlainText()
+
+
+# -- per-selection folders (ADR-007) -----------------------------------
+
+@pytest.mark.parametrize("cell_types, folder", [
+    (["Endothelial_Cell", "Endothelial_Cell"], "Endothelial_Cell"),
+    ([None, None], "all_cells"),
+    ([], "all_cells"),
+    (["Endothelial_Cell", "Fibroblast"], "mixed"),
+    (["Endothelial_Cell", None], "mixed"),
+])
+def test_selection_names_its_folder(cell_types, folder):
+    from kosmic.meta_analysis.io import meta_selection_folder
+    assert meta_selection_folder(cell_types) == folder
+
+
+def test_output_dir_nests_the_selection(tmp_path):
+    from kosmic.paths import meta_output_dir
+    assert meta_output_dir(tmp_path) == tmp_path / "meta_analysis"
+    assert (meta_output_dir(tmp_path, "Fibroblast")
+            == tmp_path / "meta_analysis" / "Fibroblast")
+
+
+def test_each_cell_type_keeps_its_own_record(project):
+    """The overwrite in #60: a second cell type must not replace the first."""
+    record_meta_stage(project, "meta_gene", {"n_studies": 5}, selection="Endothelial_Cell")
+    record_meta_stage(project, "meta_gene", {"n_studies": 4}, selection="Fibroblast")
+    endo = provenance.load(meta_provenance_dir(project, "Endothelial_Cell"))
+    fib = provenance.load(meta_provenance_dir(project, "Fibroblast"))
+    assert endo["stages"][-1]["params"]["n_studies"] == 5
+    assert fib["stages"][-1]["params"]["n_studies"] == 4
+    assert (meta_provenance_dir(project, "Fibroblast") / "methods.md").exists()
+
+
+def test_methods_render_the_selections_record(project):
+    record_meta_stage(project, "meta_gene", {"marker": "endo"}, selection="Endothelial_Cell")
+    record_meta_stage(project, "meta_gene", {"marker": "fib"}, selection="Fibroblast")
+    doc = build_combined_methods(project, ["STUDY_A"], selection="Fibroblast")
+    assert "fib" in doc and "endo" not in doc
+
+
+def test_methods_fall_back_to_the_top_level_record(project):
+    """Projects from before ADR-007 keep their record at the top level."""
+    record_meta_stage(project, "meta_gene", {"marker": "old"})
+    doc = build_combined_methods(project, ["STUDY_A"], selection="Fibroblast")
+    assert "old" in doc
+
+
+def test_mixed_selection_is_warned_about():
+    from kosmic.meta_analysis.io import mixed_selection_warning
+    assert "mixed" in mixed_selection_warning("mixed")
+    assert mixed_selection_warning("Fibroblast") is None

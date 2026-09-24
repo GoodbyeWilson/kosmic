@@ -399,10 +399,51 @@ def write_meta_settings_sidecar(path, *, tool, analysis_type, parameters,
 
 # Provenance aggregation: combined cross-study methods
 
-def meta_provenance_dir(project_folder) -> Path:
-    """Directory holding the project-level meta-analysis provenance sidecar."""
+ALL_CELLS = 'all_cells'
+MIXED = 'mixed'
+
+
+def meta_selection_folder(cell_types: Sequence[Optional[str]]) -> str:
+    """Name the output folder for a meta-analysis selection (ADR-007).
+
+    Parameters
+    ----------
+    cell_types : sequence of str or None
+        The cell type of each selected project result, None for a
+        whole-study result (see 'split_cell_types'). External imports are
+        left out by the caller: they have no cell type.
+
+    Returns
+    -------
+    str
+        The cell type when every result is of one cell type; 'all_cells'
+        when all are whole-study results or there are none; 'mixed' when
+        the selection spans more than one.
+    """
+    kinds = set(cell_types)
+    if not kinds or kinds == {None}:
+        return ALL_CELLS
+    if len(kinds) == 1:
+        return next(iter(kinds))
+    return MIXED
+
+
+def mixed_selection_warning(selection: Optional[str]) -> Optional[str]:
+    """The output-panel warning for a selection spanning cell types, or None."""
+    if selection != MIXED:
+        return None
+    return ("Warning: the selected results span more than one cell type, so "
+            "they were pooled together and saved under meta_analysis/mixed/. "
+            "Choose one cell type on Select Studies to pool it on its own.")
+
+
+def meta_provenance_dir(project_folder, selection: Optional[str] = None) -> Path:
+    """Directory holding the meta-analysis provenance record of a selection.
+
+    Without 'selection', the top-level folder earlier versions used.
+    """
     from kosmic.paths import meta_output_dir
-    return meta_output_dir(project_folder)
+    return meta_output_dir(project_folder, selection)
 
 
 def gather_study_provenance(project_folder, study_names=None, *,
@@ -471,8 +512,13 @@ def _meta_staleness_note(studies, meta_rec) -> str:
             "re-run to refresh: " + ", ".join(sorted(changed)) + "\n\n")
 
 
-def record_meta_stage(project_folder, stage: str, params: dict) -> bool:
-    """Record one meta-analysis stage into the project-level sidecar.
+def record_meta_stage(project_folder, stage: str, params: dict,
+                      selection: Optional[str] = None) -> bool:
+    """Record one meta-analysis stage into the selection's sidecar.
+
+    'selection' is the output folder of what was pooled
+    ('meta_selection_folder'); each cell type keeps its own record
+    (ADR-007).
 
     Every step of the discovery flow writes here -- pooling, enrichment,
     validation -- so the Methods page can render the whole run from one
@@ -492,18 +538,26 @@ def record_meta_stage(project_folder, stage: str, params: dict) -> bool:
         return False
     try:
         from kosmic import provenance
+        name = Path(project_folder).name
+        if selection:
+            name = f"{name} ({selection})"
         provenance.record_stage(
-            meta_provenance_dir(project_folder),
-            Path(project_folder).name, stage, params, replace=True)
+            meta_provenance_dir(project_folder, selection),
+            name, stage, params, replace=True)
         return True
     except Exception:
         return False
 
 
 def build_combined_methods(project_folder, study_names=None, *,
+                           selection: Optional[str] = None,
                            full: bool = False) -> str:
     """Render a combined methods document: each study's provenance followed by
     the meta-analysis pooling step. '' when no provenance exists anywhere.
+
+    'study_names' are study folder names. The meta-analysis record is the
+    one of 'selection' (ADR-007), falling back to the top-level record
+    that earlier versions wrote when the selection has none yet.
 
     Reports the final configuration of each stage and summarises values
     too long to read. 'full=True' gives the unabridged audit trail.
@@ -512,7 +566,11 @@ def build_combined_methods(project_folder, study_names=None, *,
 
     studies = gather_study_provenance(project_folder, study_names,
                                       only_named=bool(study_names))
-    meta_rec = provenance.load(meta_provenance_dir(project_folder))
+    meta_rec = None
+    if selection:
+        meta_rec = provenance.load(meta_provenance_dir(project_folder, selection))
+    if meta_rec is None:
+        meta_rec = provenance.load(meta_provenance_dir(project_folder))
     doc = provenance.render_combined(studies, meta_rec, full=full)
     if not doc:
         return ''
