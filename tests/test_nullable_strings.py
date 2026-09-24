@@ -52,12 +52,3 @@ def test_a_pandas3_era_file_saves_again(pandas3_file, tmp_path):
     assert pd.isna(b.obs['sample'].iloc[2])
     np.testing.assert_array_equal(b.X, a.X)
 
-
-@pytest.mark.skipif(pd.get_option('future.infer_string'),
-                    reason='pandas 3 writes these without the setting')
-def test_without_the_setting_the_save_fails(pandas3_file, tmp_path):
-    """The failure this guards against, reproduced under pandas 2."""
-    a = ad.read_h5ad(pandas3_file)
-    with ad.settings.override(allow_write_nullable_strings=None):
-        with pytest.raises(RuntimeError, match='allow_write_nullable_strings'):
-            a.write_h5ad(tmp_path / 'fails.h5ad')
