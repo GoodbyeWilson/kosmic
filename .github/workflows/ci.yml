@@ -60,17 +60,25 @@ jobs:
       - name: Lint
         run: ruff check kosmic/ main.py tests/
 
-      # The two Meta-page GUI test files run in their own process: they
-      # segfaulted on the Linux runner when they followed other GUI
-      # tests. Kept while the Xvfb change is on trial.
-      - name: Test (Linux, Xvfb)
+      # '--forked' runs each test in its own forked process, so no test
+      # can be affected by Qt objects another test left behind. That is
+      # what kept killing this job: a widget freed by the cycle
+      # collector during a later test's pyqtgraph construction, always
+      # a different test, on about half of runs. Isolation settles it
+      # whatever the object was, and a test that crashes on its own now
+      # fails by name instead of taking the run with it. Forking is
+      # Unix-only; Windows has never shown the fault and runs the suite
+      # in one process.
+      - name: Test (Linux, Xvfb, one process per test)
         if: runner.os == 'Linux'
         env:
           QT_QPA_PLATFORM: xcb
-        run: |
-          xvfb-run -a pytest tests/ -q --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
-          xvfb-run -a pytest tests/test_ma_gene_search.py tests/test_meta_workflow_steps.py -q
+        run: xvfb-run -a pytest tests/ -q --forked
 
+      # Windows cannot fork, so it keeps the split that has held there:
+      # the two Meta-page GUI files in a second process. Running the
+      # whole suite in one process fails on Windows too (a workspace
+      # test, and once a hard crash), so the split is doing real work.
       - name: Test (Windows, offscreen)
         if: runner.os == 'Windows'
         env:
