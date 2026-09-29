@@ -930,11 +930,11 @@ class LibraryGseaWorker(BaseWorker):
         self._rank_by = rank_by
 
     def _run(self):
-        import gseapy as gp
         from kosmic.de.fgsea import run_fgsea
+        from kosmic.reference.pathways.enrichr import fetch_library
 
         self.progress.emit(f"Fetching {self._library_name}...")
-        gene_sets = gp.get_library(name=self._library_name, organism='Human')
+        gene_sets = fetch_library(self._library_name)
         if not gene_sets:
             raise RuntimeError(f"Could not fetch library '{self._library_name}'.")
 
