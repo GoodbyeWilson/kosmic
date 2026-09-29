@@ -5,6 +5,9 @@
 #   runs one pooling method. Used by both single-method and consensus
 #   gene-level MA ('gene_ma_page'), pathway MA ('pathway_ma_page'),
 #   methods comparison ('methods_comparison_page'), and LOO validation.
+#   Every result carries the per-study direction columns added by
+#   'kosmic.meta_analysis.direction.annotate_direction' (n_up, n_down,
+#   direction_conflict), whichever method produced it.
 #
 #   'merge_consensus_methods(method_keys, method_dfs)' merges N pooled
 #   DataFrames into a consensus frame (per-method FDRs + max-FDR consensus).
@@ -24,7 +27,9 @@ def get_analytical_pool_fn(pooling_key: str,
 
     Keys must match the UI's method list (see METHOD_FAMILIES) plus the
     Top50 / HKSJ modifier combinations exposed by the consensus sidebar.
+    The returned table has the columns added by 'annotate_direction'.
     """
+    from kosmic.meta_analysis.direction import annotate_direction
     from kosmic.meta_analysis.pooling.dl import dl_fast
     from kosmic.meta_analysis.pooling.reml import reml_fast
     from kosmic.meta_analysis.pooling.sumrank import sumrank_fast
@@ -55,7 +60,12 @@ def get_analytical_pool_fn(pooling_key: str,
         raise KeyError(
             f"Unknown pooling_key {pooling_key!r}. "
             f"Known keys: {sorted(dispatch.keys())}")
-    return dispatch[pooling_key]
+    pool = dispatch[pooling_key]
+
+    def pool_with_direction(ds, min_studies=_ms):
+        return annotate_direction(pool(ds, min_studies=min_studies), ds)
+
+    return pool_with_direction
 
 
 def merge_consensus_methods(method_keys: List[str],

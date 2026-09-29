@@ -142,8 +142,14 @@ it as `{accession}_pseudobulk.csv`.
 
 **Meta-Analysis** operates on the project. It discovers each study's
 differential expression results and pseudobulk files on disk, pools
-them, and writes its outputs to the project's `meta_analysis/` folder.
-It does not read anything from the per-study workspaces in memory.
+them, and writes its outputs to the project's `meta_analysis/` folder,
+in one subfolder per selection (ADR-007): `meta_analysis/<cell type>/`
+when the selected results are one cell type across studies,
+`meta_analysis/all_cells/` for whole-study results and
+`meta_analysis/mixed/` when the selection spans cell types. Each
+subfolder holds that selection's result tables and its meta-analysis
+`provenance.json` and `methods.md`. It does not read anything from the
+per-study workspaces in memory.
 
 **Figures** renders figures from the datasets and results currently
 held by the scRNA and Differential Expression workspaces.

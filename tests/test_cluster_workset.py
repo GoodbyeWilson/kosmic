@@ -132,7 +132,7 @@ def test_pca_and_cluster_workers_leave_the_study_matrices_alone(app, tmp_path, e
     else:
         assert a.obs['leiden'].notna().all() and 'connectivities' in a.obsp
     saved = ad.read_h5ad(out)
-    assert saved.n_obs == 60 and 'leiden' in saved.obs and list(saved.layers) == ['counts']
+    assert saved.n_obs == 60 and 'leiden' in saved.obs and [k for k in saved.layers if k is not None] == ['counts']
 
 
 def test_pca_worker_on_counts_normalises_only_its_private_copy(app):

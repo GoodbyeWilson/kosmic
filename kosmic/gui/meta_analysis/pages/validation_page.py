@@ -59,6 +59,7 @@ class ValidationPage(SidebarTabbedPage):
         self._loo_benchmark_worker = None
         self._loo_result = None
         self._project_folder = None
+        self._selection = None
         # Assigned by the workspace, as on the other pages.
         self.progress_bar = None
         self._setup_ui()
@@ -131,9 +132,14 @@ class ValidationPage(SidebarTabbedPage):
 
         self._sync_buttons()
 
-    def set_project_folder(self, folder):
-        """Where the run's provenance sidecar lives."""
+    def set_project_folder(self, folder, selection=None):
+        """Where the run's provenance sidecar lives.
+
+        'selection' is the output folder of the pooling run being
+        validated (ADR-007).
+        """
         self._project_folder = folder
+        self._selection = selection
 
     def _ctx(self, key):
         """One read point for the pooling run's captured settings."""
@@ -240,7 +246,7 @@ class ValidationPage(SidebarTabbedPage):
             'studies': [d.get('name', '?') for d in (self._datasets or [])],
             'n_unique_strict_degs': strict['n_unique_DEGs'],
             'mean_orphan_pct': round(float(strict['mean_orphan_pct']), 2),
-        })
+        }, selection=self._selection)
 
     def _on_repro_failed(self, msg):
         self._repro_btn.setEnabled(True)
@@ -337,7 +343,7 @@ class ValidationPage(SidebarTabbedPage):
                 float(result['min_replication_pct']), 2),
             'max_replication_pct': round(
                 float(result['max_replication_pct']), 2),
-        })
+        }, selection=self._selection)
 
     def _on_loo_failed(self, message):
         self._loo_btn.setEnabled(True)

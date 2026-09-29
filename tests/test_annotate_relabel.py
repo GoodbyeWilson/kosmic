@@ -25,7 +25,7 @@ def test_set_cell_type_object_and_absent_columns():
     assert list(obs['cell_type']) == ['Unknown', 'Fib']
     obs2 = pd.DataFrame(index=['a', 'b'])
     set_cell_type(obs2, [True, False], 'CM')
-    assert list(obs2['cell_type'].astype(str)) == ['CM', 'nan']
+    assert obs2['cell_type'].iloc[0] == 'CM' and pd.isna(obs2['cell_type'].iloc[1])
 
 
 @pytest.fixture(scope='module')

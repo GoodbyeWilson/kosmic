@@ -77,11 +77,17 @@ class MetaEnrichmentPage(EnrichmentPage):
     def __init__(self, parent: Optional[QWidget] = None):
         self._ctx = _MetaEnrichmentContext()
         self._project_folder = None
+        self._selection = None
         super().__init__(self._ctx)
 
-    def set_project_folder(self, folder):
-        """Where the run's provenance sidecar and outputs live."""
+    def set_project_folder(self, folder, selection=None):
+        """Where the run's provenance sidecar and outputs live.
+
+        'selection' is the output folder of the pooling run the gene list
+        came from (ADR-007).
+        """
         self._project_folder = folder
+        self._selection = selection
         self._ctx.project_dir = folder
 
     @property
@@ -142,4 +148,4 @@ class MetaEnrichmentPage(EnrichmentPage):
             'n_background': len(background or []),
             'n_terms':     n_terms,
             'n_terms_sig': n_sig,
-        })
+        }, selection=self._selection)

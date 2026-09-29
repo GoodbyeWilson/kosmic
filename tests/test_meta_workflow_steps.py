@@ -337,3 +337,167 @@ def test_no_control_demands_a_wildly_oversized_card(enrich):
                     f"in a {budget}px card")
     finally:
         enrich.hide()
+
+
+# -- Select Studies: choose a cell type, rescan on activation ---------
+
+def _write_de(project, study, accession):
+    from kosmic.paths import de_stats_dir
+    d = de_stats_dir(project / study)
+    d.mkdir(parents=True, exist_ok=True)
+    genes = [f"G{i}" for i in range(20)]
+    pd.DataFrame({"names": genes, "logfoldchanges": 0.5, "se": 0.2,
+                  "pvals": 0.01, "pvals_adj": 0.05}).to_csv(
+        d / f"{accession}_DE_deseq2.csv", index=False)
+
+
+@pytest.fixture
+def per_cell_type_project(tmp_path):
+    """Three studies with Endothelial_Cell and CD8_T_Cell; Rare in one."""
+    for study in ("Chaffin", "Guo", "Koenig"):
+        _write_de(tmp_path, study, f"{study}_Endothelial_Cell")
+        _write_de(tmp_path, study, f"{study}_CD8_T_Cell")
+    _write_de(tmp_path, "Koenig", "Koenig_Rare")
+    return tmp_path
+
+
+def _scanned(project):
+    # Set the folder directly: set_project_directory_external would save
+    # it to the user's QSettings.
+    ws = MetaAnalysisWorkspace()
+    ws._project_folder = str(project)
+    ws._rescan_project()
+    return ws
+
+
+def _choices(ws):
+    combo = ws._cell_type_combo
+    return {combo.itemData(i): (combo.itemText(i),
+                                combo.model().item(i).isEnabled())
+            for i in range(combo.count())}
+
+
+def test_cell_types_are_offered_with_study_counts(app, per_cell_type_project):
+    choices = _choices(_scanned(per_cell_type_project))
+    assert choices["Endothelial_Cell"] == ("Endothelial_Cell  (3 studies)", True)
+    assert choices["CD8_T_Cell"][1] is True
+    # One study cannot be pooled.
+    assert choices["Rare"] == ("Rare  (1 study)", False)
+
+
+def test_choosing_a_cell_type_selects_it_in_every_study(app, per_cell_type_project):
+    ws = _scanned(per_cell_type_project)
+    combo = ws._cell_type_combo
+    combo.setCurrentIndex(combo.findData("Endothelial_Cell"))
+    assert sorted(ws.dataset_labels) == [
+        "Chaffin_Endothelial_Cell", "Guo_Endothelial_Cell",
+        "Koenig_Endothelial_Cell"]
+    shown = [name for _w, name in ws._visible_study_rows()]
+    assert sorted(shown) == sorted(ws.dataset_labels)
+
+
+def test_activation_rescans_only_when_results_changed(app, per_cell_type_project,
+                                                      monkeypatch):
+    ws = _scanned(per_cell_type_project)
+    calls = []
+    real = ws._rescan_project
+    monkeypatch.setattr(ws, "_rescan_project", lambda: (calls.append(1), real()))
+
+    ws.on_activated()
+    assert calls == []
+
+    _write_de(per_cell_type_project, "Youness", "Youness_Endothelial_Cell")
+    ws.on_activated()
+    assert calls == [1]
+    assert "Endothelial_Cell  (4 studies)" in {
+        text for text, _ok in _choices(ws).values()}
+
+
+def test_selection_names_the_output_folder(app, per_cell_type_project):
+    ws = _scanned(per_cell_type_project)
+    combo = ws._cell_type_combo
+    combo.setCurrentIndex(combo.findData("CD8_T_Cell"))
+    assert ws.output_selection == "CD8_T_Cell"
+    assert ws.selected_study_folders == ["Chaffin", "Guo", "Koenig"]
+    assert "meta_analysis/CD8_T_Cell/" in ws._select_summary.text()
+
+
+def test_two_cell_types_in_a_row_keep_both_results(app, tmp_path):
+    """Issue #60: the second cell type's table used to replace the first."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+    page = GeneMAPage()
+    page._project_folder = str(tmp_path)
+    page._method_keys = ["reml"]
+    page._meta_df = pd.DataFrame({"names": ["G1"], "fdr": [0.01]})
+    for cell_type in ("Endothelial_Cell", "Fibroblast"):
+        page._run_output_selection = cell_type
+        page._auto_save()
+    for cell_type in ("Endothelial_Cell", "Fibroblast"):
+        saved = list((tmp_path / "meta_analysis" / cell_type).glob("consensus_*.csv"))
+        assert len(saved) == 1, cell_type
+
+
+def _tiny_studies(prefix, n=3):
+    rng = np.random.default_rng(0)
+    genes = [f"G{i}" for i in range(30)]
+    return [{"name": f"S{i}_{prefix}", "cell_type": prefix, "study": f"S{i}",
+             "df": pd.DataFrame({"names": genes,
+                                 "logfoldchanges": rng.normal(0, 1, 30),
+                                 "se": 0.3, "pvals": 0.05, "pvals_adj": 0.1,
+                                 "dataset": f"S{i}_{prefix}"})}
+            for i in range(n)]
+
+
+def test_changing_the_selection_clears_the_previous_results(app, tmp_path):
+    """Results of one cell type must not stay on screen under another."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+    page = GeneMAPage()
+    endo = _tiny_studies("Endo")
+    page.set_datasets(endo, [d["name"] for d in endo], str(tmp_path),
+                      output_selection="Endo")
+    page._meta_df = pd.DataFrame({"names": ["G1"], "fdr": [0.01]})
+    page._method_cache = {("reml",): {"meta_df": page._meta_df}}
+
+    # Re-opening the page with the same selection keeps the results.
+    page.set_datasets(endo, [d["name"] for d in endo], str(tmp_path),
+                      output_selection="Endo")
+    assert page._meta_df is not None
+
+    fib = _tiny_studies("Fib")
+    page.set_datasets(fib, [d["name"] for d in fib], str(tmp_path),
+                      output_selection="Fib")
+    assert page._meta_df is None
+    assert page._method_cache == {}
+    assert all(v is None for v in page._results_by_mode.values())
+
+
+def test_a_run_saves_where_it_started(app, tmp_path):
+    """Changing the selection mid-run must not misfile the finished run."""
+    from kosmic.gui.meta_analysis.pages.gene_ma.workers import GeneMAWorker
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+    from kosmic import provenance
+    from kosmic.meta_analysis.io import meta_provenance_dir
+
+    page = GeneMAPage()
+    endo = _tiny_studies("Endo")
+    labels = [d["name"] for d in endo]
+    params = {"method_keys": ["reml"], "calibration": "analytical",
+              "min_studies": 2}
+    page.set_datasets(endo, labels, str(tmp_path), output_selection="Endo")
+    # What the launch does, then the run itself.
+    page._pending_output_selection = page._output_selection
+    page._last_consensus_labels = labels
+    page._last_consensus_params = params
+    page._last_consensus_de_dfs = [d["df"] for d in endo]
+    data = GeneMAWorker([d["df"] for d in endo], labels, params)._run()
+
+    fib = _tiny_studies("Fib")
+    page.set_datasets(fib, [d["name"] for d in fib], str(tmp_path),
+                      output_selection="Fib")
+    page._on_finished(data)
+
+    meta = tmp_path / "meta_analysis"
+    assert list((meta / "Endo").glob("consensus_*.csv"))
+    assert not (meta / "Fib").exists()
+    rec = provenance.load(meta_provenance_dir(tmp_path, "Endo"))
+    assert rec["stages"][-1]["params"]["studies"] == labels

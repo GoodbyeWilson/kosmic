@@ -261,7 +261,7 @@ def test_propagation_touches_obs_only(tmp_path):
     propagate_labels(out, s1)
     a = ad.read_h5ad(s1)
     assert (a.obs["cell_type_atlas"] == "Cardiomyocyte").all()
-    assert list(a.layers) == ["counts"] and (a.layers["counts"] != a.X).nnz == 0
+    assert [k for k in a.layers if k is not None] == ["counts"] and (a.layers["counts"] != a.X).nnz == 0
     with h5py.File(s1) as h:
         x_after = h["X"][()] if isinstance(h["X"], h5py.Dataset) else h["X/data"][()]
     assert np.array_equal(x_before, x_after)

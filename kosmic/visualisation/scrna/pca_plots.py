@@ -67,7 +67,9 @@ def elbow_report(variance_ratio: np.ndarray, min_pcs: int = 10) -> dict:
                 'cumulative': np.cumsum(ratio)}
 
     line_unit = line_vec / line_len
-    dists = np.abs(np.cross(line_unit, p1 - np.column_stack([x, y])))
+    # 2-D cross product written out: numpy 2 removed np.cross for 2-D vectors.
+    d = p1 - np.column_stack([x, y])
+    dists = np.abs(line_unit[0] * d[:, 1] - line_unit[1] * d[:, 0])
     elbow_pc = int(np.argmax(dists)) + 1  # 1-based
     # A knee is real when the curve bows away from its end-to-end line by
     # more than 1% of that line's length (a scree with a knee sits at

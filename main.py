@@ -606,6 +606,7 @@ class AppWindow(QMainWindow):
         self._explorer.set_active_step(ws.current_stack_page())
         if ws.project_folder:
             self._explorer.set_root(ws.project_folder)
+        ws.on_activated()
 
     def _sync_scrna_to_de(self, ws, scrna) -> None:
         """Push scRNA's adata into DE, gated on readiness and staleness.

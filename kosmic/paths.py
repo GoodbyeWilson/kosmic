@@ -49,7 +49,7 @@ produce paths that match it.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 PathLike = Union[str, Path]
 
@@ -162,9 +162,16 @@ def study_dir(project_dir: PathLike, accession: str) -> Path:
     return Path(project_dir) / accession
 
 
-def meta_output_dir(project_dir: PathLike) -> Path:
-    """``{project_dir}/meta_analysis`` -- consensus MA output lands here."""
-    return Path(project_dir) / "meta_analysis"
+def meta_output_dir(project_dir: PathLike, selection: Optional[str] = None) -> Path:
+    """``{project_dir}/meta_analysis[/{selection}]`` -- meta-analysis output.
+
+    ``selection`` names what was pooled -- a cell type, ``all_cells`` or
+    ``mixed`` (see ``kosmic.meta_analysis.io.meta_selection_folder``) --
+    so each cell type's results and methods record are kept apart
+    (ADR-007). Without it, the top-level folder earlier versions wrote to.
+    """
+    base = Path(project_dir) / "meta_analysis"
+    return base / selection if selection else base
 
 
 MASTER_ACCESSION = "_master"

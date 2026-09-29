@@ -32,6 +32,7 @@ class MetaMethodsPage(SimplePage):
         super().__init__(parent)
         self._project_folder = None
         self._study_names = None
+        self._selection = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -68,9 +69,12 @@ class MetaMethodsPage(SimplePage):
 
     # -- inputs ---------------------------------------------------------
 
-    def set_project(self, project_folder, study_names=None):
+    def set_project(self, project_folder, study_names=None, selection=None):
+        """'study_names' are study folders; 'selection' the output folder
+        whose meta-analysis record is shown (ADR-007)."""
         self._project_folder = project_folder
         self._study_names = list(study_names) if study_names else None
+        self._selection = selection
         self.refresh()
 
     def on_activated(self):
@@ -86,7 +90,8 @@ class MetaMethodsPage(SimplePage):
             return
 
         from kosmic.meta_analysis.io import build_combined_methods
-        text = build_combined_methods(self._project_folder, self._study_names)
+        text = build_combined_methods(self._project_folder, self._study_names,
+                                      selection=self._selection)
         if not text:
             self._view.clear()
             self._copy_btn.setEnabled(False)

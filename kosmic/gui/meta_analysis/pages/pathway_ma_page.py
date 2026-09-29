@@ -28,6 +28,34 @@ from kosmic.gui.shared import run_worker
 from kosmic.numerical import neg_log10
 from kosmic.paths import meta_output_dir
 from kosmic import DEFAULT_FDR, MIN_STUDIES, PATHWAY_VIF_RHO
+from kosmic.meta_analysis.direction import (
+    add_wald_pvalues, count_significant_conflicts,
+)
+
+
+_RESULT_COLUMNS = [
+    Column("Pathway",   "names",            "s"),
+    Column("log2FC",    "logfoldchanges",   ".3f"),
+    Column("SE",        "se",               ".3f"),
+    Column("CI low",    "ci_lower",         ".3f"),
+    Column("CI high",   "ci_upper",         ".3f"),
+    Column("Pooled P",  "pvals_pooled",     ".2e"),
+    Column("FDR",       "fdr",              ".2e"),
+    Column("k",         "n_studies",        "d"),
+    Column("I^2",       "heterogeneity_i2", ".2f"),
+]
+
+# Shown only when the per-study tables carry adjusted p-values: the
+# pathway-DE results, or the Wald p-values added to the DESeq2+VIF
+# summaries.
+_DIRECTION_COLUMNS = [
+    Column("Up",       "n_up",               "d",
+           tooltip="Studies with study FDR < 0.05 and log2FC > 0"),
+    Column("Down",     "n_down",             "d",
+           tooltip="Studies with study FDR < 0.05 and log2FC < 0"),
+    Column("Conflict", "direction_conflict", "bool",
+           tooltip="Significant up in one study and down in another"),
+]
 
 
 # Available pooling methods. (key, display, tooltip)
@@ -222,7 +250,8 @@ class PathwayMAWorker(BaseWorker):
                 })
 
             if rows:
-                results_per_study.append(pd.DataFrame(rows))
+                # So the direction columns can be counted.
+                results_per_study.append(add_wald_pvalues(pd.DataFrame(rows)))
 
         return results_per_study if results_per_study else None
 
@@ -244,6 +273,11 @@ class PathwayMAWorker(BaseWorker):
                 dfs = [d['df'] for d in self.datasets]
         else:
             dfs = [d['df'] for d in self.datasets]
+
+        from kosmic.meta_analysis.direction import unadjusted_warning
+        warning = unadjusted_warning(dfs)
+        if warning:
+            self.progress.emit(f"Warning: {warning}")
 
         # Step 2: Pool across studies using the same vectorised
         # code as gene-level MA (no reimplementation).
@@ -278,6 +312,9 @@ class PathwayMAPage(SidebarPage):
         self._datasets = []
         self._gene_datasets = []  # for finding pseudobulk paths
         self._project_folder = None
+        self._output_selection = None  # folder under meta_analysis/ (ADR-007)
+        self._run_output_selection = None
+        self._run_study_names = []
         self._meta_df = None  # pooled pathway-level DataFrame from the most recent run
         self._method_keys = []  # active method keys for the current run
         self._scatter_data = None
@@ -427,17 +464,7 @@ class PathwayMAPage(SidebarPage):
         results_layout.addLayout(toolbar)
 
         self._results_table = ResultsTable()
-        self._results_table.set_schema([
-            Column("Pathway",   "names",            "s"),
-            Column("log2FC",    "logfoldchanges",   ".3f"),
-            Column("SE",        "se",               ".3f"),
-            Column("CI low",    "ci_lower",         ".3f"),
-            Column("CI high",   "ci_upper",         ".3f"),
-            Column("Pooled P",  "pvals_pooled",     ".2e"),
-            Column("FDR",       "fdr",              ".2e"),
-            Column("k",         "n_studies",        "d"),
-            Column("I^2",       "heterogeneity_i2", ".2f"),
-        ])
+        self._results_table.set_schema(_RESULT_COLUMNS)
         self._results_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
         self._results_table.setSelectionMode(
@@ -459,7 +486,9 @@ class PathwayMAPage(SidebarPage):
     # ------------------------------------------------------------------
 
     def set_datasets(self, datasets: list, gene_datasets=None,
-                     project_folder=None, pathway_gene_sets=None):
+                     project_folder=None, pathway_gene_sets=None,
+                     output_selection=None):
+        self._output_selection = output_selection
         self._datasets = datasets
         self._gene_datasets = gene_datasets or []
         self._project_folder = project_folder
@@ -526,6 +555,9 @@ class PathwayMAPage(SidebarPage):
             f"Pathway MA: {len(self._datasets)} studies, "
             f"pooling={pooling_key}, scoring={scoring}")
 
+        # Fixed at launch: the selection may change while it runs.
+        self._run_output_selection = self._output_selection
+        self._run_study_names = [d.get('name', '?') for d in (self._datasets or [])]
         self._worker = PathwayMAWorker(
             self._datasets, self._gene_datasets, self._project_folder,
             method_keys, min_studies,
@@ -547,12 +579,16 @@ class PathwayMAPage(SidebarPage):
         meta_df, method_keys = payload
         self._meta_df = meta_df
         self._method_keys = method_keys
-        n_sig = int((meta_df['fdr'] < DEFAULT_FDR).sum())
+        n_sig, n_conflict = count_significant_conflicts(
+            meta_df, fdr=DEFAULT_FDR)
+        conflict_text = (
+            f", {n_conflict} with opposite-direction effects across studies"
+            if n_conflict is not None else "")
         self._status_label.setText(
             f"{len(meta_df)} pathways tested, "
-            f"{n_sig} significant (FDR < 0.05).")
+            f"{n_sig} significant (FDR < 0.05){conflict_text}.")
         self.log_message.emit(
-            f"Pathway MA: {n_sig}/{len(meta_df)} significant")
+            f"Pathway MA: {n_sig}/{len(meta_df)} significant{conflict_text}")
         self._populate_volcano(meta_df)
         self._populate_results_table(meta_df)
         self._auto_save(meta_df, method_keys)
@@ -575,15 +611,23 @@ class PathwayMAPage(SidebarPage):
             }
             params = {
                 'pooling_method': self._pooling_combo.currentData() or 'reml',
-                'n_studies': len(self._datasets or []),
-                'studies': [d.get('name', '?') for d in (self._datasets or [])],
+                'n_studies': len(self._run_study_names),
+                'studies': list(self._run_study_names),
                 'n_pathway_sets': len(self._pathway_gene_sets or {}),
                 'study_tokens': tokens,
             }
+            if self._meta_df is not None:
+                n_sig, n_conflict = count_significant_conflicts(
+                    self._meta_df, fdr=DEFAULT_FDR)
+                params['n_significant'] = n_sig
+                if n_conflict is not None:
+                    params['n_significant_direction_conflict'] = n_conflict
+                    params['direction_study_fdr'] = DEFAULT_FDR
             # Shared recorder: keeps the latest run, as every meta
             # stage does. A direct record_stage call appends one entry
             # per Run click.
-            record_meta_stage(self._project_folder, stage, params)
+            record_meta_stage(self._project_folder, stage, params,
+                              selection=self._run_output_selection)
         except Exception as e:
             self.log_message.emit(f"Could not record pathway meta provenance: {e}")
 
@@ -592,9 +636,11 @@ class PathwayMAPage(SidebarPage):
         if meta_df is None or meta_df.empty:
             self._results_table.set_data(pd.DataFrame())
             return
-        cols = ['names', 'logfoldchanges', 'se', 'ci_lower', 'ci_upper',
-                'pvals_pooled', 'fdr', 'n_studies', 'heterogeneity_i2']
-        cols = [c for c in cols if c in meta_df.columns]
+        schema = list(_RESULT_COLUMNS)
+        if 'direction_conflict' in meta_df.columns:
+            schema += _DIRECTION_COLUMNS
+        self._results_table.set_schema(schema)
+        cols = [c.key for c in schema if c.key in meta_df.columns]
         df = meta_df[cols].copy().sort_values('fdr').reset_index(drop=True)
         self._results_table.set_data(df)
 
@@ -619,7 +665,8 @@ class PathwayMAPage(SidebarPage):
         self._tabs.setCurrentIndex(0)  # Plots tab
 
     def _auto_save(self, meta_df, method_keys):
-        """Save the pooled DataFrame + settings sidecar to {project}/meta_analysis/.
+        """Save the pooled DataFrame + settings sidecar to the selection's folder
+        under {project}/meta_analysis/ (ADR-007).
 
         Both files are keyed by the pooling method, so re-running with
         the same method overwrites the pair (settings stay in sync with
@@ -629,7 +676,8 @@ class PathwayMAPage(SidebarPage):
         if not self._project_folder or meta_df is None or meta_df.empty:
             return
         try:
-            output_dir = meta_output_dir(self._project_folder)
+            output_dir = meta_output_dir(self._project_folder,
+                                         self._run_output_selection)
             output_dir.mkdir(parents=True, exist_ok=True)
             method = method_keys[0] if method_keys else 'pool'
             stem = f'pathway_ma_{method}'
@@ -641,8 +689,14 @@ class PathwayMAPage(SidebarPage):
             self._write_settings_sidecar(json_path, meta_df, method_keys)
 
             self.log_message.emit(
-                f"Pathway MA results saved: {csv_path.name} + {json_path.name}"
+                f"Pathway MA results saved to "
+                f"{output_dir.relative_to(self._project_folder).as_posix()}: "
+                f"{csv_path.name} + {json_path.name}"
             )
+            from kosmic.meta_analysis.io import mixed_selection_warning
+            warning = mixed_selection_warning(self._run_output_selection)
+            if warning:
+                self.log_message.emit(warning)
         except Exception as exc:
             self.log_message.emit(f"Pathway MA auto-save failed: {exc}")
 

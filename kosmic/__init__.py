@@ -8,8 +8,19 @@ restart Python. Consumers do ``from kosmic import DEFAULT_FDR`` etc.
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from pathlib import Path
+
+# Study files written under pandas 3 store their names as anndata's
+# nullable-string arrays, which read back as pandas 'string' columns.
+# Under pandas 2 anndata refuses to write those again unless this setting
+# is on, so every save of such a study failed. The environment variable is
+# read when anndata is imported; the attribute covers an anndata that was
+# imported first. An explicit ANNDATA_ALLOW_WRITE_NULLABLE_STRINGS wins.
+os.environ.setdefault("ANNDATA_ALLOW_WRITE_NULLABLE_STRINGS", "1")
+if "anndata" in sys.modules and os.environ["ANNDATA_ALLOW_WRITE_NULLABLE_STRINGS"] == "1":
+    sys.modules["anndata"].settings.allow_write_nullable_strings = True
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
 with _CONFIG_PATH.open("rb") as _f:
