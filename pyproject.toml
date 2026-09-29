@@ -71,6 +71,10 @@ dependencies = [
 # Developer / test tooling
 dev = [
     "pytest>=7.0",
+    # Each test in its own forked process (CI, Linux only): a Qt object
+    # one test leaves behind cannot then be destroyed inside another
+    # test's widget construction. Unix-only, which is where it is used.
+    "pytest-forked>=1.6; sys_platform != 'win32'",
     "pyyaml>=6",       # tests read mkdocs.yml
     "ruff>=0.4",
 ]
