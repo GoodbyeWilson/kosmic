@@ -1,11 +1,13 @@
 # Lint + test on every push and pull request.
 #
-# KOSMIC is a Qt desktop app, so the suite needs a display. It runs
-# headless via QT_QPA_PLATFORM=offscreen, which the GUI tests already
-# set themselves; it is repeated here so a test that forgets to still
-# works in CI. Linux additionally needs the xkb/EGL libraries that
-# PyQt6 links against, which the GitHub runner image does not carry by
-# default.
+# KOSMIC is a Qt desktop app, so the suite needs a display. Windows runs
+# headless via QT_QPA_PLATFORM=offscreen, which the GUI tests also set
+# for themselves ('setdefault', so a value set here wins). Linux runs
+# the ordinary 'xcb' platform against an Xvfb display instead: under
+# offscreen it segfaults while pyqtgraph builds a PlotItem's QMenu --
+# a window, and window handling is the least exercised part of the
+# offscreen plugin. Linux also needs the xkb/EGL libraries PyQt6 links
+# against, which the GitHub runner image does not carry by default.
 name: CI
 
 on:
@@ -29,9 +31,6 @@ jobs:
         # so 3.11 alone never installs the versions a new user gets.
         python: ['3.11', '3.12']
 
-    env:
-      QT_QPA_PLATFORM: offscreen
-
     steps:
       - uses: actions/checkout@v4
 
@@ -42,11 +41,13 @@ jobs:
 
       # PyQt6 links these at import time; without them every GUI test
       # fails with a missing-plugin error rather than a real failure.
+      # Xvfb provides the display the xcb platform connects to.
       - name: Install Qt system libraries (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            xvfb \
             libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-xinerama0 libdbus-1-3
@@ -59,12 +60,21 @@ jobs:
       - name: Lint
         run: ruff check kosmic/ main.py tests/
 
-      # The two Meta-page GUI test files segfault on the Linux runner
-      # when they follow other GUI tests in the same process (pyqtgraph
-      # widget construction after another test's widgets are collected).
-      # They run in their own process; everything else runs together.
-      - name: Test
-        run: pytest tests/ -q --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
+      # The two Meta-page GUI test files run in their own process: they
+      # segfaulted on the Linux runner when they followed other GUI
+      # tests. Kept while the Xvfb change is on trial.
+      - name: Test (Linux, Xvfb)
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          xvfb-run -a pytest tests/ -q --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
+          xvfb-run -a pytest tests/test_ma_gene_search.py tests/test_meta_workflow_steps.py -q
 
-      - name: Test (Meta page GUI, own process)
-        run: pytest tests/test_ma_gene_search.py tests/test_meta_workflow_steps.py -q
+      - name: Test (Windows, offscreen)
+        if: runner.os == 'Windows'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          pytest tests/ -q --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
+          pytest tests/test_ma_gene_search.py tests/test_meta_workflow_steps.py -q
