@@ -107,16 +107,16 @@ on Windows (newest version wins). If you only load `.h5ad`, `.h5`,
 ```sh
 pip install -e ".[all]"        # everything below
 pip install -e ".[annotate]"   # CellTypist cell-type annotation
+pip install -e ".[decontx]"    # DecontX decontamination (Decontaminate step)
 pip install -e ".[rds]"        # .rds reading without R (simple objects only)
 pip install -e ".[tsne]"       # openTSNE backend
 pip install -e ".[monitor]"    # status-bar CPU / RAM monitor
 ```
 
-Two features depend on packages that are not on PyPI and are installed
-separately if you want them: **SoupX**-style ambient-RNA estimation
-(the QC step's Ambient stage) and **DecontX** decontamination (the
-Decontaminate step). Each is imported only when used, and KOSMIC says
-what is missing rather than failing at startup.
+**SoupX**-style ambient-RNA estimation (the QC step's Ambient stage)
+depends on a package that is not on PyPI and is installed separately
+if you want it. Optional packages are imported only when used, and
+KOSMIC says what is missing rather than failing at startup.
 
 ## Checking it works
 

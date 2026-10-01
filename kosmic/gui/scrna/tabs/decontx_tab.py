@@ -43,15 +43,16 @@ class DecontXWorker(BaseWorker):
     Emits 'finished_ok' with '(adata, info)'.
     """
 
-    def __init__(self, adata, sample_col: str, output_path=None):
+    def __init__(self, adata, sample_col: str, cell_type_col: str, output_path=None):
         super().__init__()
         self.adata = adata
         self.sample_col = sample_col
+        self.cell_type_col = cell_type_col
         self.output_path = output_path
 
     def _run(self):
         self.adata, info = run_decontx(
-            self.adata, self.sample_col,
+            self.adata, self.sample_col, self.cell_type_col,
             progress_callback=lambda m: self.progress.emit(m),
             progress_pct_callback=lambda p: self.progress_pct.emit(p))
 
@@ -110,8 +111,17 @@ class DecontXTab(SimplePage):
         self._sample_combo.setToolTip(
             "Ambient RNA is generated during each sample's dissociation, "
             "so DecontX decontaminates one sample at a time.")
-        self._sample_combo.currentIndexChanged.connect(self._on_sample_changed)
+        self._sample_combo.currentIndexChanged.connect(self._on_settings_changed)
         grid.addWidget(self._sample_combo, 0, 1)
+
+        grid.addWidget(SecondaryLabel("Cell type column:"), 1, 0)
+        self._label_combo = NoScrollComboBox()
+        self._label_combo.setToolTip(
+            "The labels DecontX attributes off-profile counts to. Use the "
+            "same labels you will run DE on; 'cell_type_atlas' is chosen "
+            "when the study has labels propagated from an atlas.")
+        self._label_combo.currentIndexChanged.connect(self._on_settings_changed)
+        grid.addWidget(self._label_combo, 1, 1)
         grid.setColumnStretch(1, 1)
 
         layout.addWidget(controls)
@@ -179,6 +189,7 @@ class DecontXTab(SimplePage):
     def _populate_sample_columns(self, adata):
         self._loading = True
         self._sample_combo.clear()
+        self._label_combo.clear()
         options = []
         for col in adata.obs.columns:
             series = adata.obs[col]
@@ -197,13 +208,24 @@ class DecontXTab(SimplePage):
             if idx >= 0:
                 self._sample_combo.setCurrentIndex(idx)
                 break
+        # Cell-type-looking columns first; atlas labels preferred when present.
+        labels = sorted(options, key=lambda c: 'cell_type' not in c.lower())
+        self._label_combo.addItems(labels)
+        for pref in ('cell_type_atlas', CELL_TYPE_COL):
+            idx = self._label_combo.findText(pref)
+            if idx >= 0:
+                self._label_combo.setCurrentIndex(idx)
+                break
         self._loading = False
 
     def _selected_sample_col(self):
         col = self._sample_combo.currentText()
         return col or None
 
-    def _on_sample_changed(self):
+    def _selected_label_col(self):
+        return self._label_combo.currentText() or CELL_TYPE_COL
+
+    def _on_settings_changed(self):
         if self._loading:
             return
         self._refresh_gate()
@@ -215,7 +237,8 @@ class DecontXTab(SimplePage):
             return
 
         sample_col = self._selected_sample_col()
-        ok, reason = check_decontx_prerequisites(adata, sample_col)
+        label_col = self._selected_label_col()
+        ok, reason = check_decontx_prerequisites(adata, sample_col, label_col)
 
         already = DECONTX_LAYER in adata.layers
         if not ok:
@@ -224,7 +247,7 @@ class DecontXTab(SimplePage):
             self._run_btn.setEnabled(False)
             return
 
-        n_types = adata.obs[CELL_TYPE_COL].dropna().astype(str).nunique()
+        n_types = adata.obs[label_col].dropna().astype(str).nunique()
         n_samples = adata.obs[sample_col].nunique()
         if already:
             self._gate_label.setText(
@@ -234,7 +257,7 @@ class DecontXTab(SimplePage):
             self._run_btn.setText("Re-run DecontX")
         else:
             self._gate_label.setText(
-                f"Ready: {n_types} cell types across {n_samples} sample(s). "
+                f"Ready: {n_types} '{label_col}' labels across {n_samples} sample(s). "
                 f"Corrected counts are kept alongside the raw counts, so "
                 f"this step is reversible.")
             self._gate_label.set_state('info')
@@ -249,7 +272,8 @@ class DecontXTab(SimplePage):
         if adata is None:
             return
         sample_col = self._selected_sample_col()
-        ok, reason = check_decontx_prerequisites(adata, sample_col)
+        label_col = self._selected_label_col()
+        ok, reason = check_decontx_prerequisites(adata, sample_col, label_col)
         if not ok:
             dialogs.warning(self, "Cannot run DecontX", reason)
             return
@@ -258,7 +282,7 @@ class DecontXTab(SimplePage):
         if not dialogs.confirm(
                 self, "Run DecontX",
                 "This estimates and removes ambient RNA per sample using "
-                f"the cell-type labels, across {n_samples} sample(s). "
+                f"the '{label_col}' labels, across {n_samples} sample(s). "
                 "Raw counts are kept alongside the corrected counts, so "
                 "the step is reversible.\n\nProceed?"):
             return
@@ -270,7 +294,8 @@ class DecontXTab(SimplePage):
         self.log_message.emit(f"DecontX started on {n_samples} sample(s)")
 
         output_path = getattr(self.main_window, 'current_h5ad_path', None)
-        self._worker = DecontXWorker(adata, sample_col, output_path=output_path)
+        self._worker = DecontXWorker(adata, sample_col, label_col,
+                                     output_path=output_path)
         run_worker(
             self._worker,
             on_finished=self._on_finished,
@@ -299,6 +324,7 @@ class DecontXTab(SimplePage):
         if hasattr(self.main_window, 'record_provenance'):
             self.main_window.record_provenance('decontx', {
                 'sample_col': self._selected_sample_col(),
+                'cell_type_col': self._selected_label_col(),
                 'mean_contamination': round(
                     float(info.get('mean_contamination', float('nan'))), 4),
                 'n_samples': info.get('n_samples'),

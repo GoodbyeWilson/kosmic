@@ -25,7 +25,7 @@ removes nothing useful.
 So: after Cluster and Marker Check, before Subset. Three gates enforce
 that, and the Run button is disabled with the reason if one fails:
 
-1. cell-type labels exist (`cell_type` is annotated),
+1. cell-type labels exist in the chosen *Cell type column*,
 2. at least two cell types are present (the dataset is not already a
    subset),
 3. a sample column is set in Inspect — ambient RNA is generated during
@@ -35,7 +35,14 @@ that, and the Run button is disabled with the reason if one fails:
 
 ## Running it
 
-**Sample column** is pre-filled from Inspect. **Run DecontX** works
+**Sample column** is pre-filled from Inspect. **Cell type column** sets
+the labels DecontX attributes off-profile counts to. It defaults to
+`cell_type_atlas` when the study has labels propagated from an atlas,
+and to `cell_type` otherwise. Use the same labels you will run DE on,
+so that every study in a project is decontaminated against the same
+cell types. The column used is recorded in provenance.
+
+**Run DecontX** works
 through the samples one at a time; progress shows which. Peak memory is
 one sample's worth, so a 150,000-nucleus dataset is fine on a
 workstation.

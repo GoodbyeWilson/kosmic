@@ -52,16 +52,16 @@ def check_decontx_prerequisites(
         return False, "Load and process a dataset first."
 
     if cell_type_col not in adata.obs.columns:
-        return False, "Annotate cell types first (no 'cell_type' column)."
+        return False, f"Annotate cell types first (no '{cell_type_col}' column)."
     labels = adata.obs[cell_type_col]
     if labels.isna().all():
-        return False, "Annotate cell types first (cell_type is empty)."
+        return False, f"Annotate cell types first ('{cell_type_col}' is empty)."
 
     n_types = labels.dropna().astype(str).nunique()
     if n_types < min_cell_types:
         return False, (
             "DecontX needs the full multi-cell-type dataset -- run it "
-            "before Subset (only one cell type present).")
+            f"before Subset (only one '{cell_type_col}' label present).")
 
     if not sample_col:
         return False, "Select the sample/donor column -- DecontX decontaminates per sample."
@@ -145,7 +145,7 @@ def run_decontx(
     except ImportError as e:
         raise RuntimeError(
             "The 'decontx' package is not installed. Install it to use "
-            "DecontX decontamination (pip install decontx).") from e
+            "DecontX decontamination (pip install decontx-python).") from e
 
     _emit("Preparing raw counts for DecontX...")
     counts = _raw_counts_matrix(adata)
