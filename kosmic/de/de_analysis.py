@@ -21,6 +21,28 @@ from kosmic import (
 # Default detection pre-filter fraction; 0 disables (config 'de.detection_on').
 DE_DETECTION_DEFAULT = DE_DETECTION_MIN_PCT if DE_DETECTION_ON else 0.0
 
+# Gene groups the user can exclude before testing, matched on the upper-cased
+# gene symbol so human (MT-, RPL5) and mouse (mt-, Rpl5) names both match.
+# Mitochondrial transcripts are cytoplasmic, so in nuclei they come from
+# carry-over or ambient RNA. The ribosomal pattern covers the cytosolic
+# ribosomal proteins only: not MRPL/MRPS, and not kinases such as RPS6KA1.
+EXCLUDABLE_GENE_GROUPS = {
+    'mitochondrial': r'^MT-',
+    'ribosomal': r'^(RP[LS]\d+[A-Z]?\d*|RPLP[0-2]|RPSA)$',
+}
+
+
+def excluded_genes(genes, groups):
+    """Return the genes in 'genes' that belong to any of 'groups'.
+
+    'groups' names keys of EXCLUDABLE_GENE_GROUPS.
+    """
+    names = pd.Series(list(genes), dtype=str)
+    if names.empty or not groups:
+        return []
+    pattern = '|'.join(f'(?:{EXCLUDABLE_GENE_GROUPS[g]})' for g in groups)
+    return names[names.str.upper().str.match(pattern)].tolist()
+
 
 def prepare_gene_coverage(pathway_gene_sets, var_names, species='human'):
     """Check which pathway genes are available in the dataset.
@@ -1201,6 +1223,7 @@ def run_de_pipeline(adata, sample_col, condition_col,
                     filter_min_count=DE_FILTER_MIN_COUNT,
                     filter_min_samples=DE_FILTER_MIN_SAMPLES,
                     covariates=None,
+                    exclude_gene_groups=(),
                     progress_callback=None):
     """End-to-end DE pipeline.
 
@@ -1249,6 +1272,10 @@ def run_de_pipeline(adata, sample_col, condition_col,
         combined object: pooled detection otherwise blends cohorts, and
         a gene visible in one study and absent from another passes on
         the average of the two.
+    exclude_gene_groups : sequence of str
+        Gene groups removed before testing ('mitochondrial', 'ribosomal';
+        see EXCLUDABLE_GENE_GROUPS). They take no part in normalisation
+        or the FDR correction.
     fdr_genes : set of str, optional
         Restrict the BH correction to this committed gene list (hypothesis
         mode). The fit + normalisation stay genome-wide; only the FDR
@@ -1303,7 +1330,14 @@ def run_de_pipeline(adata, sample_col, condition_col,
         pathway_gene_sets, coverage_var_names, species
     )
 
+    excluded = excluded_genes(count_var_names(adata), exclude_gene_groups)
+    if excluded:
+        _progress(f"Excluded {len(excluded):,} {' and '.join(exclude_gene_groups)} "
+                  f"genes before testing")
+
     if unit == 'cell':
+        if excluded:
+            adata = adata[:, ~adata.var_names.isin(excluded)]
         return _run_cell_level_de_pipeline(
             adata, metabolic_genes, pathway_coverage,
             full_genome=full_genome, progress_callback=progress_callback)
@@ -1329,6 +1363,10 @@ def run_de_pipeline(adata, sample_col, condition_col,
     else:
         genes_to_test = metabolic_genes
         _progress(f"Pathway DE: testing {len(genes_to_test)} pathway genes")
+
+    if excluded:
+        drop = set(excluded)
+        genes_to_test = [g for g in genes_to_test if g not in drop]
 
     if not genes_to_test:
         return pd.DataFrame(), pd.DataFrame(), pathway_coverage, pd.DataFrame()

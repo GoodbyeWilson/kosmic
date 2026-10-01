@@ -254,6 +254,22 @@ class MethodsPage(SimplePage):
             return _label(gp._selected_counts_layer())
         return None
 
+    def _excluded_genes_label(self):
+        """Gene groups excluded before testing, provenance-first, or None."""
+        groups = None
+        prov = self._load_provenance()
+        if prov:
+            from kosmic import provenance
+            st = provenance.last_stage(prov, 'gene_de')
+            if st is not None:
+                groups = (st.get('params') or {}).get('excluded_gene_groups')
+        gp = getattr(self.ws, 'gene_de_page', None)
+        if groups is None and gp is not None and hasattr(gp, '_excluded_gene_groups'):
+            groups = gp._excluded_gene_groups()
+        labels = {'mitochondrial': 'mitochondrial (MT-)',
+                  'ribosomal': 'ribosomal protein (RPL/RPS)'}
+        return " and ".join(labels.get(g, g) for g in groups) if groups else None
+
     def _detection_pct_value(self):
         """Pre-DESeq2 detection filter as a percentage, provenance-first."""
         prov = self._load_provenance()
@@ -566,6 +582,9 @@ class MethodsPage(SimplePage):
             items.append(("Count source:", cs))
             if 'DecontX' in cs:
                 used_refs.add('decontx')
+        excluded = self._excluded_genes_label()
+        if excluded:
+            items.append(("Genes excluded before testing:", excluded))
 
         if getattr(ws, 'unit', 'sample') == 'cell':
             items.append(("Approach:",

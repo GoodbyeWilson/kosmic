@@ -18,6 +18,12 @@ analysis is the donor / sample rather than the cell.
 | **Min transcripts per donor** | A donor whose cells sum to fewer transcripts is dropped. Off (0) by default. |
 | **Shared atlas genes only** | Correct and report over the gene list of the project's shared atlas. Enabled only when the project has an atlas; the label shows how many genes that is. |
 | **Filter genes within each study** | Atlas only -- see below. |
+| **Exclude mitochondrial genes (MT-)** | Removes MT- genes before testing. In single-nucleus data, mitochondrial transcripts come from cytoplasmic carry-over or ambient RNA, so differences between conditions are technical. Off by default. |
+| **Exclude ribosomal protein genes (RPL/RPS)** | Removes cytosolic ribosomal protein genes before testing; mitochondrial ribosomal genes (MRPL/MRPS) are kept. These genes are transcribed in the nucleus, so exclude them only if you treat their changes as technical. Off by default. |
+
+Excluded genes take no part in normalisation or the FDR correction, and
+the exclusion is recorded in provenance and on the Methods page. The
+per-cell-type run uses the same settings.
 
 ## One gene universe for both arms
 

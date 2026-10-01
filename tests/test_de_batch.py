@@ -362,3 +362,21 @@ def test_batch_without_gene_sets_is_genome_wide(tmp_path):
     de = runs[0].de_results
     assert len(de) > 5
     assert (de['pathways'].astype(str) == '').all()
+
+
+def test_batch_excludes_chosen_gene_groups(tmp_path):
+    a = _adata(n_genes=12)
+    a.var_names = ['MT-ND1', 'MT-CO1', 'RPL5', 'RPS4X', 'RPLP0', 'MRPL12',
+                   'RPS6KA1', 'MTOR', 'TTN', 'VWF', 'DCN', 'LUM']
+
+    def tested(groups):
+        runs = B.run_de_by_cell_type(
+            a, 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
+            cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+            detection_min_pct=0.0, write=False, exclude_gene_groups=groups)
+        return set(runs[0].de_results['names'])
+
+    assert tested(()) == set(a.var_names)
+    assert tested(('mitochondrial',)) == set(a.var_names) - {'MT-ND1', 'MT-CO1'}
+    assert tested(('mitochondrial', 'ribosomal')) == {
+        'MRPL12', 'RPS6KA1', 'MTOR', 'TTN', 'VWF', 'DCN', 'LUM'}

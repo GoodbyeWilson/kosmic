@@ -524,6 +524,22 @@ class GeneDEPage(SidebarTabbedPage):
 
         filters_lay.addWidget(self.detection_study_check)
 
+        self.exclude_mt_check = QCheckBox("Exclude mitochondrial genes (MT-)")
+        self.exclude_mt_check.setToolTip(
+            "Remove MT- genes before testing. Mitochondrial transcripts are\n"
+            "cytoplasmic, so in single-nucleus data they come from carry-over\n"
+            "or ambient RNA and differ between conditions for technical\n"
+            "reasons. Excluded genes take no part in normalisation or the FDR.")
+        filters_lay.addWidget(self.exclude_mt_check)
+
+        self.exclude_ribo_check = QCheckBox("Exclude ribosomal protein genes (RPL/RPS)")
+        self.exclude_ribo_check.setToolTip(
+            "Remove cytosolic ribosomal protein genes before testing. These\n"
+            "are transcribed in the nucleus, so they are genuinely present in\n"
+            "nuclei data; exclude them only if you treat their changes as\n"
+            "technical. Mitochondrial ribosomal genes (MRPL/MRPS) are kept.")
+        filters_lay.addWidget(self.exclude_ribo_check)
+
         self._advanced_btn = QPushButton("Gene filter settings...")
         self._advanced_btn.setToolTip(
             "The two numbers behind the sentence above, plus an optional\n"
@@ -578,6 +594,8 @@ class GeneDEPage(SidebarTabbedPage):
                      self.filter_min_samples_spin.valueChanged,
                      self.count_source_combo.currentIndexChanged,
                      self.detection_study_check.toggled,
+                     self.exclude_mt_check.toggled,
+                     self.exclude_ribo_check.toggled,
                      self.indep_filter_check.toggled,
                      self.cooks_filter_check.toggled):
             _sig.connect(self._refresh_run_dirty)
@@ -600,6 +618,8 @@ class GeneDEPage(SidebarTabbedPage):
                      self.filter_min_count_spin.valueChanged,
                      self.filter_min_samples_spin.valueChanged,
                      self.detection_study_check.toggled,
+                     self.exclude_mt_check.toggled,
+                     self.exclude_ribo_check.toggled,
                      self.count_source_combo.currentIndexChanged,
                      self.de_method_combo.currentIndexChanged,
                      self.unit_combo.currentIndexChanged,
@@ -1077,6 +1097,12 @@ class GeneDEPage(SidebarTabbedPage):
         if not has_decontx and self.count_source_combo.currentIndex() == 1:
             self.count_source_combo.setCurrentIndex(0)
 
+    def _excluded_gene_groups(self):
+        """Gene groups ticked for exclusion, as run_de_pipeline names them."""
+        return tuple(g for g, box in (('mitochondrial', self.exclude_mt_check),
+                                      ('ribosomal', self.exclude_ribo_check))
+                     if box.isChecked())
+
     def _selected_counts_layer(self):
         """Return the counts layer name to feed DE, or None for raw counts."""
         if self.count_source_combo.currentIndex() == 1:
@@ -1214,6 +1240,7 @@ class GeneDEPage(SidebarTabbedPage):
             'gene_filter_per_study': bool(self._per_study_filter_col()),
             'gene_universe': self._gene_universe_record(),
             'counts_layer': self._selected_counts_layer() or 'raw',
+            'excluded_gene_groups': self._excluded_gene_groups(),
             'indep_filter': self.indep_filter_check.isChecked(),
             'cooks_filter': self.cooks_filter_check.isChecked(),
             'full_genome': full_genome,
@@ -1268,6 +1295,7 @@ class GeneDEPage(SidebarTabbedPage):
                 'filter_min_count': self.filter_min_count_spin.value(),
                 'filter_min_samples': int(self.filter_min_samples_spin.value()),
                 'count_source': self._selected_counts_layer() or 'raw',
+                'excluded_gene_groups': list(self._excluded_gene_groups()),
                 'independent_filter': self.indep_filter_check.isChecked(),
                 'cooks_filter': self.cooks_filter_check.isChecked(),
                 'fdr_threshold': self.pval_filter.value(),
@@ -1746,6 +1774,10 @@ class GeneDEPage(SidebarTabbedPage):
             self.filter_min_samples_spin.setSpecialValueText(auto_txt)
         if self.detection_pct_spin.value() > 0:
             second += f", {self.detection_pct_spin.value():g}%+ detection"
+        excluded = {'mitochondrial': 'MT', 'ribosomal': 'ribosomal'}
+        if self._excluded_gene_groups():
+            second += ", no " + "/".join(
+                excluded[g] for g in self._excluded_gene_groups())
         donors = f"Donors: \u2265{self.min_cells_spin.value()} cells each"
         if self.min_counts_spin.value():
             donors += f", \u2265{self.min_counts_spin.value():,} transcripts"
@@ -1972,6 +2004,7 @@ class GeneDEPage(SidebarTabbedPage):
             filter_min_count=self.filter_min_count_spin.value(),
             filter_min_samples=int(self.filter_min_samples_spin.value()),
             covariates=self._selected_covariates(),
+            exclude_gene_groups=self._excluded_gene_groups(),
         )
         run_worker(
             self.de_worker,
@@ -2298,6 +2331,7 @@ class GeneDEPage(SidebarTabbedPage):
             deseq2_cooks_filter=self.cooks_filter_check.isChecked(),
             filter_min_count=self.filter_min_count_spin.value(),
             filter_min_samples=int(self.filter_min_samples_spin.value()),
+            exclude_gene_groups=self._excluded_gene_groups(),
         )
         run_worker(
             self._batch_worker,
