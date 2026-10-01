@@ -21,13 +21,13 @@ from kosmic.scrna.qc.decontx import (
     run_decontx,
 )
 
-# DecontX is optional (not on PyPI); the app reports its absence and
+# DecontX is optional (the 'decontx' extra); the app reports its absence and
 # carries on, so the tests do the same rather than fail an install
 # that is otherwise complete. The prerequisite-gate tests below do not
 # need the package, so only the ones that run it are skipped.
 requires_decontx = pytest.mark.skipif(
     importlib.util.find_spec("decontx") is None,
-    reason="decontx not installed (optional; not on PyPI)")
+    reason="decontx not installed (optional: pip install decontx-python)")
 
 
 def _contaminated_adata(n_genes=120, contam=0.12, seed=0):
@@ -74,6 +74,10 @@ def test_prerequisite_gates():
     del noann.obs['cell_type']
     ok, reason = check_decontx_prerequisites(noann, sample_col='sample')
     assert not ok and 'nnotate' in reason
+
+    # Gates read the chosen label column, not always 'cell_type'.
+    noann.obs['cell_type_atlas'] = a.obs['cell_type'].values
+    assert check_decontx_prerequisites(noann, 'sample', 'cell_type_atlas')[0]
 
     # Gate 2: single cell type (already subset).
     sub = a[a.obs.cell_type == 'EC'].copy()

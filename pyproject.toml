@@ -91,13 +91,12 @@ docs = [
 # Lazy-imported features. Each silently no-ops if its package isn't
 # installed, so users can pick what they need.
 annotate = ["celltypist>=1.3"]      # ML-based cell-type annotation (alt to PanglaoDB markers)
-# NOT ON PyPI. Both of these are imported lazily and the app reports
-# how to install them if you use the feature without them, so they are
-# listed here for documentation and deliberately left out of `all` --
-# naming them in an installable extra makes that extra fail for
-# everyone, which is what `decontx` in the base dependencies was doing.
+# NOT ON PyPI. Imported lazily and the app reports how to install it
+# if you use the feature without it, so it is listed here for
+# documentation and deliberately left out of `all` -- naming it in an
+# installable extra makes that extra fail for everyone.
 ambient = ["soupx>=0.3"]            # Auto-estimate ambient RNA contamination (alt to manual)
-decontx = ["decontx>=0.1"]          # DecontX ambient-RNA decontamination
+decontx = ["decontx-python>=0.2"]   # DecontX ambient-RNA decontamination (imports as `decontx`)
 tsne = ["openTSNE>=1.0"]            # Faster t-SNE backend
 rds = ["pyreadr>=0.5"]              # R RDS file reading (pure Python, wheels everywhere)
 # rds2py reads Seurat objects directly but ships no Windows wheel and
@@ -107,10 +106,11 @@ rds = ["pyreadr>=0.5"]              # R RDS file reading (pure Python, wheels ev
 # tools: pip install rds2py
 rds-seurat = ["rds2py>=0.4"]
 monitor = ["psutil>=5.9"]           # Status-bar CPU/RAM monitor
-# Everything that actually installs from PyPI. soupx and decontx are
-# excluded on purpose -- see above.
+# Everything that actually installs from PyPI. soupx is excluded on
+# purpose -- see above.
 all = [
     "celltypist>=1.3",
+    "decontx-python>=0.2",
     "openTSNE>=1.0",
     "pyreadr>=0.5",
     "psutil>=5.9",
