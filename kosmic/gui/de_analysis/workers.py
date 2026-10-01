@@ -42,7 +42,8 @@ class MetabolicDEWorker(BaseWorker):
                  detection_min_donor_frac=None, detection_study_col=None,
                  fdr_genes=None, deseq2_independent_filter=None,
                  deseq2_cooks_filter=None, filter_min_count=None,
-                 filter_min_samples=None, covariates=None, min_counts=0):
+                 filter_min_samples=None, covariates=None, min_counts=0,
+                 exclude_gene_groups=()):
         super().__init__()
         self.adata = adata
         self.sample_col = sample_col
@@ -67,6 +68,7 @@ class MetabolicDEWorker(BaseWorker):
         self.filter_min_count = filter_min_count
         self.filter_min_samples = filter_min_samples
         self.covariates = list(covariates or ())
+        self.exclude_gene_groups = tuple(exclude_gene_groups)
 
     def _run(self):
         from kosmic.de.de_analysis import run_de_pipeline
@@ -103,6 +105,7 @@ class MetabolicDEWorker(BaseWorker):
             counts_layer=self.counts_layer,
             fdr_genes=self.fdr_genes,
             covariates=self.covariates,
+            exclude_gene_groups=self.exclude_gene_groups,
             **({} if self.deseq2_independent_filter is None
                else {'deseq2_independent_filter': self.deseq2_independent_filter}),
             **({} if self.deseq2_cooks_filter is None
