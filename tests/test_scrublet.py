@@ -49,7 +49,7 @@ def test_finds_planted_doublets_and_spares_singlets():
     assert called[~truth].mean() < 0.02        # false positives
     assert res["n_doublets"] == int(called.sum())
     assert res["n_total"] == len(truth)
-    assert not res["used_manual_threshold"]
+    assert (res["per_sample"]["status"] == "called").all()
 
 
 def test_scores_rank_doublets_above_singlets():
@@ -97,3 +97,42 @@ def test_runs_without_annoy(monkeypatch):
     a = anndata.AnnData(X)
     a, _ = run_scrublet(a)
     assert a.obs["predicted_doublet"].to_numpy()[truth].mean() > 0.9
+
+
+def _clean_one_type(n=800, seed=0):
+    """A single population with no doublets: Scrublet's histogram has no
+    second mode, so any automatic threshold lands in noise."""
+    mu = np.full(600, 0.3)
+    mu[:120] = 4.0
+    return np.random.default_rng(seed).poisson(mu, size=(n, 600)).astype(np.float32)
+
+
+def _samples(*blocks):
+    a = anndata.AnnData(np.vstack([b for _, b in blocks]))
+    a.obs["sample"] = np.concatenate([[name] * len(b) for name, b in blocks])
+    return a
+
+
+def test_clean_sample_gets_no_calls_unless_forced():
+    a = _samples(("clean", _clean_one_type()))
+    a, res = run_scrublet(a, sample_col="sample")
+    assert res["n_doublets"] == 0
+    assert res["per_sample"]["status"].tolist() == ["no clear threshold"]
+    assert (a.obs["doublet_score"] > 0).any()          # scores kept to inspect
+
+    a, res = run_scrublet(a, sample_col="sample", force_expected_rate=True)
+    assert res["per_sample"]["status"].tolist() == ["forced cut"]
+    assert 0.03 < res["n_doublets"] / a.n_obs < 0.15
+
+
+def test_samples_are_scored_separately():
+    X, truth = _planted(seed=11)
+    a = _samples(("A", X), ("clean", _clean_one_type()),
+                 ("tiny", _clean_one_type(n=40, seed=1)))
+    a, res = run_scrublet(a, sample_col="sample")
+    status = dict(zip(res["per_sample"]["sample"], res["per_sample"]["status"]))
+    assert status == {"A": "called", "clean": "no clear threshold",
+                      "tiny": "too few cells"}
+    called = a.obs["predicted_doublet"].to_numpy()
+    assert called[:len(X)][truth].mean() > 0.9
+    assert not called[len(X):].any()

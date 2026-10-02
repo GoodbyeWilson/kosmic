@@ -8,102 +8,158 @@
 # scanpy's version only touches annoy when asked for approximate
 # neighbours, which this never does.
 #
-# Uses 'adata.raw' if available (Scrublet wants raw counts, not normalised
-# expression). Falls back to a percentile-based threshold when the
-# auto-threshold step fails on small / unusual datasets.
+# Doublets form within one droplet library, so each sample is scored on
+# its own: pooled, Scrublet simulates doublets from nuclei of different
+# donors, which cannot occur. The loop is written here rather than using
+# scanpy's 'batch_key' so that a sample too small to score is skipped
+# and reported instead of failing the whole run.
+#
+# Scrublet's automatic threshold is the dip between the two modes of the
+# simulated-doublet scores. A sample without real doublets (an
+# already-cleaned deposit, or one dominated by a single cell type) has
+# no such dip, and the cut then lands in noise: on a clean single-type
+# sample it called 26% of cells. The threshold is accepted only when
+# most simulated doublets score above it; otherwise the sample gets no
+# calls. A cut at the expected rate is available, but only on request.
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
+import pandas as pd
+
+#: Fewest scored cells a sample needs; below this Scrublet's PCA and
+#: neighbour graph are not meaningful.
+MIN_CELLS_PER_SAMPLE = 100
+
+#: Fraction of simulated doublets that must score above the automatic
+#: threshold for it to be trusted (Scrublet's detectable doublet fraction).
+MIN_DETECTABLE_FRACTION = 0.5
+
+
+def _score_one(counts, expected_doublet_rate, random_state):
+    """Scrublet on one sample's counts: (scores, calls, threshold, detectable)."""
+    import anndata as ad
+    import scanpy as sc
+
+    sub = ad.AnnData(X=counts)
+    n_comps = int(min(30, sub.n_obs - 1, sub.n_vars - 1))
+    sc.pp.scrublet(
+        sub,
+        expected_doublet_rate=expected_doublet_rate,
+        sim_doublet_ratio=2.0,
+        n_neighbors=None,
+        n_prin_comps=n_comps,
+        use_approx_neighbors=False,   # keep annoy out of it
+        random_state=random_state,
+        verbose=False,
+    )
+    uns = sub.uns.get('scrublet', {})
+    threshold = uns.get('threshold')
+    sim = np.asarray(uns.get('doublet_scores_sim', []), dtype=float)
+    detectable = (float((sim > threshold).mean())
+                  if threshold is not None and np.isfinite(threshold) and sim.size
+                  else 0.0)
+    return (sub.obs['doublet_score'].to_numpy(dtype=float),
+            sub.obs['predicted_doublet'].to_numpy().astype(bool),
+            threshold, detectable)
 
 
 def run_scrublet(
     adata,
+    sample_col: Optional[str] = None,
     expected_doublet_rate: float = 0.06,
     min_counts: int = 2,
+    force_expected_rate: bool = False,
+    progress_callback=None,
 ) -> Tuple:
-    """Run Scrublet doublet detection on an AnnData object.
+    """Run Scrublet doublet detection on each sample of an AnnData object.
 
     Parameters
     ----------
     adata : anndata.AnnData
-        Data to check for doublets. Uses the raw counts (layers['counts']).
+        Data to check for doublets. Scored on its raw counts.
+    sample_col : str, optional
+        obs column identifying the droplet library (sample). None scores
+        the whole object as one sample.
     expected_doublet_rate : float
-        Expected fraction of doublets.
+        Expected fraction of doublets, passed to Scrublet.
     min_counts : int
         Minimum UMI counts for a cell to be scored. Cells below this
         get a score of 0 and are never called doublets.
+    force_expected_rate : bool
+        Where a sample's automatic threshold is rejected, call the top
+        'expected_doublet_rate' of its scores instead of calling none.
+    progress_callback : callable(msg), optional
 
     Returns
     -------
     tuple of (anndata.AnnData, dict)
-        adata with 'doublet_score' and 'predicted_doublet' columns added.
-        dict with n_doublets, n_total, pct_doublets, threshold, etc.
+        adata with 'doublet_score' and 'predicted_doublet' in obs. The dict
+        has n_doublets, n_total, pct_doublets, doublet_scores, and
+        'per_sample': one row per sample with its threshold, detectable
+        fraction, doublets called and status ('called', 'no clear
+        threshold', 'forced cut' or 'too few cells').
     """
-    import anndata as ad
-    import scanpy as sc
     import scipy.sparse as sp
 
     from kosmic.scrna.counts import count_source
-    counts_matrix, _, _ = count_source(adata)
+    counts, _, _ = count_source(adata)
+    counts = counts.tocsr() if sp.issparse(counts) else sp.csr_matrix(counts)
 
-    # Score on a throwaway object so scanpy's internal filtering and
-    # normalisation never touch the caller's data.
-    work = ad.AnnData(
-        X=counts_matrix.copy() if sp.issparse(counts_matrix)
-        else np.asarray(counts_matrix).copy())
-    work.obs_names = adata.obs_names
+    totals = np.asarray(counts.sum(axis=1)).ravel()
+    scorable = totals >= min_counts
+    if sample_col is None:
+        samples = np.zeros(adata.n_obs, dtype=object)
+        samples[:] = 'all cells'
+    else:
+        samples = adata.obs[sample_col].astype(str).to_numpy()
 
-    # Mirror the standalone package's 'min_counts' pre-filter: cells
-    # with too few UMIs are not scored rather than being fed in as
-    # near-empty profiles that distort the simulated doublets.
-    totals = np.asarray(work.X.sum(axis=1)).ravel()
-    scored = totals >= min_counts
-    doublet_scores = np.zeros(work.n_obs, dtype=float)
-    predicted = np.zeros(work.n_obs, dtype=bool)
-    threshold = None
+    scores = np.zeros(adata.n_obs, dtype=float)
+    predicted = np.zeros(adata.n_obs, dtype=bool)
+    rows = []
+    unique = list(pd.unique(samples))
+    for i, s in enumerate(unique):
+        idx = np.flatnonzero((samples == s) & scorable)
+        if progress_callback:
+            progress_callback(f"Scrublet: sample {i + 1}/{len(unique)} '{s}' "
+                              f"({idx.size:,} cells)...")
+        row = {'sample': s, 'n_cells': int((samples == s).sum()),
+               'n_scored': int(idx.size), 'threshold': np.nan,
+               'detectable_fraction': np.nan, 'n_doublets': 0}
+        if idx.size < MIN_CELLS_PER_SAMPLE:
+            rows.append({**row, 'status': 'too few cells'})
+            continue
 
-    if scored.sum() >= 2:
-        sub = work[scored].copy()
-        sc.pp.scrublet(
-            sub,
-            expected_doublet_rate=expected_doublet_rate,
-            sim_doublet_ratio=2.0,
-            n_neighbors=None,
-            n_prin_comps=30,
-            use_approx_neighbors=False,   # keep annoy out of it
-            random_state=42,
-            verbose=False,
-        )
-        doublet_scores[scored] = sub.obs['doublet_score'].to_numpy()
-        threshold = sub.uns.get('scrublet', {}).get('threshold')
-        if threshold is not None and np.isfinite(threshold):
-            predicted[scored] = sub.obs['predicted_doublet'].to_numpy().astype(bool)
+        s_scores, s_calls, threshold, detectable = _score_one(
+            counts[idx].astype(np.float32), expected_doublet_rate, 42)
+        scores[idx] = s_scores
+        row['detectable_fraction'] = round(detectable, 3)
+        if (threshold is not None and np.isfinite(threshold)
+                and detectable >= MIN_DETECTABLE_FRACTION):
+            predicted[idx] = s_calls
+            row.update(threshold=float(threshold), status='called')
+        elif force_expected_rate:
+            # Scores take few distinct values, so ties at the cut are kept
+            # rather than dropped; the count can exceed the expected rate.
+            cut = float(np.percentile(s_scores, 100 * (1 - expected_doublet_rate)))
+            predicted[idx] = s_scores >= cut
+            row.update(threshold=cut, status='forced cut')
+        else:
+            row['status'] = 'no clear threshold'
+        row['n_doublets'] = int(predicted[idx].sum())
+        rows.append(row)
 
-    used_manual_threshold = False
-    if threshold is None or not np.isfinite(threshold):
-        # Auto-threshold failed (bimodality not found). Same fallback
-        # the standalone wrapper used: call the top expected fraction.
-        threshold = float(np.percentile(
-            doublet_scores[scored] if scored.any() else doublet_scores,
-            100 * (1 - expected_doublet_rate)))
-        predicted = doublet_scores > threshold
-        used_manual_threshold = True
-
-    adata.obs['doublet_score'] = doublet_scores
+    adata.obs['doublet_score'] = scores
     adata.obs['predicted_doublet'] = predicted
 
-    n_doublets = int(np.sum(predicted))
-    n_total = len(predicted)
-
+    n_doublets = int(predicted.sum())
+    n_total = adata.n_obs
     results = {
         'n_doublets': n_doublets,
         'n_total': n_total,
-        'pct_doublets': (n_doublets / n_total) * 100 if n_total > 0 else 0,
-        'threshold': float(threshold),
-        'used_manual_threshold': used_manual_threshold,
-        'doublet_scores': doublet_scores,
+        'pct_doublets': (n_doublets / n_total) * 100 if n_total else 0.0,
+        'doublet_scores': scores,
+        'per_sample': pd.DataFrame(rows),
     }
-
     return adata, results
