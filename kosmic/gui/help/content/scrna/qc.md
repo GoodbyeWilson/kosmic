@@ -71,14 +71,35 @@ cells before and after.
 **Run Scrublet** simulates doublets from the data and scores every cell
 by similarity to them. *Rate* is the expected doublet fraction — 6% by
 default, typically 5–10% and roughly 0.8% per 1,000 cells loaded in a
-10x lane. *Min counts* is the gene floor for the simulation. Scrublet
-picks a threshold on the score distribution automatically; where that
-fails on a small or unusual dataset, KOSMIC falls back to a percentile
-matching the expected rate and says so.
+10x lane. *Min counts* is the fewest total counts a cell needs to be
+scored.
 
-The plot switches to the doublet-score histogram with the threshold
-marked. **Filter Doublets** removes cells above it. Scores and calls
-stay in `obs` (`doublet_score`, `predicted_doublet`) either way.
+*Sample* is the column naming each droplet library. Doublets form
+within one library, so each sample is scored separately; scoring all
+cells together would simulate doublets from nuclei of different donors,
+which cannot occur. It defaults to the study's sample column. Samples
+with fewer than 100 cells are skipped and reported.
+
+Scrublet sets each sample's threshold at the dip between the two peaks
+of the simulated-doublet scores. A sample without real doublets — a
+deposit whose authors already removed them, or one dominated by a
+single cell type — has no such dip, and the cut then falls in noise.
+KOSMIC accepts a sample's threshold only when at least half of the
+simulated doublets score above it. Otherwise that sample has **no
+doublets called**, and the report says *no clear threshold*. **Force a
+cut at the expected rate** calls the top-scoring cells at *Rate* in
+those samples instead. It is off by default because, on a sample
+without doublets, it removes good cells, most often those with the most
+transcripts.
+
+The log lists each sample's threshold, doublets called and status, and
+the run is recorded in provenance. The plot switches to the
+doublet-score histogram, with the threshold marked when a single sample
+was scored. **Filter Doublets** removes the called cells. Scores and
+calls stay in `obs` (`doublet_score`, `predicted_doublet`) either way.
+
+For a deposit whose authors have already removed doublets, Scrublet is
+not needed.
 
 ## Ambient (SoupX)
 

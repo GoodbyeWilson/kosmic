@@ -406,27 +406,29 @@ class ScrubletWorker(BaseWorker):
     Emits 'finished_ok' with a tuple '(adata, message, results_dict)'.
     """
 
-    def __init__(self, adata, expected_doublet_rate: float, min_counts: int, output_path: str):
+    def __init__(self, adata, expected_doublet_rate: float, min_counts: int, output_path: str,
+                 sample_col=None, force_expected_rate=False):
         super().__init__()
         self.adata = adata
         self.expected_doublet_rate = expected_doublet_rate
         self.min_counts = min_counts
         self.output_path = output_path
+        self.sample_col = sample_col
+        self.force_expected_rate = force_expected_rate
 
     def _run(self):
-        try:
-            from kosmic.scrna.qc.scrublet import run_scrublet
-        except ImportError as e:
-            raise RuntimeError(
-                "Scrublet not installed. Install with: pip install scrublet") from e
+        from kosmic.scrna.qc.scrublet import run_scrublet
 
         self.progress.emit("Running Scrublet doublet detection...")
         self.progress_pct.emit(10)
 
         self.adata, results = run_scrublet(
             self.adata,
+            sample_col=self.sample_col,
             expected_doublet_rate=self.expected_doublet_rate,
             min_counts=self.min_counts,
+            force_expected_rate=self.force_expected_rate,
+            progress_callback=self.progress.emit,
         )
 
         self.progress.emit("Saving results...")
@@ -912,9 +914,27 @@ class QCTab(SidebarPage):
         self.doublet_min_counts_spin = NoScrollSpinBox()
         self.doublet_min_counts_spin.setRange(1, 10)
         self.doublet_min_counts_spin.setValue(2)
-        self.doublet_min_counts_spin.setToolTip("Minimum counts for a gene to be used")
+        self.doublet_min_counts_spin.setToolTip(
+            "Minimum total counts for a cell to be scored")
         grid.addWidget(self.doublet_min_counts_spin, 1, 1)
+
+        grid.addWidget(QLabel("Sample"), 2, 0)
+        self.doublet_sample_combo = NoScrollComboBox()
+        self.doublet_sample_combo.setToolTip(
+            "Doublets form within one droplet library, so each sample is\n"
+            "scored separately. Choose the column naming the library or\n"
+            "sample; scoring all cells together simulates doublets from\n"
+            "nuclei of different donors.")
+        grid.addWidget(self.doublet_sample_combo, 2, 1)
         left_layout.addLayout(grid)
+
+        self.doublet_force_check = QCheckBox("Force a cut at the expected rate")
+        self.doublet_force_check.setToolTip(
+            "Where a sample shows no clear doublet population, call the\n"
+            "top-scoring cells at the expected rate anyway. Off by default:\n"
+            "on a sample without doublets this removes good cells, most\n"
+            "often those with the most transcripts.")
+        left_layout.addWidget(self.doublet_force_check)
 
         self.run_scrublet_btn = QPushButton("Run Scrublet")
         self.run_scrublet_btn.clicked.connect(self._run_scrublet)
@@ -1329,13 +1349,14 @@ class QCTab(SidebarPage):
         self.apply_qc_btn.setEnabled(True)
 
         # Doublet detection
+        self._populate_doublet_sample_combo()
         self.run_scrublet_btn.setEnabled(True)
         if 'predicted_doublet' in self.adata.obs.columns:
             n_doublets = self.adata.obs['predicted_doublet'].sum()
             pct = (n_doublets / n) * 100
             self.doublet_status.setText(f"Detected: {n_doublets:,} doublets ({pct:.1f}%)")
-            self.doublet_status.set_state('warning')
-            self.filter_doublets_btn.setEnabled(True)
+            self.doublet_status.set_state('warning' if n_doublets else 'success')
+            self.filter_doublets_btn.setEnabled(bool(n_doublets))
             self._doublet_card.set_completed(True)
             self._doublet_card.set_summary(
                 [f"{n_doublets:,} doublets flagged ({pct:.1f}%)"])
@@ -1706,6 +1727,30 @@ class QCTab(SidebarPage):
     # Scrublet doublet detection
     # ------------------------------------------------------------------
 
+    _NO_SAMPLE = "(score all cells together)"
+
+    def _populate_doublet_sample_combo(self):
+        """Offer categorical obs columns; default to the study's sample column."""
+        from kosmic.scrna.inspect.batch import _SAMPLE_COL_CANDIDATES
+
+        obs = self.adata.obs
+        options = [c for c in obs.columns
+                   if not c.startswith('_')
+                   and str(obs[c].dtype) in ('category', 'object')
+                   and 2 <= obs[c].nunique() <= 500]
+        current = self.doublet_sample_combo.currentText()
+        self.doublet_sample_combo.blockSignals(True)
+        self.doublet_sample_combo.clear()
+        self.doublet_sample_combo.addItems(options + [self._NO_SAMPLE])
+        default = next((c for c in (current, *_SAMPLE_COL_CANDIDATES) if c in options),
+                       self._NO_SAMPLE)
+        self.doublet_sample_combo.setCurrentText(default)
+        self.doublet_sample_combo.blockSignals(False)
+
+    def _doublet_sample_col(self):
+        col = self.doublet_sample_combo.currentText()
+        return None if col in ('', self._NO_SAMPLE) else col
+
     def _run_scrublet(self):
         """Run Scrublet doublet detection."""
         if self.adata is None or self.h5ad_path is None:
@@ -1713,10 +1758,18 @@ class QCTab(SidebarPage):
 
         expected_rate = self.doublet_rate_spin.value() / 100.0
         min_counts = self.doublet_min_counts_spin.value()
+        sample_col = self._doublet_sample_col()
+        force = self.doublet_force_check.isChecked()
+        scope = (f"each '{sample_col}' separately "
+                 f"({self.adata.obs[sample_col].nunique()} samples)"
+                 if sample_col else "all cells together, as one sample")
 
         if not dialogs.confirm(self, "Run Scrublet", f"This will run Scrublet doublet detection with:\n\n"
+            f"  - Scoring: {scope}\n"
             f"  - Expected doublet rate: {expected_rate*100:.0f}%\n"
-            f"  - Min counts: {min_counts}\n\n"
+            f"  - Min counts: {min_counts}\n"
+            f"  - Samples without a clear doublet population: "
+            f"{'cut at the expected rate' if force else 'no doublets called'}\n\n"
             f"Current cell count: {self.adata.n_obs:,}\n\n"
             "This may take a few minutes. Proceed?"):
             return
@@ -1730,7 +1783,9 @@ class QCTab(SidebarPage):
             self.adata,
             expected_rate,
             min_counts,
-            str(self.h5ad_path)
+            str(self.h5ad_path),
+            sample_col=sample_col,
+            force_expected_rate=force,
         )
         run_worker(
             self.scrublet_worker,
@@ -1750,29 +1805,42 @@ class QCTab(SidebarPage):
         self.adata = adata
         self.main_window.set_adata(adata, str(self.h5ad_path), switch=False)
 
+        self._update_controls()
         n_doublets = results['n_doublets']
         pct = results['pct_doublets']
-        self.doublet_status.setText(f"Detected: {n_doublets:,} doublets ({pct:.1f}%)")
-        self.doublet_status.set_state('warning')
-        self.filter_doublets_btn.setEnabled(True)
+        per_sample = results['per_sample']
+        by_status = per_sample['status'].value_counts().to_dict()
+        breakdown = ", ".join(f"{n} {status}" for status, n in by_status.items())
+        self.doublet_status.setText(
+            f"Detected: {n_doublets:,} doublets ({pct:.1f}%) -- samples: {breakdown}")
+        self.doublet_status.set_state('warning' if n_doublets else 'success')
+        self.filter_doublets_btn.setEnabled(n_doublets > 0)
 
-        # Generate scrublet histogram
-        if 'doublet_score' in self.adata.obs.columns:
-            self._generate_scrublet_plot(
-                self.adata.obs['doublet_score'].values,
-                results['threshold'],
-            )
+        # A threshold line only when there is a single threshold to draw.
+        threshold = per_sample['threshold'].iloc[0] if len(per_sample) == 1 else np.nan
+        self._generate_scrublet_plot(
+            results['doublet_scores'],
+            None if np.isnan(threshold) else float(threshold))
 
-        self._update_controls()
+        if hasattr(self.main_window, 'record_provenance'):
+            self.main_window.record_provenance('doublets', {
+                'method': 'scrublet',
+                'sample_col': self._doublet_sample_col(),
+                'expected_doublet_rate': self.doublet_rate_spin.value() / 100.0,
+                'min_counts': self.doublet_min_counts_spin.value(),
+                'force_expected_rate': self.doublet_force_check.isChecked(),
+                'n_doublets': n_doublets,
+                'samples_by_status': by_status,
+            }, data_changed=False)
+
         self.log_message.emit(message)
+        self.log_message.emit(per_sample.to_string(index=False))
 
         dialogs.info(self, "Scrublet Complete",
-            f"{message}\n\n"
-            f"Threshold: {results['threshold']:.3f}\n\n"
-            f"New columns added:\n"
-            f"  - doublet_score (continuous)\n"
-            f"  - predicted_doublet (boolean)\n\n"
-            f"Click 'Filter Doublets' to remove them.")
+            f"{message}\n\nSamples: {breakdown}. Per-sample thresholds are in "
+            f"the log.\n\n"
+            + ("Click 'Filter Doublets' to remove them." if n_doublets
+               else "Nothing to filter."))
 
     def _on_scrublet_failed(self, message: str):
         if self.progress_bar:

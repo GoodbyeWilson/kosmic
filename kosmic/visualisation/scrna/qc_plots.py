@@ -112,10 +112,11 @@ def create_qc_violin_plots(
 
 def create_scrublet_histogram(
     doublet_scores: np.ndarray,
-    threshold: float,
+    threshold: Optional[float],
     dark_mode: bool = True,
 ):
-    """Histogram of Scrublet doublet scores with threshold line.
+    """Histogram of Scrublet doublet scores, with the threshold line when
+    there is a single one (per-sample runs have one threshold each).
 
     Returns
     -------
@@ -126,12 +127,13 @@ def create_scrublet_histogram(
 
     color = "#4fc1ff" if dark_mode else "#1976d2"
     ax.hist(doublet_scores, bins=50, color=color, alpha=0.7, edgecolor="none")
-    ax.axvline(threshold, color="#ff4444", linestyle="--", linewidth=1.5,
-               label=f"Threshold: {threshold:.3f}")
+    if threshold is not None:
+        ax.axvline(threshold, color="#ff4444", linestyle="--", linewidth=1.5,
+                   label=f"Threshold: {threshold:.3f}")
+        ax.legend(fontsize=8, framealpha=0.6)
     ax.set_xlabel("Doublet score", fontsize=9)
     ax.set_ylabel("Count", fontsize=9)
     ax.set_title("Scrublet Doublet Scores", fontsize=10)
-    ax.legend(fontsize=8, framealpha=0.6)
 
     fig.tight_layout(pad=1.0)
     return fig

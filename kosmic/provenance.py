@@ -212,6 +212,7 @@ def staleness(study_dir, adata, sample_col: Optional[str] = None,
 _STAGE_TITLES = {
     'load': 'Load', 'qc': 'Quality control', 'normalize': 'Normalisation',
     'cluster': 'Clustering', 'decontx': 'DecontX decontamination',
+    'doublets': 'Doublet detection',
     'embedding': 'HVG / PCA / batch correction',
     'subset': 'Cell-type subset',
     'filter_dataset': 'Pre-analysis cell filter',
