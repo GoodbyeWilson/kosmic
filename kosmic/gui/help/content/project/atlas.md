@@ -107,6 +107,11 @@ partial coverage:
   so labels are projected by nearest neighbours in the atlas's PCA space
   instead. This is slower and needs the atlas to have PCA computed.
 
+Each study's provenance records the transfer: the atlas it came from,
+the columns written, how many cells were matched by barcode, projected,
+or left unlabelled, and the atlas's annotation method and model. The
+study's Methods page therefore states where its labels came from.
+
 ## Independent labels vs atlas labels
 
 Keeping both is the point. Per-study annotation and atlas annotation

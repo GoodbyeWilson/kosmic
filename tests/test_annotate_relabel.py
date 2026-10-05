@@ -134,3 +134,48 @@ def test_relabel_acts_on_the_workspace_dataset_not_a_stale_one(app):
     assert (old.obs['cell_type'] == 'old').all()          # untouched
     assert (new.obs['cell_type'] == 'Unknown').all()
     assert t.adata is new
+
+
+def test_annotation_and_manual_relabels_are_recorded(app, tmp_path, monkeypatch):
+    """An automated pass records the method and per-cluster labels; hand
+    relabels are recorded on save, and a new automated pass starts afresh."""
+    from kosmic.gui.shared import dialogs
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+    monkeypatch.setattr(dialogs, 'info', lambda *a, **k: None)
+
+    class MW:
+        current_adata = None
+        current_h5ad_path = None
+        _adata_version = 0
+        recorded = []
+
+        def record_provenance(self, stage, params, **kw):
+            self.recorded.append((stage, params, kw))
+
+    ws = MW()
+    t = AnnotateTab(ws)
+    n = 60
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 3), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['0'] * 40 + ['1'] * 20),
+            'cell_type': pd.Categorical(['CM'] * 40 + ['Fib'] * 20),
+        }, index=[f'c{i}' for i in range(n)]))
+    target = tmp_path / 's.h5ad'
+    ws.current_adata, ws.current_h5ad_path, t.adata = a, str(target), a
+
+    t._record_annotation({'method': 'CellTypist', 'name': 'Healthy_Adult_Heart.pkl'})
+    stage, params, _ = ws.recorded[-1]
+    assert stage == 'annotate' and params['name'] == 'Healthy_Adult_Heart.pkl'
+    assert params['clusters'] == {'0': {'label': 'CM', 'n_cells': 40},
+                                  '1': {'label': 'Fib', 'n_cells': 20}}
+
+    t._populate_cluster_table()
+    t._apply_cluster_reannotation(1, 'Unknown')
+    t._save_annotations()
+    stage, params, kw = ws.recorded[-1]
+    assert stage == 'annotate_manual' and kw == {'replace': True}
+    assert params['edits'] == [{'cluster': '1', 'from': 'Fib', 'to': 'Unknown', 'n_cells': 20}]
+
+    t._record_annotation({'method': 'CellTypist'})
+    assert 'manual_relabels' not in a.uns

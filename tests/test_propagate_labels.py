@@ -265,3 +265,22 @@ def test_propagation_touches_obs_only(tmp_path):
     with h5py.File(s1) as h:
         x_after = h["X"][()] if isinstance(h["X"], h5py.Dataset) else h["X/data"][()]
     assert np.array_equal(x_before, x_after)
+
+
+def test_propagation_is_recorded_in_the_study_provenance(tmp_path):
+    """Each study records where its labels came from and how they were
+    matched, including the annotation the atlas labels were made with."""
+    from kosmic import provenance
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad",
+                ["disease", "control", "exclude"])
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control"])
+    master = _master_from(tmp_path, [s1, s2], drop_excluded=True)
+    provenance.record_stage(master.parent, master.stem, 'annotate',
+                            {'method': 'CellTypist', 'name': 'Heart.pkl',
+                             'clusters': {'0': {'label': 'Cardiomyocyte'}}})
+    propagate_labels(master, s1)
+    p = provenance.last_stage(s1.parent, 'propagate_labels')['params']
+    assert p['columns'] == {'leiden': 'leiden_atlas', 'cell_type': 'cell_type_atlas'}
+    assert (p['n_cells'], p['n_matched_by_barcode'], p['n_unlabelled_excluded']) == (3, 2, 1)
+    assert p['n_projected_by_knn'] == 0 and p['n_unlabelled_not_in_atlas'] == 0
+    assert p['atlas_annotation'] == {'method': 'CellTypist', 'name': 'Heart.pkl'}

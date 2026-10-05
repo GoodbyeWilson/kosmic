@@ -425,13 +425,16 @@ class MethodsPage(SimplePage):
             used_refs.add('harmony')
         if 'decontX_counts' in layers:
             used_refs.add('decontx')
-        if 'cell_type_auto' in obs:
+        # CellTypist's own outputs; other annotation methods also write
+        # cell_type_auto, so that column is no evidence of CellTypist.
+        if 'celltypist_model' in uns or 'conf_score' in obs:
             used_refs.add('celltypist')
 
     @staticmethod
     def _provenance_preprocessing(prov, used_refs: set) -> list:
         """Preprocessing lines from the recorded scRNA stages (accurate)."""
-        scrna = ('load', 'qc', 'normalize', 'cluster', 'decontx', 'subset',
+        scrna = ('load', 'qc', 'doublets', 'normalize', 'cluster', 'annotate',
+                 'annotate_manual', 'propagate_labels', 'decontx', 'subset',
                  'setup', 'roles')
         lines = []
         for st in prov.get('stages', []):
@@ -443,6 +446,10 @@ class MethodsPage(SimplePage):
                 used_refs.add('leiden')
             if st['stage'] == 'decontx':
                 used_refs.add('decontx')
+            if (st.get('params') or {}).get('method') == 'CellTypist':
+                used_refs.add('celltypist')
+            if (st.get('params') or {}).get('method') == 'scrublet':
+                used_refs.add('scrublet')
             from kosmic.provenance import _STAGE_TITLES
             title = _STAGE_TITLES.get(st['stage'],
                                       st['stage'].replace('_', ' ').title())
@@ -450,6 +457,11 @@ class MethodsPage(SimplePage):
             for k, v in (st.get('params') or {}).items():
                 if isinstance(v, float):
                     v = f"{v:.4g}"
+                elif (isinstance(v, (dict, list)) and v
+                      and isinstance(next(iter(v.values() if isinstance(v, dict) else v)), dict)):
+                    # Per-cluster labels or per-edit rows: the count here,
+                    # the rows in provenance.json.
+                    v = f"{len(v)} {k}"
                 elif isinstance(v, dict):
                     v = ", ".join(f"{a}={b}" for a, b in v.items()) or "(none)"
                 elif isinstance(v, (list, tuple)):
