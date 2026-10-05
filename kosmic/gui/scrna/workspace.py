@@ -203,7 +203,8 @@ class ScRNAWorkspace(QWidget):
 
         # Steps are only marked complete when the user visits them.
 
-    def record_provenance(self, stage, params, *, data_changed=True, source=None):
+    def record_provenance(self, stage, params, *, data_changed=True, source=None,
+                          replace=False):
         """Append a processing stage to the study's provenance sidecar.
 
         Writes '<study_dir>/provenance.json' next to the working h5ad (never
@@ -212,6 +213,7 @@ class ScRNAWorkspace(QWidget):
         counts / obs, so downstream staleness checks see the new state. 'source'
         is the parent h5ad a derived study (a cell-type subset) came from, stored
         so the lineage can be followed back to the upstream processing.
+        'replace' keeps only the latest entry of this stage.
         """
         from pathlib import Path
         h5ad = self.current_h5ad_path
@@ -222,7 +224,8 @@ class ScRNAWorkspace(QWidget):
             fp = (provenance.compute_fingerprint(self.current_adata, h5ad_path=h5ad)
                   if data_changed else None)
             provenance.record_stage(Path(h5ad).parent, Path(h5ad).stem,
-                                    stage, params, fingerprint=fp, source=source)
+                                    stage, params, fingerprint=fp, source=source,
+                                    replace=replace)
         except Exception as e:  # provenance is best-effort, never blocks work
             self.status_message.emit(f"Could not record provenance: {e}")
 

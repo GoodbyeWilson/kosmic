@@ -229,7 +229,11 @@ full dataset.
 
 **Provenance.** Study stages append to the study's record, so the
 record is a lineage. Meta-analysis stages replace the previous entry
-for the same stage, because a re-run overwrites its output file.
+for the same stage, because a re-run overwrites its output file; so
+does the manual-relabel stage, which lists the hand edits present in
+the saved file. Propagating atlas labels adds a stage to each receiving
+study's record, naming the atlas and the annotation the labels came
+from.
 
 ## GUI state and navigation
 

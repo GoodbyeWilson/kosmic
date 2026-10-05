@@ -171,3 +171,12 @@ that you must not.
 `obs['leiden']`, `obs['cell_type']`, the PCA and UMAP coordinates, the
 neighbour graph, and the settings for all of it in provenance. The
 counts are untouched.
+
+Each automated annotation is recorded in provenance as its own stage:
+the method, the model or reference with its version (for CellTypist,
+the model's name, version and source), whether majority voting was
+used, and each cluster's label. Relabels you make by hand in the
+cluster table are recorded when you save, as a separate stage listing
+each change (cluster, old label, new label, number of cells), so the
+Methods page can say which labels were assigned automatically and which
+were changed by hand.

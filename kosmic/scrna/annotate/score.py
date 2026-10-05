@@ -659,4 +659,13 @@ def run_celltypist(adata, model_name, majority_voting=True, progress_callback=No
     else:
         adata.obs['cell_type_score'] = 0.0
 
+    # Which model produced the labels, for provenance and the methods text.
+    desc = getattr(model, 'description', None) or {}
+    adata.uns['celltypist_model'] = {
+        'name': str(model_name),
+        'version': str(desc.get('version', '')),
+        'source': str(desc.get('source', '')),
+        'n_cell_types': int(len(model.cell_types)),
+        'majority_voting_on_leiden': bool(use_leiden),
+    }
     return adata

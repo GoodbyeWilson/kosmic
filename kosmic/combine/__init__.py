@@ -474,7 +474,33 @@ def propagate_labels(
     if progress_callback:
         progress_callback(f"Writing labels into {study_h5ad_path.name}...")
     write_obs(study_h5ad_path, study_obs)
+
+    _record_propagation(master_h5ad_path, study_h5ad_path, {
+        'atlas': str(master_h5ad_path),
+        'columns': {col: f"{col}{suffix}" for col in label_cols},
+        'n_cells': int(study_n_obs),
+        'n_matched_by_barcode': int(study_n_obs - len(uncovered)),
+        'n_projected_by_knn': int(len(leftover)) if project else 0,
+        'n_unlabelled_excluded': n_excluded,
+        'n_unlabelled_not_in_atlas': 0 if project else int(len(leftover)),
+    })
     return int(study_n_obs)
+
+
+def _record_propagation(master_h5ad_path: Path, study_h5ad_path: Path,
+                        params: dict) -> None:
+    """Add a 'propagate_labels' stage to the study's provenance, naming the
+    atlas annotation the labels came from. Never blocks the transfer."""
+    from kosmic import provenance
+    try:
+        annotate = provenance.last_stage(master_h5ad_path.parent, 'annotate')
+        if annotate:
+            params['atlas_annotation'] = {
+                k: v for k, v in annotate['params'].items() if k != 'clusters'}
+        provenance.record_stage(study_h5ad_path.parent, study_h5ad_path.stem,
+                                'propagate_labels', params)
+    except Exception:  # provenance is best-effort, as everywhere else
+        pass
 
 
 __all__ = ['concat_studies', 'propagate_labels']

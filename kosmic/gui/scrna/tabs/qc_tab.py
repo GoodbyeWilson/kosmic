@@ -2079,6 +2079,17 @@ class QCTab(SidebarPage):
         self.h5ad_path = self._pending_norm_path
         self.main_window.set_adata(adata, str(self.h5ad_path), switch=False)
 
+        if hasattr(self.main_window, 'record_provenance'):
+            # Say so when no cell filter preceded this, so methods.md cannot
+            # imply one.
+            from kosmic import provenance
+            self.main_window.record_provenance('normalize', {
+                'target_sum': self._last_norm_target,
+                'log_transform': self.log_transform_check.isChecked(),
+                'qc_filter_applied': provenance.last_stage(
+                    Path(self.h5ad_path).parent, 'qc') is not None,
+            })
+
         # Mark QC step complete after normalization
         self.main_window.mark_step_complete(3)
 

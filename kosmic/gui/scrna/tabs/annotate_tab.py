@@ -22,7 +22,7 @@ from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
 from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
 from kosmic.scrna.annotate.cluster_qc import flag_clusters
-from kosmic.scrna.annotate.labels import set_cell_type
+from kosmic.scrna.annotate.labels import cluster_column, cluster_label_summary, set_cell_type
 from kosmic.scrna.cluster.workset import apply_annotations, working_subset
 
 
@@ -586,6 +586,7 @@ class AnnotateTab(QWidget):
         self.project_dir = None
         self.adata = None
         self.h5ad_path = None
+        self._pending_annotation = {}
         self.marker_worker = None
         self.celltypist_worker = None
         self.ref_worker = None
@@ -1395,7 +1396,17 @@ class AnnotateTab(QWidget):
             return
 
         mask = (self.adata.obs[cluster_col].astype(str) == str(cluster_id)).to_numpy()
+        old_type = (self.adata.obs.loc[mask, 'cell_type'].astype(str).mode()
+                    if 'cell_type' in self.adata.obs.columns else pd.Series(dtype=str))
         set_cell_type(self.adata.obs, mask, new_type)
+
+        # Recorded in provenance when the annotations are saved.
+        edits = dict(self.adata.uns.get('manual_relabels', {}))
+        for key, value in (('cluster', str(cluster_id)),
+                           ('from', old_type.iat[0] if len(old_type) else ''),
+                           ('to', new_type), ('n_cells', int(mask.sum()))):
+            edits[key] = list(edits.get(key, [])) + [value]
+        self.adata.uns['manual_relabels'] = edits
 
         # Provenance: tag this cluster as a manual override so the
         # cluster table can show which calls came from auto vs. user.
@@ -1591,10 +1602,46 @@ class AnnotateTab(QWidget):
             tmp = target.with_name(target.name + '.tmp')
             current.write_h5ad(str(tmp))
             os.replace(tmp, target)
+            self._record_manual_relabels()
             self._on_status(f"Annotations saved to {target}")
             dialogs.info(self, "Saved", f"Annotations saved to:\n{target}")
         except Exception as e:
             dialogs.warning(self, "Save Failed", f"Could not save: {str(e)}")
+
+    def _record_annotation(self, settings: dict):
+        """Record an automated annotation pass as an 'annotate' stage.
+
+        A new automated pass starts a new set of manual edits, so any
+        edits held for the previous one are dropped.
+        """
+        self.adata.uns.pop('manual_relabels', None)
+        if not hasattr(self.main_window, 'record_provenance'):
+            return
+        cluster_col = cluster_column(self.adata.obs)
+        params = {**settings, 'cluster_col': cluster_col,
+                  'n_cell_types': int(self.adata.obs['cell_type'].nunique())}
+        if cluster_col:
+            params['clusters'] = cluster_label_summary(
+                self.adata.obs, cluster_col,
+                self.adata.uns.get('cluster_annotation_details'))
+        self.main_window.record_provenance('annotate', params)
+
+    def _record_manual_relabels(self):
+        """Record the hand relabels made since the last automated pass.
+
+        One 'annotate_manual' stage, replaced on each save, so the record
+        lists every edit that is in the saved file and nothing that is not.
+        """
+        edits = self.adata.uns.get('manual_relabels')
+        if not edits or not hasattr(self.main_window, 'record_provenance'):
+            return
+        # Values read back from a saved file are numpy scalars; store plain ones.
+        rows = [{k: (v.item() if hasattr(v, 'item') else v) for k, v in zip(edits, values)}
+                for values in zip(*edits.values())]
+        self.main_window.record_provenance(
+            'annotate_manual',
+            {'cluster_col': cluster_column(self.adata.obs), 'edits': rows},
+            replace=True)
 
     def _undo_annotation_changes(self):
         """Revert cell_type to the last automated annotation (cell_type_auto)."""
@@ -1605,6 +1652,7 @@ class AnnotateTab(QWidget):
             return
 
         self.adata.obs['cell_type'] = self.adata.obs['cell_type_auto'].copy()
+        self.adata.uns.pop('manual_relabels', None)
         self.main_window.current_adata = self.adata
         self.main_window._adata_version += 1
         self._last_adata_version = self.main_window._adata_version
@@ -1694,6 +1742,12 @@ class AnnotateTab(QWidget):
             'min_markers': self.pdb_min_markers_spin.value(),
         }
 
+        self._pending_annotation = {
+            'method': 'marker scoring', 'markers': 'PanglaoDB', 'organ': organ,
+            'species': self.species_combo.currentText().lower(),
+            'min_specificity': self.specificity_spin.value(),
+            'canonical_only': self.canonical_check.isChecked(),
+            'cell_types_offered': selected_cell_types, **annotation_params}
         self.marker_worker = MarkerScoringWorker(self.adata, marker_dict, output_path, annotation_params)
         run_worker(
             self.marker_worker,
@@ -1714,6 +1768,7 @@ class AnnotateTab(QWidget):
         self.main_window.current_adata = adata
         self.main_window._adata_version += 1
         self._last_adata_version = self.main_window._adata_version
+        self._record_annotation(self._pending_annotation)
         self._update_status()
         self.annotation_complete.emit(message)
         dialogs.info(self, "Annotation Complete", message)
@@ -1748,6 +1803,7 @@ class AnnotateTab(QWidget):
 
         broad_labels = self.broad_labels_check.isChecked()
 
+        self._pending_annotation = {'method': 'CellTypist', 'broad_labels': broad_labels}
         self.celltypist_worker = CellTypistWorker(
             self.adata, model_name, majority_voting, output_path,
             broad_labels=broad_labels,
@@ -1769,6 +1825,8 @@ class AnnotateTab(QWidget):
         self.main_window.current_adata = adata
         self.main_window._adata_version += 1
         self._last_adata_version = self.main_window._adata_version
+        self._record_annotation({**self._pending_annotation,
+                                 **adata.uns.get('celltypist_model', {})})
         self._update_status()
         self.annotation_complete.emit(message)
         dialogs.info(self, "Annotation Complete", message)
@@ -1827,6 +1885,10 @@ class AnnotateTab(QWidget):
             'min_markers': self.cm2_min_markers_spin.value(),
         }
 
+        self._pending_annotation = {
+            'method': 'marker scoring', 'markers': 'CellMarker 2.0', 'tissue': tissue,
+            'species': species, 'cancer_type': cancer_type,
+            'cell_types_offered': selected_cell_types, **annotation_params}
         self.marker_worker = MarkerScoringWorker(self.adata, marker_dict, output_path, annotation_params)
         run_worker(
             self.marker_worker,
@@ -1939,6 +2001,12 @@ class AnnotateTab(QWidget):
         if self.progress_bar:
             self.progress_bar.setValue(0)
 
+        from kosmic.scrna.annotate.reference import list_available_references
+        ref_info = list_available_references().get(ref_name, {})
+        self._pending_annotation = {
+            'method': 'reference correlation', 'reference': ref_name,
+            'reference_source': ref_info.get('source', ''),
+            'min_correlation': self.ref_min_corr_spin.value()}
         self.ref_worker = ReferenceAnnotationWorker(
             self.adata,
             ref_name,
@@ -1962,6 +2030,7 @@ class AnnotateTab(QWidget):
         self.main_window.current_adata = adata
         self.main_window._adata_version += 1
         self._last_adata_version = self.main_window._adata_version
+        self._record_annotation(self._pending_annotation)
         self._update_status()
         self.annotation_complete.emit(message)
         dialogs.info(self, "Annotation Complete", message)
