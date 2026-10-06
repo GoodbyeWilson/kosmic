@@ -179,3 +179,65 @@ def test_annotation_and_manual_relabels_are_recorded(app, tmp_path, monkeypatch)
 
     t._record_annotation({'method': 'CellTypist'})
     assert 'manual_relabels' not in a.uns
+
+
+def test_a_subset_source_is_annotated_in_memory_and_never_written(app, tmp_path, monkeypatch):
+    """Focus mode (ADR-008) points the panel at a subset held in memory.
+    Edits, annotation passes and stages stay with the subset; the open
+    study, its file and its record are untouched."""
+    from kosmic.gui.shared import dialogs
+    from kosmic.gui.scrna.tabs.annotate_tab import (
+        AnnotateTab, ReferenceAnnotationWorker, SubsetSource)
+    import kosmic.scrna.annotate.reference as ref_mod
+    warnings = []
+    monkeypatch.setattr(dialogs, 'warning', lambda *a, **k: warnings.append(a[2]))
+
+    class MW:
+        current_adata = None
+        current_h5ad_path = None
+        _adata_version = 5
+        recorded = []
+
+        def record_provenance(self, stage, params, **kw):
+            self.recorded.append(stage)
+
+    def _cells(clusters):
+        n = len(clusters)
+        return ad.AnnData(
+            X=sp.csr_matrix(np.ones((n, 3), dtype=np.float32)),
+            obs=pd.DataFrame({'leiden': pd.Categorical(clusters),
+                              'cell_type': pd.Categorical(['Fib'] * n),
+                              'cell_type_auto': pd.Categorical(['Fib'] * n)},
+                             index=[f'c{i}' for i in range(n)]))
+
+    ws = MW()
+    study, sub = _cells(['0'] * 30), _cells(['0'] * 20 + ['1'] * 10)
+    ws.current_adata, ws.current_h5ad_path = study, str(tmp_path / 's.h5ad')
+    t = AnnotateTab(ws)
+    src = SubsetSource(sub)
+    t.set_source(src)
+    assert t.adata is sub and t.save_annot_btn.isHidden()
+    assert t.cluster_table.rowCount() == 2
+
+    t._apply_cluster_reannotation(1, 'Fib_activated')
+    assert (sub.obs['cell_type'] == 'Fib_activated').sum() == 10 and src.version == 1
+    assert (study.obs['cell_type'] == 'Fib').all() and ws._adata_version == 5
+
+    t._record_manual_relabels()
+    t._record_manual_relabels()                       # replaced, not appended
+    t._record_annotation({'method': 'CellTypist'})
+    assert [stage for stage, _ in src.records] == ['annotate_manual', 'annotate']
+    assert not ws.recorded
+
+    def fake_run(adata, ref, **kw):
+        adata.obs['cell_type'] = pd.Categorical(['FB1'] * 20 + ['FB2'] * 10)
+        return adata, {'0': 'FB1', '1': 'FB2'}, {}
+
+    monkeypatch.setattr(ref_mod, 'run_reference_annotation', fake_run)
+    out, _ = ReferenceAnnotationWorker(sub, 'any', t._resolve_h5ad_path())._run()
+    assert out is sub and (sub.obs['cell_type'] == 'FB2').sum() == 10
+    t._save_annotations()
+    assert not list(tmp_path.iterdir()) and not warnings
+
+    t.set_source(None)
+    assert t.adata is study and not t.save_annot_btn.isHidden()

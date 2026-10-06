@@ -66,8 +66,9 @@ Cells are named `<barcode>-<accession>` in the atlas, and an
 study's metadata the atlas keeps `sample`, `condition`, `_role`,
 `cell_type`, `age`, one `sex` column (female / male, from whichever
 column the study's Inspect step designated) and, if labels have already
-been propagated, `cell_type_atlas` and `leiden_atlas`. A column that
-only some studies have is blank for the others.
+been propagated, `cell_type_atlas`, `leiden_atlas` and
+`leiden_sub_atlas`. A column that only some studies have is blank for
+the others.
 
 ## 3. Cluster the atlas
 
@@ -86,14 +87,25 @@ As for any dataset. The Marker Check step exists to sense-check the
 result before you propagate it — labels you push out are hard to take
 back.
 
+To label in more depth than one clustering of the whole atlas allows —
+the cardiomyocyte, fibroblast or endothelial states within each type —
+open each population in the Cluster step's **Subcluster** mode (see
+*Cluster*). Its labels are written into the atlas's `cell_type` and its
+subcluster ids into `leiden_sub`, so they reach the studies in step 5
+like any other label. Deriving a study per cell type with the Subset
+step is not needed for this.
+
 ## 5. Propagate labels
 
 **Propagate labels to studies…** becomes available once the atlas
 exists. Labels land in each study as **`cell_type_atlas`** and
-**`leiden_atlas`**. Each study keeps its own `cell_type` and `leiden`
-from when it was processed alone, so you can compare the two. A study
-that was never annotated individually also gets a plain `cell_type`,
-since there is nothing to protect.
+**`leiden_atlas`**, and as **`leiden_sub_atlas`** when the atlas was
+subclustered. Each study keeps its own `cell_type` and `leiden` from
+when it was processed alone, so you can compare the two. A study that
+was never annotated individually also gets a plain `cell_type` and
+`leiden`, since there is nothing to protect. Subcluster ids are the
+exception: they name the atlas's clusters, so they only ever arrive as
+`leiden_sub_atlas`.
 
 Only studies actually in the atlas are offered — the atlas's own
 `study` column decides, not what happens to be in the project folder.
@@ -109,8 +121,10 @@ partial coverage:
 
 Each study's provenance records the transfer: the atlas it came from,
 the columns written, how many cells were matched by barcode, projected,
-or left unlabelled, and the atlas's annotation method and model. The
-study's Methods page therefore states where its labels came from.
+or left unlabelled, the atlas's annotation method and model, and each
+of the atlas's subclusterings (the population, its size, the resolution
+and how it was annotated). The study's Methods page therefore states
+where its labels came from.
 
 ## Independent labels vs atlas labels
 

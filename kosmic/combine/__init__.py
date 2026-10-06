@@ -21,9 +21,12 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
+from kosmic.scrna.cluster.subcluster import SUBCLUSTER_COLUMN
+
 
 # obs columns carried from each study onto the master. The atlas labels
-# ('cell_type_atlas', 'leiden_atlas') are there so an atlas re-created
+# ('cell_type_atlas', 'leiden_atlas', 'leiden_sub_atlas') are there so an
+# atlas re-created
 # after propagation -- for example uncapped, as the container for the
 # mega-analysis DE -- still carries the shared labels; 'sex' and 'age' so
 # they are available as DE covariates.
@@ -33,7 +36,8 @@ import pandas as pd
 PROJECT_MIN_FRACTION = 0.01
 
 _OBS_KEEP_CANDIDATES = ('sample', 'condition', 'cell_type', '_role',
-                        'cell_type_atlas', 'leiden_atlas', 'sex', 'age')
+                        'cell_type_atlas', 'leiden_atlas', 'leiden_sub_atlas',
+                        'sex', 'age')
 
 
 def _kept_columns_across(study_h5ad_paths) -> list[str]:
@@ -300,11 +304,22 @@ def _write_label(obs, col: str, values, suffix: str) -> None:
 
     Always writes '<col><suffix>'. Also fills the plain column when the
     study does not already have one, so a study that was never annotated
-    individually is still usable downstream.
+    individually is still usable downstream -- except 'leiden_sub', whose
+    ids must belong to the study's own 'leiden' (ADR-008).
     """
     obs[f"{col}{suffix}"] = values
-    if col not in obs.columns:
+    if col not in obs.columns and col != SUBCLUSTER_COLUMN:
         obs[col] = values
+
+
+def propagation_columns(master_h5ad_path) -> tuple:
+    """The atlas columns to propagate: 'leiden' and 'cell_type', and
+    'leiden_sub' when the atlas has subclusters (ADR-008)."""
+    from kosmic.scrna.load.h5ad_meta import read_obs_columns
+    cols = ('leiden', 'cell_type')
+    if SUBCLUSTER_COLUMN in read_obs_columns(master_h5ad_path):
+        cols += (SUBCLUSTER_COLUMN,)
+    return cols
 
 
 def propagate_labels(
@@ -325,7 +340,8 @@ def propagate_labels(
 
     The unsuffixed columns are written only when the study has none, so
     a study that was never annotated individually still comes out with a
-    usable ``cell_type`` for the steps that assume one.
+    usable ``cell_type`` for the steps that assume one. ``leiden_sub`` is
+    the exception: it is only ever written as ``leiden_sub_atlas``.
 
     Fast path (every per-study cell is in the master):
       Read master.obs only, join by obs_names suffix, write labels back.
@@ -490,17 +506,26 @@ def propagate_labels(
 def _record_propagation(master_h5ad_path: Path, study_h5ad_path: Path,
                         params: dict) -> None:
     """Add a 'propagate_labels' stage to the study's provenance, naming the
-    atlas annotation the labels came from. Never blocks the transfer."""
+    atlas annotation and subclusterings the labels came from. Never blocks
+    the transfer."""
     from kosmic import provenance
     try:
-        annotate = provenance.last_stage(master_h5ad_path.parent, 'annotate')
+        record = provenance.load(master_h5ad_path.parent)
+        annotate = provenance.last_stage(record, 'annotate') if record else None
         if annotate:
             params['atlas_annotation'] = {
                 k: v for k, v in annotate['params'].items() if k != 'clusters'}
+        subclusterings = [st.get('params') or {} for st in (record or {}).get('stages', [])
+                          if st.get('stage') == 'subcluster']
+        if subclusterings:
+            params['atlas_subclustering'] = [
+                {k: p.get(k) for k in ('column', 'groups', 'n_cells', 'resolution',
+                                       'n_subclusters', 'annotation')}
+                for p in subclusterings]
         provenance.record_stage(study_h5ad_path.parent, study_h5ad_path.stem,
                                 'propagate_labels', params)
     except Exception:  # provenance is best-effort, as everywhere else
         pass
 
 
-__all__ = ['concat_studies', 'propagate_labels']
+__all__ = ['concat_studies', 'propagate_labels', 'propagation_columns']

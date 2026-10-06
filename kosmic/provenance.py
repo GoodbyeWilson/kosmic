@@ -216,6 +216,7 @@ _STAGE_TITLES = {
     'annotate': 'Cell-type annotation',
     'annotate_manual': 'Manual cell-type relabelling',
     'propagate_labels': 'Cell-type labels from the atlas',
+    'subcluster': 'Subclustering',
     'embedding': 'HVG / PCA / batch correction',
     'subset': 'Cell-type subset',
     'filter_dataset': 'Pre-analysis cell filter',
@@ -265,12 +266,18 @@ def _abbrev_value(key: str, value, limit: int = _VALUE_LIMIT) -> str:
     return f"{head}, ... ({len(text):,} chars -- full value in provenance.json)"
 
 
+# Stages whose every entry is a separate result rather than a re-run of
+# the one before: each subclustering refines a different population.
+_EVERY_ENTRY_STAGES = frozenset({'subcluster'})
+
+
 def _final_stages(stages: list) -> list:
     """Keep the last run of each stage, noting how many there were.
 
     Re-running clustering or DE overwrites what came before, so listing
     every attempt as an equal makes the document describe settings that
     produced nothing. The count is kept so nothing is hidden silently.
+    Every entry of a stage in _EVERY_ENTRY_STAGES is kept.
     """
     counts = {}
     for st in stages:
@@ -280,7 +287,9 @@ def _final_stages(stages: list) -> list:
         latest[st.get('stage')] = st
     out = []
     for st in stages:
-        if latest.get(st.get('stage')) is st:
+        if st.get('stage') in _EVERY_ENTRY_STAGES:
+            out.append(dict(st))
+        elif latest.get(st.get('stage')) is st:
             entry = dict(st)
             entry['_n_runs'] = counts.get(st.get('stage'), 1)
             out.append(entry)

@@ -1,7 +1,8 @@
-# Intent-named wrappers around QMessageBox: info / warning / error / confirm.
+# Intent-named wrappers around QMessageBox: info / warning / error / choose /
+# confirm.
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
@@ -22,6 +23,29 @@ def warning(parent: Optional[QWidget], title: str, text: str) -> None:
 def error(parent: Optional[QWidget], title: str, text: str) -> None:
     """Show an error. Use for failed operations / caught exceptions."""
     QMessageBox.critical(parent, title, text)
+
+
+def choose(parent: Optional[QWidget], title: str, text: str,
+           options: Sequence[str], *, escape: Optional[str] = None) -> Optional[str]:
+    """Ask the user to pick one of 'options', shown as buttons in order.
+
+    Returns the label of the button clicked. Esc or closing the box
+    returns 'escape' when it is one of the options, else None.
+    """
+    box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=parent)
+    buttons = {}
+    for label in options:
+        buttons[label] = box.addButton(label, QMessageBox.ButtonRole.ActionRole)
+    if options:
+        box.setDefaultButton(buttons[options[0]])
+    if escape in buttons:
+        box.setEscapeButton(buttons[escape])
+    box.exec()
+    clicked = box.clickedButton()
+    for label, button in buttons.items():
+        if button is clicked:
+            return label
+    return escape if escape in buttons else None
 
 
 def confirm(parent: Optional[QWidget], title: str, text: str, *,

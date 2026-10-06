@@ -1,10 +1,11 @@
 # Cluster
 
 Turns a normalised matrix into cell types, in three stages the sidebar
-shows as cards: **PCA**, **Clustering**, **Annotate**. The UMAP fills
-the screen; the *Elbow Plot* tab sits beside it, and a strip of
-resolution thumbnails runs underneath. Each card says what it did once
-it has run; *View full report* gives the numbers.
+shows as cards: **PCA**, **Clustering**, **Annotate**. A fourth card,
+**Subcluster**, refines the labels of one population at a time. The
+UMAP fills the screen; the *Elbow Plot* tab sits beside it, and a strip
+of resolution thumbnails runs underneath. Each card says what it did
+once it has run; *View full report* gives the numbers.
 
 ![Cluster: PCA, Clustering and Annotate cards; the UMAP coloured by cell type; Elbow Plot and Annotate tabs above it](img/cluster.png)
 
@@ -166,6 +167,55 @@ Whatever the method, go to **Marker Check** next and look. Automated
 annotation is right often enough to be trusted and wrong often enough
 that you must not.
 
+## Subcluster
+
+Refines the labels of one population — the cardiomyocyte or fibroblast
+states within a cell type, or a cluster whose markers look mixed. The
+population is given its own highly variable genes, PCA, Harmony,
+neighbour graph, UMAP and Leiden clusters, because the genes and
+components chosen over every cell are the ones that separate the major
+cell types, not the states within one of them.
+
+1. Colour the UMAP by the column that defines the population, usually
+   `leiden` or `cell_type`, and click a cell of it. The other groups
+   turn grey, and a bar above the plot names the selection and its cell
+   count. Ctrl-click adds or removes groups of the same column, so two
+   clusters of one cell type can be subclustered together. Clicking
+   empty space clears the selection.
+2. Check the settings in the **Subcluster** card. They start from how
+   the study itself was embedded and clustered: HVG count, Harmony and
+   its batch key, PCs, neighbours and resolution. Click **Subcluster** in
+   the bar.
+3. The plot and the Annotate controls now show only the population,
+   and the bar reads *All cells › …*. PCA and Clustering are greyed out,
+   because they act on the whole study. Name the subclusters as you would
+   name clusters: from the top differential genes, by hand, or with any
+   of the annotation methods. **Re-run** with only a new resolution keeps
+   the population's UMAP and the labels given so far; changing any other
+   setting subclusters it afresh.
+4. **Apply** writes the result onto the study and saves it. **Discard**
+   closes the population and leaves the study as it was. Switching study
+   or closing KOSMIC with a population open asks which.
+
+Applying writes two columns:
+
+- `obs['leiden_sub']` — every cell's cluster, with the population's
+  cells split as `<group>.<subcluster>`: `7.0` and `7.1`, `7+12.0` when
+  clusters 7 and 12 were taken together, or `Fibroblast.0` when the
+  population was a cell type. Every other cell keeps its `leiden` id.
+  Colour by `leiden_sub` and click a subcluster to refine it further,
+  which gives ids such as `7.1.0`.
+- `obs['cell_type']` — the labels the population's cells were given.
+  A cell whose label you did not change keeps it.
+
+`leiden` and the study's UMAP are not changed. Cells marked 'exclude'
+are left out of the population, as in PCA and Clustering, and keep their
+labels. A population needs at least 50 cells, and Harmony is skipped
+when its cells come from a single batch. Running clustering on the whole
+study again removes `leiden_sub`, because its ids name the old clusters;
+the cell types it gave are kept. An automated annotation of the whole
+study, or *Undo Changes*, replaces those cell types too, and asks first.
+
 ## What is saved
 
 `obs['leiden']`, `obs['cell_type']`, the PCA and UMAP coordinates, the
@@ -180,3 +230,11 @@ cluster table are recorded when you save, as a separate stage listing
 each change (cluster, old label, new label, number of cells), so the
 Methods page can say which labels were assigned automatically and which
 were changed by hand.
+
+Each applied subclustering is recorded as a *Subclustering* stage: the
+column and the groups taken, the number of cells from each group and of
+excluded cells left out, the settings the population was embedded and
+clustered with, the annotation method and any hand relabels (each with
+the resolution it was made at), and each subcluster's id, label and
+size, with the groups its cells came from when there were several. The
+report lists every subclustering, not only the last.

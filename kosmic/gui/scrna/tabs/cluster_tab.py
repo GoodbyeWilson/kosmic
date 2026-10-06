@@ -27,6 +27,9 @@ from kosmic.gui.shared.widgets import (
 )
 from kosmic.paths import processed_data_dir, processed_h5ad_path
 from kosmic.gui.shared import borderless, dialogs, run_worker
+from kosmic.scrna.cluster.subcluster import (
+    EARLIER_EDITS_KEY, SUBCLUSTER_COLUMN, natural_key,
+)
 
 
 def _refresh_style(widget) -> None:
@@ -339,6 +342,13 @@ class ClusteringWorker(BaseWorker):
             uns_keys=('neighbors', 'rank_genes_groups', 'leiden', 'umap'),
             obsp_keys=('connectivities', 'distances'))
         self.adata = full
+        # Subcluster ids name the previous clusters; the labels they gave
+        # stay in 'cell_type' (ADR-008).
+        from kosmic.scrna.cluster.subcluster import clear_subclusters
+        if clear_subclusters(full):
+            self.progress.emit(
+                "Removed 'leiden_sub': its ids named the previous clusters. "
+                "The cell types it gave are kept.")
 
         self.progress.emit(f"Saving to {self.output_path}...")
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -508,6 +518,74 @@ class TSNEWorker(BaseWorker):
         return self.adata
 
 
+class SubclusterWorker(BaseWorker):
+    """
+    Open a population in focus mode: subset it, embed and cluster it.
+
+    Given an open 'focus' and only a new resolution, re-runs Leiden on
+    its existing graph instead. Emits 'finished_ok' with the Focus.
+    """
+
+    def __init__(self, adata, column: str, groups: list, settings: dict, *,
+                 honour_roles: bool = True, focus=None):
+        super().__init__()
+        self.adata = adata
+        self.column = column
+        self.groups = list(groups)
+        self.settings = dict(settings)
+        self.honour_roles = honour_roles
+        self.focus = focus
+
+    def _run(self):
+        from kosmic.scrna.cluster import subcluster
+
+        self.progress_pct.emit(5)
+        if self.focus is not None:
+            # Not kept here: the finished worker outlives the focus, and
+            # the population's copy of the matrix would stay in memory.
+            focus, self.focus = self.focus, None
+            subcluster.recluster(focus, self.settings['resolution'],
+                                 self.progress.emit)
+            self.progress_pct.emit(100)
+            return focus
+        focus = subcluster.select_population(
+            self.adata, self.column, self.groups,
+            honour_roles=self.honour_roles)
+        self.progress.emit(
+            f"Subclustering {focus.adata.n_obs:,} cells of {focus.column} "
+            f"{', '.join(focus.groups)}"
+            + (f" ({focus.n_excluded:,} excluded cells left out)"
+               if focus.n_excluded else "") + "...")
+        subcluster.embed_and_cluster(focus, self.settings, self.progress.emit)
+        self.progress_pct.emit(100)
+        return focus
+
+
+class _SaveStudyWorker(BaseWorker):
+    """Write a study to its file through a temporary name, so a failed
+    write leaves the original intact. 'finished_ok' carries the path."""
+
+    def __init__(self, adata, path: str):
+        super().__init__()
+        self.adata = adata
+        self.path = str(path)
+
+    def _run(self):
+        _save_study(self.adata, self.path, self.progress.emit)
+        return self.path
+
+
+def _save_study(adata, path: str, progress=None) -> None:
+    """Write 'adata' to 'path' via a temporary file renamed into place."""
+    import os
+    target = Path(path)
+    if progress is not None:
+        progress(f"Saving {target.name}...")
+    tmp = target.with_name(target.name + '.tmp')
+    adata.write_h5ad(str(tmp))
+    os.replace(tmp, target)
+
+
 # ---------------------------------------------------------------------------
 # Interactive UMAP Widget
 # ---------------------------------------------------------------------------
@@ -538,7 +616,8 @@ def _viridis_color(t: float) -> str:
 
 
 def _label_sort_key(label):
-    """Numbered clusters first in numeric order, then names; 'nan' last.
+    """Numbered clusters first in numeric order, then names in natural
+    order ('7.2' before '7.10'); 'nan' last.
 
     A study whose excluded donors were never clustered carries NaN in
     obs['leiden'], which reaches here as the string 'nan'. Mixing int and
@@ -546,10 +625,10 @@ def _label_sort_key(label):
     """
     text = str(label)
     if text.isdigit():
-        return (0, int(text), '')
+        return (0, int(text), [])
     if text.lower() in ('nan', 'none', ''):
-        return (2, 0, text)
-    return (1, 0, text)
+        return (2, 0, [text])
+    return (1, 0, natural_key(text))
 
 
 class _UMAPWidget(QWidget):
@@ -558,10 +637,15 @@ class _UMAPWidget(QWidget):
 
     Supports coloring by categorical obs columns (discrete tab20 palette),
     continuous obs columns (viridis gradient), or gene expression.
+
+    With a categorical column shown, clicking a cell selects its group
+    and Ctrl-click adds or removes groups of the same column; the other
+    groups are greyed out. Clicking empty space clears the selection.
     """
 
     color_by_changed = pyqtSignal(str)  # emitted when user changes selection
     tsne_computed = pyqtSignal(object)  # emitted when background t-SNE finishes
+    selection_changed = pyqtSignal()    # groups clicked on the embedding
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -573,6 +657,10 @@ class _UMAPWidget(QWidget):
         self._embedding = 'umap'  # 'umap' or 'tsne'
         self._tsne_worker = None
         self._computing_tsne = False
+        self._drawn = None        # indices of the cells drawn
+        self._selectable = True
+        self._sel_col = None      # column the selected groups belong to
+        self._sel_groups = []
 
         layout = borderless(QVBoxLayout, self)
 
@@ -648,6 +736,7 @@ class _UMAPWidget(QWidget):
         self._tooltip.setVisible(False)
         self._plot.addItem(self._tooltip)
         self._scatter.sigHovered.connect(self._on_hover)
+        self._plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
 
         layout.addWidget(self._plot, 1)
 
@@ -656,8 +745,33 @@ class _UMAPWidget(QWidget):
     def set_adata(self, adata):
         """Store reference and populate color-by combo with obs columns."""
         self._adata = adata
+        self._reset_selection()
         self._populate_color_combo()
         self._populate_gene_completer()
+
+    def selection(self):
+        """'(column, groups, n_cells)' for the selected groups, or None."""
+        if not self._sel_groups or self._values is None:
+            return None
+        n = int(np.isin(np.asarray(self._values, dtype=str), self._sel_groups).sum())
+        return self._sel_col, list(self._sel_groups), n
+
+    def clear_selection(self):
+        if self._sel_groups:
+            self._reset_selection()
+            self._recolor()
+
+    def set_selectable(self, selectable: bool):
+        """Allow or stop selecting groups by clicking (off in focus mode)."""
+        self._selectable = selectable
+        if not selectable:
+            self.clear_selection()
+
+    def _reset_selection(self):
+        had = bool(self._sel_groups)
+        self._sel_col, self._sel_groups = None, []
+        if had:
+            self.selection_changed.emit()
 
     def build_toolbar(self):
         """Build a horizontal toolbar widget with visualization controls."""
@@ -686,10 +800,15 @@ class _UMAPWidget(QWidget):
         return toolbar
 
     def set_data_categorical(self, coords: np.ndarray, labels: np.ndarray,
-                              info_text: str = ""):
-        """Plot embedding colored by categorical labels (clusters, sample, etc)."""
-        # Clear legend overlay if showing
+                              info_text: str = "", highlight=None):
+        """Plot embedding colored by categorical labels (clusters, sample, etc).
+
+        With 'highlight', a list of labels, every other label is drawn grey.
+        """
+        # Clear legend overlay if showing. Hidden first: deleteLater waits
+        # for the event loop, and until then it paints over its successor.
         if self._legend_overlay is not None:
+            self._legend_overlay.hide()
             self._legend_overlay.deleteLater()
             self._legend_overlay = None
         self._coords = coords
@@ -715,7 +834,14 @@ class _UMAPWidget(QWidget):
         # in overlap/boundary regions. The same permutation also picks the
         # displayed subset when the dataset is over the display cap.
         order = self._draw_order(n_total)
+        selected = None
+        if highlight:
+            # Selected cells on top, so the grey of the rest never hides them.
+            selected = np.isin(label_arr[order], list(highlight))
+            order = np.concatenate([order[~selected], order[selected]])
+            selected = np.sort(selected)
         n_shown = len(order)
+        self._drawn = order
 
         # Alpha scales down with cell count: opaque for small datasets, translucent
         # for large ones so overlapping points blend instead of fully occluding
@@ -728,9 +854,13 @@ class _UMAPWidget(QWidget):
         # building a dict and a QBrush per cell was the slow part for
         # atlas-sized studies.
         brushes = []
-        for i in range(n_categories):
-            color = pg.mkColor(_TAB20[i % len(_TAB20)])
-            color.setAlpha(alpha)
+        for i, lb in enumerate(unique):
+            if highlight and lb not in highlight:
+                color = pg.mkColor(get_color('fg_tertiary'))
+                color.setAlpha(min(alpha, 90))
+            else:
+                color = pg.mkColor(_TAB20[i % len(_TAB20)])
+                color.setAlpha(alpha)
             brushes.append(pg.mkBrush(color))
         shown_labels = label_arr[order].tolist()
         idx = [label_to_idx[lb] for lb in shown_labels]
@@ -744,7 +874,13 @@ class _UMAPWidget(QWidget):
         # Auto-size points for cell count
         auto_size = max(1, min(4, 5000 / n_shown))
         self._point_size = int(auto_size)
-        self._scatter.setSize(self._point_size)
+        if selected is not None:
+            # Two pixels larger: a selected group whose palette colour is
+            # grey or brown would otherwise not stand out from the rest.
+            self._scatter.setSize(np.where(selected, self._point_size + 2,
+                                           self._point_size))
+        else:
+            self._scatter.setSize(self._point_size)
 
         if not info_text:
             info_text = f"{self._shown_text(n_shown, n_total)}  |  {n_categories} groups"
@@ -828,6 +964,8 @@ class _UMAPWidget(QWidget):
         self._info_label.setText("No data \u2014 run clustering to see preview")
         self._coords = None
         self._values = None
+        self._drawn = None
+        self._reset_selection()
         self._adata = None          # the widget must not keep the study alive
         self._legend_entries = []
         self._key_btn.setVisible(False)
@@ -984,6 +1122,7 @@ class _UMAPWidget(QWidget):
         if not text or self._adata is None or self._obsm_key not in self._adata.obsm:
             return
         self._color_key = text
+        self._reset_selection()     # groups of another column
         self._gene_edit.clear()
         self._recolor()
 
@@ -1003,6 +1142,7 @@ class _UMAPWidget(QWidget):
                 return
 
         self._color_key = f"gene:{gene}"
+        self._reset_selection()
         coords = self._adata.obsm[self._obsm_key]
 
         # Get expression values
@@ -1066,7 +1206,8 @@ class _UMAPWidget(QWidget):
             n_groups = len(set(labels))
             self.set_data_categorical(
                 coords, labels,
-                f"{col}  |  {len(coords):,} cells  |  {n_groups} groups"
+                f"{col}  |  {len(coords):,} cells  |  {n_groups} groups",
+                highlight=self._sel_groups if self._sel_col == col else None,
             )
         else:
             values = series.values.astype(float)
@@ -1075,6 +1216,50 @@ class _UMAPWidget(QWidget):
                 f"{col}  |  {len(coords):,} cells  |  "
                 f"range {np.nanmin(values):.1f} \u2013 {np.nanmax(values):.1f}"
             )
+
+    # ── Selection ──
+
+    def _on_plot_clicked(self, ev):
+        """Click: select the clicked group; Ctrl-click: add or remove it."""
+        col = self._color_key
+        if (not self._selectable or self._is_continuous or self._drawn is None
+                or ev.button() != Qt.MouseButton.LeftButton
+                or self._adata is None or col not in self._adata.obs.columns):
+            return
+        ctrl = bool(ev.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        label = self._label_at(ev.scenePos())
+        if label is None:
+            if not ctrl:
+                self.clear_selection()
+            return
+        groups = self._sel_groups if self._sel_col == col else []
+        if ctrl:
+            groups = ([g for g in groups if g != label] if label in groups
+                      else groups + [label])
+        else:
+            groups = [] if groups == [label] else [label]
+        self._sel_col, self._sel_groups = (col if groups else None), groups
+        self._recolor()
+        self.selection_changed.emit()
+
+    def _label_at(self, scene_pos, max_px: float = 8.0):
+        """The label of the drawn cell nearest 'scene_pos', if one is
+        within 'max_px' screen pixels of it."""
+        vb = self._plot.getPlotItem().vb
+        if not vb.sceneBoundingRect().contains(scene_pos):
+            return None
+        point = vb.mapSceneToView(scene_pos)
+        px_w, px_h = vb.viewPixelSize()
+        if not px_w or not px_h:
+            return None
+        xy = np.asarray(self._coords, dtype=float)[self._drawn]
+        d2 = (((xy[:, 0] - point.x()) / px_w) ** 2
+              + ((xy[:, 1] - point.y()) / px_h) ** 2)
+        d2 = np.where(np.isnan(d2), np.inf, d2)
+        i = int(np.argmin(d2))
+        if d2[i] > max_px ** 2:
+            return None
+        return str(np.asarray(self._values)[self._drawn[i]])
 
     # ── Hover ──
 
@@ -1117,6 +1302,7 @@ class _UMAPWidget(QWidget):
             return
         # Remove existing if any
         if self._legend_overlay is not None:
+            self._legend_overlay.hide()
             self._legend_overlay.deleteLater()
             self._legend_overlay = None
 
@@ -1332,6 +1518,18 @@ class ClusterTab(SidebarPage):
         self._pca_worker = None
         self._sweep_results = []
         self._suggested_pcs = None
+        # Focus mode (ADR-008): the open population, the annotation source
+        # holding it, the settings it was asked for, and the study it was
+        # taken from (a result for any other study is not shown).
+        self._focus = None
+        self._focus_source = None
+        self._focus_requested = {}
+        self._focus_target = None
+        self._focus_worker = None
+        self._focus_running = False
+        self._focus_running_text = ""
+        self._save_worker = None
+        self._saving = False
 
         self._setup_ui()
 
@@ -1358,6 +1556,11 @@ class ClusterTab(SidebarPage):
         self._annot_card.set_summary(["Not run yet"])
         left_layout.addWidget(self._annot_card)
         self._accordion.add_card('annotate', self._annot_card)
+
+        self._focus_card = StageSummaryCard("Subcluster", icon="microscope")
+        self._focus_card.set_summary(["Click a group on the UMAP"])
+        left_layout.addWidget(self._focus_card)
+        self._accordion.add_card('subcluster', self._focus_card)
 
         left_layout.addStretch()
         self._accordion.finalize()
@@ -1604,10 +1807,86 @@ class ClusterTab(SidebarPage):
         cluster_page_layout.addWidget(self.run_clustree_btn)
         cluster_page_layout.addStretch()
 
+        # ═══ Drawer page: Subcluster (focus mode, ADR-008) ═══
+        focus_page = QWidget()
+        focus_layout = QVBoxLayout(focus_page)
+        focus_layout.setContentsMargins(0, 4, 0, 0)
+        focus_layout.setSpacing(8)
+
+        focus_hint = SecondaryLabel(
+            "Click a cluster or cell type on the UMAP to select it; "
+            "Ctrl-click adds groups of the same column. The selection gets "
+            "its own genes, PCA, graph, UMAP and clusters, and is annotated "
+            "on its own. The study is not changed until you apply the "
+            "result.")
+        focus_hint.setWordWrap(True)
+        focus_layout.addWidget(focus_hint)
+
+        self._focus_sel_label = SecondaryLabel("No selection")
+        self._focus_sel_label.setWordWrap(True)
+        focus_layout.addWidget(self._focus_sel_label)
+
+        focus_grid = QGridLayout()
+        focus_grid.setSpacing(4)
+        focus_grid.addWidget(QLabel("HVG count"), 0, 0)
+        self.focus_hvg_spin = NoScrollSpinBox()
+        self.focus_hvg_spin.setRange(500, 5000)
+        self.focus_hvg_spin.setSingleStep(500)
+        self.focus_hvg_spin.setValue(2000)
+        focus_grid.addWidget(self.focus_hvg_spin, 0, 1)
+        focus_grid.addWidget(QLabel("PCs"), 1, 0)
+        self.focus_pcs_spin = NoScrollSpinBox()
+        self.focus_pcs_spin.setRange(5, 100)
+        self.focus_pcs_spin.setValue(30)
+        focus_grid.addWidget(self.focus_pcs_spin, 1, 1)
+        focus_grid.addWidget(QLabel("Neighbors (k)"), 2, 0)
+        self.focus_neighbors_spin = NoScrollSpinBox()
+        self.focus_neighbors_spin.setRange(5, 100)
+        self.focus_neighbors_spin.setValue(15)
+        focus_grid.addWidget(self.focus_neighbors_spin, 2, 1)
+        focus_grid.addWidget(QLabel("Resolution"), 3, 0)
+        self.focus_resolution_spin = NoScrollDoubleSpinBox()
+        self.focus_resolution_spin.setRange(0.05, 5.0)
+        self.focus_resolution_spin.setSingleStep(0.1)
+        self.focus_resolution_spin.setValue(0.5)
+        self.focus_resolution_spin.setToolTip(
+            "Changing only the resolution re-runs Leiden on the population's\n"
+            "graph and keeps its UMAP and the labels given so far.")
+        focus_grid.addWidget(self.focus_resolution_spin, 3, 1)
+        focus_layout.addLayout(focus_grid)
+
+        self.focus_scale_check = QCheckBox("Scale genes before PCA")
+        focus_layout.addWidget(self.focus_scale_check)
+        self.focus_harmony_check = QCheckBox("Harmony batch correction")
+        focus_layout.addWidget(self.focus_harmony_check)
+        focus_batch_grid = QGridLayout()
+        focus_batch_grid.setSpacing(4)
+        focus_batch_grid.addWidget(QLabel("Batch key"), 0, 0)
+        self.focus_batch_combo = NoScrollComboBox()
+        self.focus_batch_combo.setEditable(True)
+        focus_batch_grid.addWidget(self.focus_batch_combo, 0, 1)
+        focus_batch_grid.addWidget(QLabel("Merge across"), 1, 0)
+        self.focus_merge_combo = NoScrollComboBox()
+        self.focus_merge_combo.setEditable(True)
+        focus_batch_grid.addWidget(self.focus_merge_combo, 1, 1)
+        focus_layout.addLayout(focus_batch_grid)
+        self.focus_harmony_check.toggled.connect(self.focus_batch_combo.setEnabled)
+        self.focus_harmony_check.toggled.connect(self.focus_merge_combo.setEnabled)
+        self.focus_batch_combo.setEnabled(False)
+        self.focus_merge_combo.setEnabled(False)
+
+        self.focus_run_btn = PrimaryButton("Subcluster selection")
+        self.focus_run_btn.setMinimumHeight(32)
+        self.focus_run_btn.setEnabled(False)
+        self.focus_run_btn.clicked.connect(self._run_focus)
+        focus_layout.addWidget(self.focus_run_btn)
+        focus_layout.addStretch()
+
         # ═══ Install the settings pages into their summary cards ═══
         self._pca_card.set_settings_widget(pca_page)
         self._cluster_card.set_settings_widget(cluster_page)
         self._annot_card.set_settings_widget(self.annotate_tab.controls_widget)
+        self._focus_card.set_settings_widget(focus_page)
 
         # ---- Right: preview area (tabbed: UMAP | Elbow Plot) ----
         right_layout = self.content_layout
@@ -1639,6 +1918,38 @@ class ClusterTab(SidebarPage):
         umap_container = QWidget()
         umap_container_layout = borderless(QVBoxLayout, umap_container)
         self._umap_widget.tsne_computed.connect(self._on_tsne_ready)
+        self._umap_widget.selection_changed.connect(self._update_focus_bar)
+
+        # Focus bar: the selected groups, then the open focus (ADR-008)
+        self._focus_bar = QFrame()
+        self._focus_bar.setObjectName("info_panel")
+        focus_bar_layout = QHBoxLayout(self._focus_bar)
+        focus_bar_layout.setContentsMargins(12, 6, 12, 6)
+        focus_bar_layout.setSpacing(8)
+        self._focus_bar_label = QLabel("")
+        self._focus_bar_label.setWordWrap(True)
+        focus_bar_layout.addWidget(self._focus_bar_label, 1)
+        self._focus_go_btn = PrimaryButton("Subcluster")
+        self._focus_go_btn.setToolTip(
+            "Subcluster the selection with the settings under Subcluster\n"
+            "in the sidebar (taken from how this study was clustered).")
+        self._focus_go_btn.clicked.connect(self._run_focus)
+        self._focus_clear_btn = SecondaryButton("Clear")
+        self._focus_clear_btn.clicked.connect(self._umap_widget.clear_selection)
+        self._focus_apply_btn = PrimaryButton("Apply")
+        self._focus_apply_btn.setToolTip(
+            "Write the subcluster ids (leiden_sub) and the cell types given\n"
+            "here onto the study, save it and record the subclustering.")
+        self._focus_apply_btn.clicked.connect(lambda: self._apply_focus())
+        self._focus_discard_btn = SecondaryButton("Discard")
+        self._focus_discard_btn.setToolTip(
+            "Close the population without changing the study.")
+        self._focus_discard_btn.clicked.connect(self._discard_focus)
+        for btn in (self._focus_go_btn, self._focus_clear_btn,
+                    self._focus_apply_btn, self._focus_discard_btn):
+            focus_bar_layout.addWidget(btn)
+        self._focus_bar.setVisible(False)
+        umap_container_layout.addWidget(self._focus_bar)
 
         # Visualization toolbar sits above the plot
         umap_container_layout.addWidget(self._umap_widget.build_toolbar())
@@ -1690,6 +2001,16 @@ class ClusterTab(SidebarPage):
         self._sweep_results = []
         self._suggested_pcs = None
         self._last_adata_version = -1
+        # An open focus goes with the study. A subclustering still running
+        # is left to finish (its thread cannot be stopped) and its result
+        # is not shown, because it is for a study no longer held.
+        self._focus = None
+        self._focus_source = None
+        self._focus_requested = {}
+        self._focus_target = None
+        self._umap_widget.set_selectable(True)
+        for card in (self._pca_card, self._cluster_card):
+            card.setEnabled(True)
         # Reset UI
         self._umap_widget.clear_plot()
         self._elbow_plot.clear_plot_items()
@@ -1703,6 +2024,7 @@ class ClusterTab(SidebarPage):
         # Reset annotate tab too
         if hasattr(self, 'annotate_tab'):
             self.annotate_tab.reset_state()
+        self._update_focus_bar()
 
     def set_project_directory(self, directory: str):
         self.project_dir = Path(directory)
@@ -1712,11 +2034,16 @@ class ClusterTab(SidebarPage):
         prev_adata = self.adata
         self.adata = adata
         self.file_path = file_path
+        if self._focus is not None and adata is not None:
+            # Focus mode shows the population. The study is still updated
+            # here, and shown again when the focus is closed.
+            return
 
         # Only repopulate combos if adata object actually changed
         if adata is not prev_adata:
             self._umap_widget.set_adata(adata)
             self._populate_harmony_keys()
+            self._fill_focus_defaults()
             # Forward to embedded annotate tab
             if hasattr(self, 'annotate_tab'):
                 self.annotate_tab.set_adata(adata)
@@ -1736,7 +2063,8 @@ class ClusterTab(SidebarPage):
 
     def _on_tsne_ready(self, adata):
         """Update our adata reference when background t-SNE completes."""
-        self.adata = adata
+        if self._focus is None:      # in focus mode it was the population's
+            self.adata = adata
 
     def _update_state(self):
         """Enable/disable buttons based on data state and show detected status."""
@@ -1794,6 +2122,8 @@ class ClusterTab(SidebarPage):
 
     def _update_preview(self):
         """Update the interactive embedding with current data."""
+        if self._focus is not None:   # the population is on show
+            return
         if self.adata is None:
             self._umap_widget.clear_plot()
             self._umap_stats_bar.setVisible(False)
@@ -1848,6 +2178,11 @@ class ClusterTab(SidebarPage):
 
     def _on_annotation_complete(self, message: str):
         """Handle annotation completing — refresh UMAP to show cell types."""
+        if self._focus is not None:
+            # The population was annotated; the study is untouched.
+            self._show_embedding(self._focus.adata, 'cell_type')
+            self._right_tabs.setCurrentIndex(1)
+            return
         # Pull updated adata from annotate tab
         if self.annotate_tab.adata is not None:
             self.adata = self.annotate_tab.adata
@@ -1868,25 +2203,27 @@ class ClusterTab(SidebarPage):
 
     def _update_umap_info_label(self):
         """Update the stats footer below the UMAP with cluster/annotation summary."""
-        if self.adata is None:
+        adata = self._focus.adata if self._focus is not None else self.adata
+        if adata is None:
             self._umap_stats_bar.setVisible(False)
             return
 
         parts = []
         # Cluster count
-        if 'leiden' in self.adata.obs.columns:
-            n_clusters = self.adata.obs['leiden'].nunique()
-            parts.append(f"{n_clusters} Leiden clusters")
-        elif 'clusters' in self.adata.obs.columns:
-            n_clusters = self.adata.obs['clusters'].nunique()
+        if 'leiden' in adata.obs.columns:
+            n_clusters = adata.obs['leiden'].nunique()
+            parts.append(f"{n_clusters} subclusters" if self._focus is not None
+                         else f"{n_clusters} Leiden clusters")
+        elif 'clusters' in adata.obs.columns:
+            n_clusters = adata.obs['clusters'].nunique()
             parts.append(f"{n_clusters} clusters")
 
         # Cell type count
-        if 'cell_type' in self.adata.obs.columns:
-            n_types = self.adata.obs['cell_type'].nunique()
+        if 'cell_type' in adata.obs.columns:
+            n_types = adata.obs['cell_type'].nunique()
             parts.append(f"{n_types} cell types annotated")
 
-        parts.append(f"{self.adata.n_obs:,} cells")
+        parts.append(f"{adata.n_obs:,} cells")
 
         # Rebuild the footer: evenly spaced stat cells with dividers
         while self._umap_stats_layout.count():
@@ -1976,6 +2313,7 @@ class ClusterTab(SidebarPage):
                 'resolution': round(float(self.resolution_spin.value()), 3),
                 'n_clusters': n_clusters,
             })
+        self._fill_focus_defaults()
         self._last_adata_version = self.main_window._adata_version
         # Forward to annotate tab (now has leiden clusters)
         if hasattr(self, 'annotate_tab'):
@@ -2421,6 +2759,7 @@ class ClusterTab(SidebarPage):
                     self.condition_combo.currentText().strip() or None
                     if harmony_on else None),
             })
+        self._fill_focus_defaults()
 
         # Show elbow plot and auto-set PCA spinner
         self._show_elbow_plot(adata)
@@ -2523,3 +2862,347 @@ class ClusterTab(SidebarPage):
             f"{self.hvg_spin.value():,} HVGs · {self.pca_compute_spin.value()} PCs",
             f"elbow at PC {suggested}",
         ])
+
+    # ------------------------------------------------------------------
+    # Focus mode: subcluster a population (ADR-008)
+    # ------------------------------------------------------------------
+
+    def _fill_focus_defaults(self):
+        """Prefill the Subcluster settings with how this study was embedded."""
+        if self.adata is None:
+            return
+        from kosmic import provenance
+        from kosmic.scrna.cluster.subcluster import focus_defaults
+        path = self.file_path or getattr(self.main_window, 'current_h5ad_path', None)
+        record = provenance.load(Path(path).parent) if path else None
+        d = focus_defaults(self.adata, record)
+        for combo, source in ((self.focus_batch_combo, self.batch_combo),
+                              (self.focus_merge_combo, self.condition_combo)):
+            combo.clear()
+            combo.addItems([source.itemText(i) for i in range(source.count())])
+        self.focus_hvg_spin.setValue(d['n_hvg'])
+        self.focus_pcs_spin.setValue(d['n_pcs'])
+        self.focus_neighbors_spin.setValue(d['n_neighbors'])
+        self.focus_resolution_spin.setValue(d['resolution'])
+        self.focus_scale_check.setChecked(d['scale'])
+        self.focus_batch_combo.setCurrentText(
+            d['harmony_batch_key'] or self.batch_combo.currentText())
+        self.focus_merge_combo.setCurrentText(d['harmony_merge_across'] or "")
+        self.focus_harmony_check.setChecked(d['harmony'])
+        self.focus_batch_combo.setEnabled(d['harmony'])
+        self.focus_merge_combo.setEnabled(d['harmony'])
+
+    def _focus_settings(self) -> dict:
+        return {
+            'n_hvg': self.focus_hvg_spin.value(),
+            'n_pcs': self.focus_pcs_spin.value(),
+            'harmony': self.focus_harmony_check.isChecked(),
+            'harmony_batch_key': self.focus_batch_combo.currentText().strip() or None,
+            'harmony_merge_across': self.focus_merge_combo.currentText().strip() or None,
+            'scale': self.focus_scale_check.isChecked(),
+            'n_neighbors': self.focus_neighbors_spin.value(),
+            'resolution': round(self.focus_resolution_spin.value(), 3),
+        }
+
+    def _focus_busy(self) -> bool:
+        return self._focus_running or self._saving
+
+    def _focus_has_work(self) -> bool:
+        """True when the population was annotated in focus mode."""
+        if self._focus is None:
+            return False
+        uns = self._focus.adata.uns
+        return (bool(self._focus_source and self._focus_source.records)
+                or bool(uns.get('manual_relabels'))
+                or bool(uns.get(EARLIER_EDITS_KEY)))
+
+    def _run_focus(self):
+        """Subcluster the selected groups, or re-run the open focus."""
+        from kosmic.scrna.cluster.subcluster import MIN_CELLS
+        if self.adata is None or self._focus_busy():
+            return
+        if self.annotate_tab.is_busy():
+            dialogs.warning(self, "Annotation running",
+                            "Wait for the annotation to finish, then run this.")
+            return
+        settings = self._focus_settings()
+        focus = self._focus
+        if focus is not None:
+            column, groups = focus.column, focus.groups
+            same = ({k: v for k, v in settings.items() if k != 'resolution'}
+                    == {k: v for k, v in self._focus_requested.items()
+                        if k != 'resolution'})
+            if not same and self._focus_has_work() and not dialogs.confirm(
+                    self, "Re-run subclustering",
+                    "These settings change the population's embedding, so it "
+                    "is subclustered afresh and the labels given to it here "
+                    "are lost. Continue?"):
+                return
+            reuse = focus if same else None
+        else:
+            selection = self._umap_widget.selection()
+            if selection is None:
+                dialogs.info(self, "Nothing selected",
+                             "Click a group on the UMAP first; Ctrl-click "
+                             "adds more groups of the same column.")
+                return
+            column, groups, n_cells = selection
+            if n_cells < MIN_CELLS:
+                dialogs.info(self, "Too few cells",
+                             f"The selection has {n_cells:,} cells; at least "
+                             f"{MIN_CELLS} are needed to subcluster them.")
+                return
+            reuse = None
+        self._focus_requested = settings
+        self._focus_target = self.adata
+        self._focus_running_text = (
+            f"Re-clustering {column} {', '.join(groups)} at resolution "
+            f"{settings['resolution']:g}..." if reuse is not None
+            else f"Subclustering {column} {', '.join(groups)}...")
+        self._reset_progress()
+        self.annotate_tab.setEnabled(False)
+        self.annotate_tab.controls_widget.setEnabled(False)
+        self._focus_running = True
+        self._focus_worker = SubclusterWorker(
+            self.adata, column, groups, settings,
+            honour_roles=self.honour_roles_check.isChecked(), focus=reuse)
+        run_worker(
+            self._focus_worker,
+            on_finished=self._on_focus_ready,
+            on_failed=self._on_focus_failed,
+            on_progress=self._on_status,
+            on_progress_pct=self._on_progress,
+        )
+        self._update_focus_bar()
+
+    def _on_focus_ready(self, focus):
+        self._focus_running = False
+        self._reset_progress()
+        self.annotate_tab.setEnabled(True)
+        self.annotate_tab.controls_widget.setEnabled(True)
+        if self.adata is None or self.adata is not self._focus_target:
+            self._update_focus_bar()        # the study was closed meanwhile
+            return
+        if focus is self._focus:            # re-clustered at a new resolution
+            self.annotate_tab.set_source(self._focus_source)
+            self._show_embedding(focus.adata, 'leiden')
+        else:
+            self._enter_focus(focus)
+        self._on_status(
+            f"{focus.adata.obs['leiden'].nunique()} subclusters of "
+            f"{focus.column} {', '.join(focus.groups)} "
+            f"({focus.adata.n_obs:,} cells).")
+        self._update_focus_bar()
+
+    def _on_focus_failed(self, message: str):
+        self._focus_running = False
+        self._reset_progress()
+        self.annotate_tab.setEnabled(True)
+        self.annotate_tab.controls_widget.setEnabled(True)
+        self._update_focus_bar()
+        dialogs.warning(self, "Subclustering Failed", message)
+
+    def _enter_focus(self, focus):
+        from kosmic.gui.scrna.tabs.annotate_tab import SubsetSource
+        self._focus = focus
+        self._focus_source = SubsetSource(focus.adata)
+        self.annotate_tab.set_source(self._focus_source)
+        self._umap_widget.set_selectable(False)
+        self._accordion.collapse_all()
+        for card in (self._pca_card, self._cluster_card):
+            card.setEnabled(False)
+        self._accordion.toggle('annotate')
+        self._show_embedding(focus.adata, 'leiden')
+        self._right_tabs.setCurrentIndex(1)
+
+    def _exit_focus(self, color: Optional[str] = None):
+        self._focus = None
+        self._focus_source = None
+        self._focus_requested = {}
+        self.annotate_tab.set_source(None)
+        self._umap_widget.set_selectable(True)
+        for card in (self._pca_card, self._cluster_card):
+            card.setEnabled(True)
+        if self.adata is not None:
+            self._show_embedding(self.adata, color or (
+                'cell_type' if 'cell_type' in self.adata.obs.columns else 'leiden'))
+        self._update_focus_bar()
+
+    def _show_embedding(self, adata, color: str):
+        """Show 'adata''s UMAP coloured by the obs column 'color'."""
+        w = self._umap_widget
+        w.set_adata(adata)
+        w._switch_embedding('umap')
+        idx = w._color_combo.findText(color)
+        if idx >= 0:
+            w._color_combo.blockSignals(True)
+            w._color_combo.setCurrentIndex(idx)
+            w._color_combo.blockSignals(False)
+        w._color_key = color
+        w._recolor()
+        self._update_umap_info_label()
+
+    def _focus_annotation(self):
+        """The last automated annotation and the hand relabels made in
+        focus mode, as the Annotate panel recorded them."""
+        records = self._focus_source.records if self._focus_source else []
+        annotation = next((dict(p) for stage, p in reversed(records)
+                           if stage == 'annotate'), None)
+        if annotation:
+            for key in ('clusters', 'cluster_col'):
+                annotation.pop(key, None)
+        edits = next((p.get('edits') for stage, p in reversed(records)
+                      if stage == 'annotate_manual'), None)
+        return annotation, edits
+
+    def _apply_focus(self, wait: bool = False) -> bool:
+        """Write the population's subclusters and labels onto the study,
+        save it and record a 'subcluster' stage.
+
+        The save runs in the background unless 'wait' is set. Returns
+        False when nothing was applied.
+        """
+        from kosmic.scrna.cluster.subcluster import apply_focus
+        focus = self._focus
+        if focus is None:
+            return False
+        if self._focus_busy() or self.annotate_tab.is_busy():
+            dialogs.warning(self, "Still running",
+                            "Wait for the running step to finish, then apply.")
+            return False
+        ws = self.main_window
+        full = getattr(ws, 'current_adata', None)
+        path = getattr(ws, 'current_h5ad_path', None)
+        if full is None or not path:
+            dialogs.warning(self, "No study", "No study file is open to apply this to.")
+            return False
+        self.annotate_tab._record_manual_relabels()
+        annotation, edits = self._focus_annotation()
+        try:
+            params = apply_focus(full, focus, annotation=annotation, manual_edits=edits)
+        except ValueError as exc:
+            dialogs.warning(self, "Not Applied", str(exc))
+            return False
+
+        self.adata = full
+        self._exit_focus('cell_type' if params['n_cells_relabelled']
+                         else SUBCLUSTER_COLUMN)
+        if hasattr(ws, 'notify_adata_changed'):
+            ws.notify_adata_changed()
+            self._last_adata_version = ws._adata_version
+        if wait:
+            try:
+                _save_study(full, path, self._on_status)
+            except Exception as exc:  # noqa: BLE001 -- reported to the user
+                self._on_focus_save_failed(str(exc))
+                return False
+            self._on_focus_saved(params)
+            return True
+        self._saving = True
+        self._save_worker = _SaveStudyWorker(full, path)
+        run_worker(
+            self._save_worker,
+            on_finished=lambda _path: self._on_focus_saved(params),
+            on_failed=self._on_focus_save_failed,
+            on_progress=self._on_status,
+        )
+        self._update_focus_bar()
+        return True
+
+    def _on_focus_saved(self, params: dict):
+        self._saving = False
+        if hasattr(self.main_window, 'record_provenance'):
+            self.main_window.record_provenance('subcluster', params)
+        groups = ', '.join(params['groups'])
+        message = (
+            f"Applied {params['n_subclusters']} subclusters of "
+            f"{params['column']} {groups} to '{SUBCLUSTER_COLUMN}'; "
+            f"{params['n_cells_relabelled']:,} cells took a new cell type.")
+        self._on_status(message + " Study saved.")
+        self._update_focus_bar()
+        self._update_state()
+
+    def _on_focus_save_failed(self, message: str):
+        self._saving = False
+        self._update_focus_bar()
+        dialogs.error(
+            self, "Not Saved",
+            "The subclusters were applied to the study in memory, but the "
+            f"file could not be written:\n\n{message}")
+
+    def _discard_focus(self):
+        if self._focus is None or self._focus_busy():
+            return
+        f = self._focus
+        if self._focus_has_work() and not dialogs.confirm(
+                self, "Discard subclustering",
+                f"Discard the subclusters of {f.column} {', '.join(f.groups)} "
+                "and the labels given to them? The study is not changed."):
+            return
+        self._exit_focus()
+
+    def settle_focus(self, *, allow_cancel: bool = False) -> bool:
+        """Before the study is closed: ask whether to apply or discard an
+        open focus (ADR-008).
+
+        Returns False only when 'allow_cancel' is set and the user
+        cancels, or chose Apply and it could not be done.
+        """
+        if self._focus is None:
+            return True
+        f = self._focus
+        options = ['Apply', 'Discard'] + (['Cancel'] if allow_cancel else [])
+        choice = dialogs.choose(
+            self, "Subclustering not applied",
+            f"The subclustering of {f.column} {', '.join(f.groups)} has not "
+            "been applied to the study. Apply it (the study is saved) or "
+            "discard it?",
+            options, escape='Cancel' if allow_cancel else 'Discard')
+        if choice == 'Cancel':
+            return False
+        if choice == 'Apply':
+            if self._apply_focus(wait=True):
+                return True
+            if allow_cancel:
+                return False
+        self._exit_focus()
+        return True
+
+    def _update_focus_bar(self):
+        """Show the selection, a subclustering in progress, or the open focus."""
+        running, saving = self._focus_running, self._saving
+        focus = self._focus
+        selection = self._umap_widget.selection() if focus is None else None
+        if focus is not None:
+            n_sub = focus.adata.obs['leiden'].nunique()
+            text = (f"All cells  ›  {focus.column} {', '.join(focus.groups)}"
+                    f"  ·  {focus.adata.n_obs:,} cells  ·  "
+                    f"{n_sub} subclusters")
+            summary = [f"{focus.column} {', '.join(focus.groups)}",
+                       f"{n_sub} subclusters · resolution "
+                       f"{focus.settings.get('resolution', 0):g}"]
+        elif selection is not None:
+            column, groups, n = selection
+            text = f"Selected {column} {', '.join(groups)}  ·  {n:,} cells"
+            summary = [f"Selected: {column} {', '.join(groups)}", f"{n:,} cells"]
+        else:
+            text = ""
+            summary = ["Click a group on the UMAP"]
+        if running:
+            text = self._focus_running_text
+        self._focus_bar_label.setText(text)
+        self._focus_bar.setVisible(bool(text))
+        self._focus_go_btn.setVisible(focus is None)
+        self._focus_clear_btn.setVisible(focus is None)
+        self._focus_apply_btn.setVisible(focus is not None)
+        self._focus_discard_btn.setVisible(focus is not None)
+        for btn in (self._focus_go_btn, self._focus_clear_btn,
+                    self._focus_apply_btn, self._focus_discard_btn):
+            btn.setEnabled(not running and not saving)
+        self._focus_card.set_summary(summary)
+        self._focus_sel_label.setText(summary[0])
+        self.focus_run_btn.setText("Re-run" if focus is not None
+                                   else "Subcluster selection")
+        self.focus_run_btn.setEnabled(
+            not running and not saving
+            and (focus is not None or selection is not None))

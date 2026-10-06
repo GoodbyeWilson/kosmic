@@ -300,6 +300,10 @@ class ScRNAWorkspace(QWidget):
         Returns True when something was released.
         """
         import gc
+        # A subclustering open in the Cluster step is applied or discarded
+        # first, while the study it belongs to is still here (ADR-008).
+        if self.current_adata is not None:
+            self.cluster_tab.settle_focus()
         had = self.current_adata is not None
         self.current_adata = None
         self.current_h5ad_path = None
