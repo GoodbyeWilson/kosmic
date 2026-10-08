@@ -25,7 +25,7 @@ class _VolcanoControls(FigureControls):
 
         self.point_size = QSpinBox()
         self.point_size.setRange(1, 30)
-        self.point_size.setValue(9)
+        self.point_size.setValue(3)
         self.point_size.valueChanged.connect(self.changed)
         self.add_row("Point size:", self.point_size)
 
@@ -39,6 +39,7 @@ class _VolcanoControls(FigureControls):
         self.pval_type.addItems(["Adjusted (FDR)", "Nominal"])
         self.pval_type.currentIndexChanged.connect(self.changed)
         self.add_row("Y-axis p-value:", self.pval_type)
+        self.add_lfc_gate()
 
         # 0 = automatic range.
         self.x_limit = QDoubleSpinBox()
@@ -88,23 +89,18 @@ class VolcanoPage(FigurePage):
         pcol = 'pvals' if ctrl.pval_type.currentIndex() == 1 else 'pvals_adj'
         xlim = ctrl.x_limit.value() or None
         ylim = ctrl.y_limit.value() or None
+        gate = ctrl.lfc_gate.value()
         figsize = ctrl.figsize.get_figsize() or (8, 8)
         font_sizes = self._font_sizes()
 
-        gene_highlights = set()
-        cov = getattr(de, 'pathway_coverage', None) or {}
-        for info in cov.values():
-            gene_highlights.update(info.get('genes', []))
-
         def _render(dr=dr, d=d, c=c, dn=dn, ml=ml, ps=ps, cs=cs, pcol=pcol,
-                    xlim=xlim, ylim=ylim, figsize=figsize, font_sizes=font_sizes,
-                    gene_highlights=gene_highlights):
+                    xlim=xlim, ylim=ylim, gate=gate, figsize=figsize,
+                    font_sizes=font_sizes):
             from kosmic.visualisation.de.volcano import create_volcano_plot
             return create_volcano_plot(
                 dr, d, c, dataset_name=dn, pval_col=pcol,
-                genes_of_interest=gene_highlights or None,
                 max_labels=ml, point_size=ps, color_scheme=cs,
-                x_limit=xlim, y_limit=ylim,
+                x_limit=xlim, y_limit=ylim, logfc_threshold=gate,
                 font_sizes=font_sizes, figsize=figsize,
             )
         return _render

@@ -7,9 +7,35 @@ Pathway summary split bar chart and per-pathway gene bar charts.
 import numpy as np
 import pandas as pd
 
+from kosmic.visualisation.style import DOWN_COLOR, FG, UP_COLOR
+
+
+def draw_split_bars(ax, labels, n_up, n_down, disease_label, xlabel, font_sizes):
+    """Up counts to the right of zero, down counts to the left, one row
+    per label (first row at the bottom). The x axis shows counts on both
+    sides."""
+    from matplotlib.ticker import FuncFormatter
+
+    y = np.arange(len(labels))
+    ax.barh(y, n_up, height=0.65, color=UP_COLOR, label=f'Up in {disease_label}')
+    ax.barh(y, -np.asarray(n_down), height=0.65, color=DOWN_COLOR,
+            label=f'Down in {disease_label}')
+    ax.axvline(0, color=FG, linewidth=0.8)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=font_sizes['tick'])
+    ax.set_ylim(-0.6, len(labels) - 0.4)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{abs(v):g}'))
+    ax.set_xlabel(xlabel, fontsize=font_sizes['axis_label'])
+    ax.tick_params(labelsize=font_sizes['tick'])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1), frameon=False,
+              fontsize=font_sizes['legend'])
+
 
 def create_pathway_summary_chart(de_results, pathway_gene_sets, disease_label, control_label,
-                                 label='Significant', figsize=None, font_sizes=None):
+                                 label='Significant', figsize=None, font_sizes=None,
+                                 pathway_coverage=None):
     """Create a split bar chart of up/down DE genes per pathway.
 
     Parameters
@@ -22,6 +48,10 @@ def create_pathway_summary_chart(de_results, pathway_gene_sets, disease_label, c
         Condition labels.
     label : str
         Label for plot (e.g. 'Significant', 'All Genes').
+    pathway_coverage : dict, optional
+        {pathway: {available_genes, total_genes, ...}}. When given, each
+        label ends with the gene set's coverage: genes measured in the
+        dataset / genes in the set.
     figsize : tuple, optional
         Figure size. Auto-computed if None.
 
@@ -33,9 +63,6 @@ def create_pathway_summary_chart(de_results, pathway_gene_sets, disease_label, c
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
 
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes
@@ -49,8 +76,12 @@ def create_pathway_summary_chart(de_results, pathway_gene_sets, disease_label, c
         n_up = int((pw_genes['logfoldchanges'] > 0).sum())
         n_down = int((pw_genes['logfoldchanges'] < 0).sum())
         if n_up + n_down > 0:
+            name = pathway_name.replace('_', ' ')
+            cov = (pathway_coverage or {}).get(pathway_name)
+            if cov:
+                name += f" ({cov['available_genes']}/{cov['total_genes']})"
             pathway_stats.append({
-                'pathway': pathway_name.replace('_', ' '),
+                'pathway': name,
                 'n_up': n_up,
                 'n_down': n_down,
                 'total': n_up + n_down,
@@ -66,30 +97,12 @@ def create_pathway_summary_chart(de_results, pathway_gene_sets, disease_label, c
         figsize = (10, fig_h)
 
     fig, ax = plt.subplots(figsize=figsize)
-    y = np.arange(n_pw)
-
-    ax.barh(y, pw_df['n_up'].values, height=0.6, color='#d62728', alpha=0.85, label='Upregulated')
-    ax.barh(y, -pw_df['n_down'].values, height=0.6, color='#1f77b4', alpha=0.85, label='Downregulated')
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(pw_df['pathway'].values, fontsize=font_sizes['tick'])
-    ax.axvline(0, color='black', linewidth=0.8)
-    ax.set_xlabel(f'Number of DE Genes ({label})', fontsize=font_sizes['axis_label'], fontweight='bold')
-    ax.set_title(f'Top DE Genes by Pathway ({label})\n{disease_label} vs {control_label}',
+    draw_split_bars(ax, pw_df['pathway'].values, pw_df['n_up'].values,
+                    pw_df['n_down'].values, disease_label,
+                    f'DE genes ({label.lower()})', font_sizes)
+    ax.set_title(f'DE genes by pathway ({label.lower()})\n{disease_label} vs {control_label}',
                  fontsize=font_sizes['title'], fontweight='bold')
-    ax.legend(loc='lower right', fontsize=font_sizes['legend'])
-
-    for i, row in enumerate(pw_df.itertuples()):
-        if row.n_up > 0:
-            ax.text(row.n_up + 0.1, i, str(row.n_up), va='center',
-                    fontsize=font_sizes['annotation'], fontweight='bold')
-        if row.n_down > 0:
-            ax.text(-row.n_down - 0.1, i, str(row.n_down), va='center', ha='right',
-                    fontsize=font_sizes['annotation'], fontweight='bold')
-
-    plt.tight_layout()
-    plt.subplots_adjust(left=0.3)
-
+    fig.tight_layout()
     return fig
 
 
@@ -124,9 +137,6 @@ def create_gene_bar_chart(de_results, pathway_name, pathway_genes,
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
-
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes
         font_sizes = default_font_sizes()
@@ -147,7 +157,7 @@ def create_gene_bar_chart(de_results, pathway_name, pathway_genes,
     fig, ax = plt.subplots(figsize=figsize)
     y = np.arange(n_genes)
     lfc_vals = pw_df['logfoldchanges'].values
-    colors = ['#d62728' if lfc > 0 else '#1f77b4' for lfc in lfc_vals]
+    colors = [UP_COLOR if lfc > 0 else DOWN_COLOR for lfc in lfc_vals]
 
     ax.barh(y, np.abs(lfc_vals), height=0.6, color=colors, alpha=0.85,
             edgecolor='black', linewidth=0.5)
@@ -166,11 +176,11 @@ def create_gene_bar_chart(de_results, pathway_name, pathway_genes,
             pval_text = f'  (padj={row["pvals_adj"]:.2e})'
         ax.text(np.abs(lfc) + 0.02, i, f'log2FC={lfc:+.2f}{pval_text}',
                 va='center', fontsize=font_sizes['annotation'], fontweight='bold',
-                color='#d62728' if lfc > 0 else '#1f77b4')
+                color=UP_COLOR if lfc > 0 else DOWN_COLOR)
 
     legend_elements = [
-        Patch(facecolor='#d62728', alpha=0.85, label=f'Up in {disease_label}'),
-        Patch(facecolor='#1f77b4', alpha=0.85, label=f'Down in {disease_label}'),
+        Patch(facecolor=UP_COLOR, label=f'Up in {disease_label}'),
+        Patch(facecolor=DOWN_COLOR, label=f'Down in {disease_label}'),
     ]
     ax.legend(handles=legend_elements, loc='lower right', fontsize=font_sizes['annotation'])
     plt.tight_layout()

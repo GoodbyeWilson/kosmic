@@ -81,10 +81,11 @@ class PlotSettingsDialog(QDialog):
 
         self.export_dpi_spin = QSpinBox()
         self.export_dpi_spin.setRange(72, 600)
-        self.export_dpi_spin.setValue(150)
+        self.export_dpi_spin.setValue(DEFAULT_EXPORT_DPI)
         self.export_dpi_spin.setSuffix(" dpi")
         self.export_dpi_spin.setToolTip(
-            "Resolution for all exported PNG images.\n"
+            "Resolution of exported PNG images and of the rasterised\n"
+            "parts of exported PDF and SVG files.\n"
             "150 = screen quality, 300 = publication quality, 600 = high-res print")
         form.addRow("Export DPI:", self.export_dpi_spin)
 

@@ -20,7 +20,9 @@ class DatasetSummaryPage(FigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        return FigureControls(default_w=16, default_h=10)
+        ctrl = FigureControls(default_w=16, default_h=10)
+        ctrl.add_lfc_gate()
+        return ctrl
 
     def dependencies_met(self) -> bool:
         de = self.workspace.de_ws
@@ -44,13 +46,14 @@ class DatasetSummaryPage(FigurePage):
         gl = getattr(de, 'geneset_label', "")
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
+        gate = self._controls.lfc_gate.value()
 
-        def _render(dr=dr, gs=gs, pc=pc, dn=dn, d=d, c=c, gl=gl,
+        def _render(dr=dr, gs=gs, pc=pc, dn=dn, d=d, c=c, gl=gl, gate=gate,
                     f=font_sizes, sz=figsize):
             from kosmic.visualisation.de.dataset_summary import (
                 compute_dataset_summary, create_summary_figure,
             )
-            sdf = compute_dataset_summary(dr, gs, pc)
+            sdf = compute_dataset_summary(dr, gs, pc, lfc_threshold=gate)
             return create_summary_figure(
                 sdf, dn, d, c, gl, font_sizes=f, figsize=sz,
             )

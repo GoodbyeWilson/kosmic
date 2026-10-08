@@ -16,15 +16,19 @@ from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.shared import borderless
 from kosmic.gui.figure_export.pages.dataset_summary import DatasetSummaryPage
 from kosmic.gui.figure_export.pages.elbow import PCAElbowPage
-from kosmic.gui.figure_export.pages.enrichment_bar import EnrichmentBarPage
+from kosmic.gui.figure_export.pages.enriched_terms import EnrichedTermsPage
 from kosmic.gui.figure_export.pages.fgsea import FgseaPage
 from kosmic.gui.figure_export.pages.gene_heatmap import GeneHeatmapPage
 from kosmic.gui.figure_export.pages.library_gsea import LibraryGseaPage
 from kosmic.gui.figure_export.pages.library_gsea_mountain import LibraryGseaMountainPage
+from kosmic.gui.figure_export.pages.meta_figures import (
+    LeaveOneOutPage, MetaVolcanoPage, PathwayForestPage, PathwayMetaVolcanoPage,
+    StudyForestPage,
+)
 from kosmic.gui.figure_export.pages.patient_dotplot import PatientDotplotPage
-from kosmic.gui.figure_export.pages.pathway_bar import PathwayBarPage
 from kosmic.gui.figure_export.pages.pathway_bubble import PathwayBubblePage
 from kosmic.gui.figure_export.pages.qc_violins import QCViolinsPage
+from kosmic.gui.figure_export.pages.term_links import TermLinksPage
 from kosmic.gui.figure_export.pages.topde_summary import TopDESummaryPage
 from kosmic.gui.figure_export.pages.umap import UMAPPage
 from kosmic.gui.figure_export.pages.variable_genes import VariableGenesPage
@@ -43,17 +47,23 @@ _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     # Differential Expression
     ("Differential Expression", VolcanoPage),
     ("Differential Expression", GeneHeatmapPage),
-    ("Differential Expression", PathwayBarPage),
     ("Differential Expression", TopDESummaryPage),
     ("Differential Expression", DatasetSummaryPage),
     # Pathway Activity
     ("Pathway Activity", PathwayBubblePage),
     ("Pathway Activity", PatientDotplotPage),
     # Enrichment
-    ("Enrichment", EnrichmentBarPage),
+    ("Enrichment", EnrichedTermsPage),
+    ("Enrichment", TermLinksPage),
     ("Enrichment", FgseaPage),
     ("Enrichment", LibraryGseaPage),
     ("Enrichment", LibraryGseaMountainPage),
+    # Meta-Analysis (ADR-010)
+    ("Meta-Analysis", MetaVolcanoPage),
+    ("Meta-Analysis", PathwayMetaVolcanoPage),
+    ("Meta-Analysis", StudyForestPage),
+    ("Meta-Analysis", PathwayForestPage),
+    ("Meta-Analysis", LeaveOneOutPage),
 ]
 
 
@@ -63,10 +73,12 @@ class FigureExportWorkspace(QWidget):
     status_message = pyqtSignal(str)
     log_message = pyqtSignal(str)
 
-    def __init__(self, scrna_workspace=None, de_workspace=None):
+    def __init__(self, scrna_workspace=None, de_workspace=None, meta_workspace=None):
         super().__init__()
         self.scrna_ws = scrna_workspace
         self.de_ws = de_workspace
+        # Read through its figure_inputs() (ADR-010).
+        self.meta_ws = meta_workspace
         self._data_version = 0
         self._pages: list[FigurePage] = []
 
@@ -80,6 +92,10 @@ class FigureExportWorkspace(QWidget):
 
     def set_de_workspace(self, ws):
         self.de_ws = ws
+        self.bump_data_version()
+
+    def set_meta_workspace(self, ws):
+        self.meta_ws = ws
         self.bump_data_version()
 
     def bump_data_version(self):

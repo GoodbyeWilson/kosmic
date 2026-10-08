@@ -776,7 +776,14 @@ class EnrichmentPage(SidebarTabbedPage):
         norm = pd.DataFrame()
         norm['Term'] = df.get('GO_ID', '').astype(str) + ' ' + df.get('Term', '').astype(str)
         norm['P_value'] = df['P_value']
-        norm['FDR'] = df.get('P_adjusted', df['P_value'])
+        if 'P_adjusted' in df.columns:
+            norm['FDR'] = df['P_adjusted']
+        else:
+            # elim p-values are not multiplicity-adjusted (the topGO
+            # convention). The column holds the p-value significance is
+            # judged on; the label says which it is.
+            norm['FDR'] = df['P_value']
+            norm.attrs['significance_label'] = 'elim P (uncorrected)'
         norm['Fold_Enrichment'] = df.get('Fold_Enrichment', 1.0)
         norm['Gene_Count'] = df.get('Genes', df.get('Gene_Count', '')).apply(
             lambda x: len(x) if isinstance(x, list) else 0

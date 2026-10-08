@@ -65,16 +65,12 @@ class LibraryGseaPage(FigurePage):
             title = f'{lib}: {d} vs {c}'
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
-        from kosmic.gui.shared.theme import get_color
-        theme_colors = {'plot_disease': get_color('plot_disease'),
-                        'plot_ns': get_color('fg_secondary')}
 
-        def _render(res=res, d=d, c=c, t=title, f=font_sizes, sz=figsize,
-                    tc=theme_colors):
+        def _render(res=res, d=d, c=c, t=title, f=font_sizes, sz=figsize):
             from kosmic.visualisation.de.fgsea_plot import create_fgsea_nes_plot
             return create_fgsea_nes_plot(
                 res, disease_label=d, control_label=c, title=t,
-                figsize=sz, font_sizes=f, theme_colors=tc)
+                figsize=sz, font_sizes=f)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

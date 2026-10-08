@@ -123,6 +123,27 @@ class MetaAnalysisWorkspace(QWidget):
         ("Consensus Evaluation", "Build and compare method combinations. Is pooling worth it?"),
     )
 
+    def figure_inputs(self) -> dict:
+        """The results the Figures workspace draws from (ADR-010).
+
+        Keys: 'gene_results' and 'pathway_results' (the pooled tables of the
+        latest gene- and pathway-level runs, or None), 'gene_studies' and
+        'pathway_studies' (lists of (study name, DE table) for the current
+        selection, as loaded from each study's DE file), 'selection' (the
+        selection's folder name, e.g. the cell type) and 'project_folder'.
+        """
+        gene_page = getattr(self, '_gene_ma_page', None)
+        pw_page = getattr(self, '_pw_ma_page', None)
+        return {
+            'gene_results': getattr(gene_page, '_meta_df', None),
+            'pathway_results': getattr(pw_page, '_meta_df', None),
+            'gene_studies': [(d['name'], d['df']) for d in self.datasets],
+            'pathway_studies': [(d['name'], d['df']) for d in self.pathway_datasets],
+            'selection': getattr(gene_page, '_run_output_selection', None)
+            or getattr(gene_page, '_output_selection', None),
+            'project_folder': self._project_folder or None,
+        }
+
     @classmethod
     def steps_for_mode(cls, mode):
         """Return the sidebar step list for the given mode."""

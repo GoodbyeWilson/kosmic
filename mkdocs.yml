@@ -125,9 +125,12 @@ nav:
       - Gene heatmap: figures/gene_heatmap.md
       - Patient dot plot: figures/patient_dotplot.md
       - Volcano: figures/volcano.md
-      - Top DE summary: figures/topde_summary.md
-      - Enrichment bar: figures/enrichment_bar.md
-      - Pathway bar: figures/pathway_bar.md
+      - DE genes by pathway: figures/topde_summary.md
+      - Enriched terms: figures/enriched_terms.md
+      - Enriched term links: figures/term_links.md
       - Pathway bubble: figures/pathway_bubble.md
+      - Meta-analysis volcano: figures/meta_volcano.md
+      - Meta-analysis forest plot: figures/meta_forest.md
+      - Leave-one-out sensitivity: figures/meta_loo.md
   - Glossary: glossary.md
   - Developer reference: reference/

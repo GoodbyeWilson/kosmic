@@ -1,6 +1,7 @@
 """Visualisation package. Sub-packages: scrna, de, meta, shared."""
 
 from kosmic.meta_analysis.io import load_de_results
+from kosmic.visualisation.style import apply_export_rcparams, save_figure
 from kosmic.visualisation.scrna.umap import (
     create_embedding_plot,
     create_highlight_plot,
@@ -18,7 +19,6 @@ from kosmic.visualisation.de.gene_heatmap import (
     prepare_heatmap_data,
 )
 from kosmic.visualisation.de.bubble_plot import create_bubble_plot
-from kosmic.visualisation.de.pathway_plots import create_pathway_bar_plot
 from kosmic.visualisation.de.top_de_plots import (
     create_pathway_summary_chart,
     create_gene_bar_chart,
@@ -36,6 +36,9 @@ from kosmic.visualisation.de.dotplots import (
 from kosmic.visualisation.de.enrichment import create_enrichment_bar_plot
 from kosmic.visualisation.meta.heatmap_forest import create_multi_dataset_figure
 from kosmic.visualisation.meta.forest_plot import create_family_forest_plot
+
+# Every figure saved after this import keeps its text editable (ADR-009).
+apply_export_rcparams()
 
 
 # Shared typography scale used by every plot module.
@@ -66,6 +69,7 @@ def default_font_sizes(base: int = _DEFAULT_BASE) -> dict:
 
 __all__ = [
     "default_font_sizes",
+    "save_figure",
     "load_de_results",
     "create_embedding_plot",
     "create_highlight_plot",
@@ -78,7 +82,6 @@ __all__ = [
     "create_gene_heatmap",
     "prepare_heatmap_data",
     "create_bubble_plot",
-    "create_pathway_bar_plot",
     "create_pathway_summary_chart",
     "create_gene_bar_chart",
     "compute_dataset_summary",

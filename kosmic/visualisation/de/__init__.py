@@ -2,7 +2,6 @@
 from kosmic.visualisation.de.volcano import create_volcano_plot
 from kosmic.visualisation.de.gene_heatmap import create_gene_heatmap, prepare_heatmap_data
 from kosmic.visualisation.de.bubble_plot import create_bubble_plot
-from kosmic.visualisation.de.pathway_plots import create_pathway_bar_plot
 from kosmic.visualisation.de.top_de_plots import (
     create_pathway_summary_chart,
     create_gene_bar_chart,
@@ -24,7 +23,6 @@ __all__ = [
     "create_gene_heatmap",
     "prepare_heatmap_data",
     "create_bubble_plot",
-    "create_pathway_bar_plot",
     "create_pathway_summary_chart",
     "create_gene_bar_chart",
     "compute_dataset_summary",

@@ -79,9 +79,6 @@ def create_variable_gene_plot(top_genes_df, parent_name, disease_label, control_
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
-
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes
         font_sizes = default_font_sizes()
