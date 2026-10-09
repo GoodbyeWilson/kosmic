@@ -37,3 +37,20 @@ class FigureControls(QWidget):
     def add_row(self, label: str, widget: QWidget):
         """Add a labelled control row. Caller still wires its own signals."""
         self._form.addRow(label, widget)
+
+    def add_lfc_gate(self, effect: str = "log2 fold change"):
+        """Add 'Min |log2FC|' as 'self.lfc_gate'. Off (0) means a gene is
+        significant on FDR < 0.05 alone; a value also requires the absolute
+        *effect* to exceed it."""
+        from PyQt6.QtWidgets import QDoubleSpinBox
+        self.lfc_gate = QDoubleSpinBox()
+        self.lfc_gate.setRange(0.0, 5.0)
+        self.lfc_gate.setSingleStep(0.05)
+        self.lfc_gate.setDecimals(2)
+        self.lfc_gate.setSpecialValueText("Off")
+        self.lfc_gate.setToolTip(
+            "Off: significant means FDR < 0.05. A value also requires\n"
+            f"|{effect}| above it.")
+        self.lfc_gate.valueChanged.connect(self.changed)
+        self.add_row("Min |log2FC|:", self.lfc_gate)
+        return self.lfc_gate

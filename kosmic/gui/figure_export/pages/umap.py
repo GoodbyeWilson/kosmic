@@ -1,7 +1,7 @@
 # UMAP / t-SNE embedding plot page.
 #
-# Single page that switches between an Overview (2x2) layout and
-# per-column plots via a 'Color by' combo. Reads from 'workspace.scrna_ws'.
+# One embedding plot coloured by the 'Color by' column, optionally with a
+# single category highlighted. Reads from 'workspace.scrna_ws'.
 
 from __future__ import annotations
 
@@ -13,32 +13,24 @@ from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox
 from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
-# 'Overview' = 2x2 grid of top categorical columns.
-COLOR_OVERVIEW = "Overview (2x2 grid)"
+LABELS_ON_PLOT = "On plot"
+LABELS_LEGEND = "Legend"
+
+
+def _count_title(labels, col: str) -> str:
+    """'93,302 cells across 12 cell types' for the column being shown."""
+    k = len(set(labels))
+    if 'cell_type' in col.lower():
+        noun = 'cell types'
+    elif 'leiden' in col.lower() or 'cluster' in col.lower():
+        noun = 'clusters'
+    else:
+        noun = f'{col} groups'
+    return f"{len(labels):,} cells across {k} {noun}"
+
+
 # Highlight selector default: colour every category (no single-category focus).
 HL_NONE = "(show all categories)"
-
-_COL_PRIORITY = ['cell_type', 'leiden', 'sample', 'condition',
-                 'clusters', 'seurat_clusters', 'batch']
-
-
-def _pick_overview_columns(adata, max_cols: int = 4):
-    chosen = []
-    for col in _COL_PRIORITY:
-        if col in adata.obs.columns and adata.obs[col].nunique() <= 50:
-            chosen.append(col)
-            if len(chosen) >= max_cols:
-                return chosen
-    for col in adata.obs.columns:
-        if col in chosen:
-            continue
-        dtype = adata.obs[col].dtype
-        if str(dtype) == 'category' or dtype == 'object':
-            if 1 < adata.obs[col].nunique() <= 30:
-                chosen.append(col)
-                if len(chosen) >= max_cols:
-                    break
-    return chosen
 
 
 class _UMAPControls(FigureControls):
@@ -59,7 +51,7 @@ class _UMAPControls(FigureControls):
         self.point_size.setRange(0.1, 30.0)
         self.point_size.setDecimals(2)
         self.point_size.setSingleStep(0.25)
-        self.point_size.setValue(2.0)
+        self.point_size.setValue(0.5)
         self.point_size.valueChanged.connect(self.changed)
         self.add_row("Point size:", self.point_size)
 
@@ -68,6 +60,12 @@ class _UMAPControls(FigureControls):
         self.colours.addItems(PALETTE_NAMES)
         self.colours.currentIndexChanged.connect(self.changed)
         self.add_row("Colours:", self.colours)
+
+        # Category names written on the plot, or a legend beside it.
+        self.labels = QComboBox()
+        self.labels.addItems([LABELS_ON_PLOT, LABELS_LEGEND])
+        self.labels.currentIndexChanged.connect(self.changed)
+        self.add_row("Labels:", self.labels)
 
         # Colour only one category of the 'Color by' column; grey the rest.
         self.highlight = QComboBox()
@@ -85,18 +83,18 @@ class _UMAPControls(FigureControls):
         self.highlight.blockSignals(False)
 
     def populate_columns(self, options: list[str]):
-        """Populate the colour-by combo: single columns first (a biological
-        label preferred as default), with the 2x2 overview last."""
+        """Populate the colour-by combo, preferring a biological label as
+        the default."""
         prev = self.color_by.currentText()
         self.color_by.blockSignals(True)
         self.color_by.clear()
-        self.color_by.addItems(options + [COLOR_OVERVIEW])
+        self.color_by.addItems(options)
         target = prev
         if not target:
             target = next(
                 (c for c in ('cell_type', 'Names', 'predicted_labels', 'leiden')
                  if c in options),
-                options[0] if options else COLOR_OVERVIEW)
+                options[0] if options else '')
         idx = self.color_by.findText(target)
         self.color_by.setCurrentIndex(idx if idx >= 0 else 0)
         self.color_by.blockSignals(False)
@@ -118,9 +116,9 @@ class UMAPPage(FigurePage):
 
     def _sync_highlight(self, adata):
         """Populate the highlight combo with the current colour-by column's
-        categories (or empty for the overview / no column)."""
+        categories (or empty when there is no column)."""
         col = self._controls.color_by.currentText()
-        if col and col != COLOR_OVERVIEW and col in adata.obs.columns:
+        if col and col in adata.obs.columns:
             vals = sorted(adata.obs[col].astype(str).unique())
             self._controls.populate_highlight(vals)
         else:
@@ -167,7 +165,7 @@ class UMAPPage(FigurePage):
             if c in adata.obs.columns and c not in out:
                 out.append(c)
         for c in adata.obs.columns:
-            if c in out:
+            if c in out or c.startswith('_'):   # '_' columns are internal
                 continue
             dtype = adata.obs[c].dtype
             if str(dtype) == 'category' or dtype == 'object':
@@ -192,55 +190,41 @@ class UMAPPage(FigurePage):
         font_sizes = self._font_sizes()
         coords = adata.obsm[embed_key]
 
-        choice = ctrl.color_by.currentText()
-
-        if choice == COLOR_OVERVIEW or not choice:
-            cols = _pick_overview_columns(adata)
-            if not cols:
-                return None
-            obs = adata.obs
-
-            def _render(coords=coords, obs=obs, cols=cols, embed_name=embed_name,
-                        figsize=figsize, font_sizes=font_sizes, scheme=scheme):
-                from kosmic.visualisation.scrna.umap import create_overview_figure
-                kw = dict(embedding_name=embed_name, font_sizes=font_sizes, scheme=scheme)
-                if figsize:
-                    kw['figsize_per_panel'] = (figsize[0] // 2, figsize[1] // 2)
-                return create_overview_figure(coords, obs, cols, **kw)
-            return _render
-
-        # Per-column plot
-        col = choice
-        if col not in adata.obs.columns:
+        col = ctrl.color_by.currentText()
+        if not col or col not in adata.obs.columns:
             return None
         labels = adata.obs[col].astype(str).values
 
         # Highlight mode: colour only one category, grey the rest.
+        on_plot = ctrl.labels.currentText() == LABELS_ON_PLOT
         hl = ctrl.highlight.currentText()
         if hl and hl != HL_NONE and hl in set(labels):
             title = f"{embed_name}: {hl}"
 
             def _render(coords=coords, labels=labels, hl=hl, title=title,
                         embed_name=embed_name, figsize=figsize,
-                        point_size=point_size, font_sizes=font_sizes, scheme=scheme):
+                        point_size=point_size, font_sizes=font_sizes, scheme=scheme,
+                        on_plot=on_plot):
                 from kosmic.visualisation.scrna.umap import create_highlight_plot
                 return create_highlight_plot(
                     coords, labels, [hl], title=title,
                     embedding_name=embed_name, figsize=figsize,
                     point_size=point_size, font_sizes=font_sizes, scheme=scheme,
+                    labels_on_plot=on_plot,
                 )
             return _render
 
-        title = f"{embed_name} coloured by {col}"
+        title = _count_title(labels, col)
 
         def _render(coords=coords, labels=labels, title=title,
                     embed_name=embed_name, figsize=figsize,
-                    point_size=point_size, font_sizes=font_sizes, scheme=scheme):
+                    point_size=point_size, font_sizes=font_sizes, scheme=scheme,
+                    on_plot=on_plot):
             from kosmic.visualisation.scrna.umap import create_embedding_plot
             return create_embedding_plot(
                 coords, labels, title=title, embedding_name=embed_name,
                 figsize=figsize, point_size=point_size, font_sizes=font_sizes,
-                scheme=scheme,
+                scheme=scheme, labels_on_plot=on_plot,
             )
         return _render
 
@@ -253,8 +237,6 @@ class UMAPPage(FigurePage):
 
     def _default_export_basename(self) -> str:
         choice = self._controls.color_by.currentText()
-        if choice == COLOR_OVERVIEW:
-            return "embedding_overview"
         hl = self._controls.highlight.currentText()
         if hl and hl != HL_NONE:
             safe = ''.join(ch if ch.isalnum() else '_' for ch in hl)

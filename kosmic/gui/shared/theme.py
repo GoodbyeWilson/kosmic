@@ -236,7 +236,7 @@ def get_plot_settings() -> dict:
 
 
 def get_export_dpi() -> int:
-    """Return the user-configured export DPI (default 150)."""
+    """Return the user-configured export DPI."""
     return int(QSettings("KOSMIC", "KOSMIC").value("plot/export_dpi", DEFAULT_EXPORT_DPI))
 
 

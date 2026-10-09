@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from kosmic.de.de_analysis import tested_gene_set
 from kosmic.gui.de_analysis.plot_settings import HEATMAP_CMAPS
+from kosmic.visualisation.de.gene_heatmap import HOUSE_CMAP
 from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 from kosmic.gui.shared.widgets import SecondaryLabel
@@ -56,7 +57,7 @@ class _HeatmapControls(FigureControls):
         self.add_row("", self._pw_label)
 
         self.cmap = QComboBox()
-        self.cmap.addItems(HEATMAP_CMAPS)
+        self.cmap.addItems([HOUSE_CMAP] + HEATMAP_CMAPS)
         self.cmap.currentIndexChanged.connect(self.changed)
         self.add_row("Colormap:", self.cmap)
 

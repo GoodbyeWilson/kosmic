@@ -10,6 +10,9 @@ import pandas as pd
 from kosmic.scrna.inspect.detection import detect_species, format_gene_for_species
 from kosmic import DE_MIN_CELLS
 
+#: Colour-map name for the house blue-white-red scale, centred on zero.
+HOUSE_CMAP = 'House (blue-white-red)'
+
 
 def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
                         control_label, disease_label, figsize=None,
@@ -31,7 +34,8 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
     figsize : tuple, optional
         Figure size. Auto-computed if None.
     cmap : str
-        Matplotlib colormap name.
+        Matplotlib colormap name, or HOUSE_CMAP for the house diverging
+        scale centred on zero.
     vmin_pct, vmax_pct : float
         Percentile clipping for the color scale (0–100).
     theme_colors : dict, optional
@@ -48,9 +52,6 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
     import seaborn as sns
-
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
 
     available_genes = [g for g in pathway_genes if g in sample_gene_df.columns]
     if len(available_genes) < 3:
@@ -96,6 +97,12 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
 
     vmin = np.percentile(heatmap_data.values, vmin_pct)
     vmax = np.percentile(heatmap_data.values, vmax_pct)
+    if cmap == HOUSE_CMAP:
+        # Diverging scale: centre it on zero so white means average.
+        from kosmic.visualisation.style import diverging_cmap
+        cmap = diverging_cmap()
+        vmax = max(abs(vmin), abs(vmax))
+        vmin = -vmax
 
     # Default font sizes if not provided
     if font_sizes is None:
@@ -115,11 +122,13 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
         for spine in cbar.ax.spines.values():
             spine.set_edgecolor(fg2)
 
-    # Condition color bar at top
-    control_color = (theme_colors.get('plot_control', '#3498DB')
-                     if theme_colors else '#3498DB')
-    disease_color = (theme_colors.get('plot_disease', '#E74C3C')
-                     if theme_colors else '#E74C3C')
+    # Condition strip under the samples. Grey shades, not red / blue, so it
+    # is not read as part of the expression scale.
+    from kosmic.visualisation.style import FG, NS_COLOR
+    control_color = (theme_colors.get('plot_control', NS_COLOR)
+                     if theme_colors else NS_COLOR)
+    disease_color = (theme_colors.get('plot_disease', FG)
+                     if theme_colors else FG)
     condition_map = df.set_index('sample')['condition'].to_dict()
     color_map = {disease_label: disease_color, control_label: control_color}
 
@@ -133,18 +142,15 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
         Patch(facecolor=control_color, label=control_label),
         Patch(facecolor=disease_color, label=disease_label),
     ]
-    legend = ax.legend(handles=legend_elements, loc='upper left',
-                       bbox_to_anchor=(0, 1.08), ncol=2, frameon=True,
-                       fontsize=font_sizes['legend'])
-    legend.get_frame().set_facecolor(bg)
-    legend.get_frame().set_edgecolor(fg2)
+    legend = ax.legend(handles=legend_elements, loc='lower right',
+                       bbox_to_anchor=(1, 1.0), ncol=2, frameon=False,
+                       borderaxespad=0.2, fontsize=font_sizes['legend'])
     for text in legend.get_texts():
         text.set_color(fg)
 
     ax.set_title(
-        f'{pathway_name.replace("_", " ")} Gene Expression\n'
-        f'({control_label} → {disease_label})',
-        fontsize=font_sizes['title'], fontweight='bold', color=fg, pad=20)
+        f'{pathway_name.replace("_", " ")}: {disease_label} vs {control_label}',
+        fontsize=font_sizes['title'], fontweight='bold', color=fg, pad=22)
     ax.set_xlabel('Samples', fontsize=font_sizes['axis_label'], color=fg)
     ax.set_ylabel('Genes', fontsize=font_sizes['axis_label'], color=fg)
     ax.tick_params(axis='x', rotation=45, colors=fg2, labelsize=font_sizes['tick'])

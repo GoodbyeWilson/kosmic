@@ -15,7 +15,7 @@ from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
 
 class _BubbleControls(FigureControls):
-    def __init__(self, default_w: int = 12, default_h: int = 10):
+    def __init__(self, default_w: int = 8, default_h: int = 6):
         super().__init__(default_w, default_h)
 
         self.title_edit = QLineEdit()
@@ -69,7 +69,7 @@ class PathwayBubblePage(FigurePage):
             y_label = 'Metabolic Pathways' if 'Metabolic' in gl else 'Gene Sets'
             return create_bubble_plot(
                 sd, d, c, plot_title=title, y_label=y_label,
-                font_sizes=f, figsize=sz or (12, 10),
+                font_sizes=f, figsize=sz or (8, 6),
             )
         return _render
 

@@ -42,6 +42,7 @@ def create_qc_violin_plots(
     thresholds: Optional[Dict[str, Dict[str, float]]] = None,
     dark_mode: bool = True,
     figsize: Optional[tuple] = None,
+    font_sizes: Optional[dict] = None,
 ):
     """Side-by-side violin plots for QC metrics.
 
@@ -76,6 +77,10 @@ def create_qc_violin_plots(
         axes = [axes]
 
     _apply_theme(fig, axes, dark_mode)
+    if font_sizes is None:
+        from kosmic.visualisation import default_font_sizes
+        font_sizes = default_font_sizes()
+    from kosmic.visualisation.style import FG, NS_COLOR
 
     labels = {
         "n_genes_by_counts": "Genes per cell",
@@ -85,26 +90,34 @@ def create_qc_violin_plots(
 
     for ax, metric in zip(axes, available):
         data = obs_df[metric].dropna().values
+        title_kw = dict(fontsize=font_sizes['title'], fontweight='bold')
         if len(data) == 0:
-            ax.set_title(labels.get(metric, metric), fontsize=9)
+            ax.set_title(labels.get(metric, metric), **title_kw)
             continue
 
         vp = ax.violinplot(data, showmedians=True, showextrema=False)
-        color = "#4fc1ff" if dark_mode else "#1976d2"
         for body in vp["bodies"]:
-            body.set_facecolor(color)
-            body.set_alpha(0.7)
-        vp["cmedians"].set_color("#ff6b6b" if dark_mode else "#d32f2f")
+            body.set_facecolor("#4fc1ff" if dark_mode else NS_COLOR)
+            body.set_edgecolor("none" if dark_mode else FG)
+            body.set_linewidth(0.6)
+            body.set_alpha(0.7 if dark_mode else 1.0)
+        vp["cmedians"].set_color("#ff6b6b" if dark_mode else FG)
+        vp["cmedians"].set_linewidth(1.5)
 
-        ax.set_title(labels.get(metric, metric), fontsize=9)
+        ax.set_title(labels.get(metric, metric), **title_kw)
         ax.set_xticks([])
+        ax.tick_params(labelsize=font_sizes['tick'])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        if not dark_mode:
+            ax.spines['left'].set_color(FG)
 
         if thresholds and metric in thresholds:
             t = thresholds[metric]
-            if "min" in t:
-                ax.axhline(t["min"], color="#ff4444", linestyle="--", linewidth=1, alpha=0.8)
-            if "max" in t:
-                ax.axhline(t["max"], color="#ff4444", linestyle="--", linewidth=1, alpha=0.8)
+            for key in ("min", "max"):
+                if key in t:
+                    ax.axhline(t[key], color=FG, linestyle=":", linewidth=1)
 
     fig.tight_layout(pad=1.0)
     return fig

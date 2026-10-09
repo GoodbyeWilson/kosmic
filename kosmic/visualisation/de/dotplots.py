@@ -7,8 +7,6 @@ Patient-level pathway dotplots, per-gene dotplots, and expression dotplots.
 import numpy as np
 import pandas as pd
 
-from kosmic import DEFAULT_FDR
-
 
 def pathway_scores_to_sample_df(pathway_score_data, standardize=False):
     """Reshape the DE window's cached per-donor pathway scores for the dotplot.
@@ -38,8 +36,8 @@ def pathway_scores_to_sample_df(pathway_score_data, standardize=False):
 def create_patient_dotplot(sample_df, pathway_names, disease_label, control_label,
                            figsize=None, font_sizes=None,
                            ylabel='Pathway score (per donor)', suptitle=None,
-                           shared_y=False, theme_colors=None):
-    """Create a grid of pathway dotplots with MWU statistics.
+                           shared_y=False, theme_colors=None, fdr_by_pathway=None):
+    """Create a grid of per-donor pathway score dotplots.
 
     Parameters
     ----------
@@ -50,64 +48,27 @@ def create_patient_dotplot(sample_df, pathway_names, disease_label, control_labe
     disease_label, control_label : str
         Condition labels.
     figsize : tuple, optional
+    fdr_by_pathway : dict, optional
+        {pathway: FDR} from Pathway DE, shown above each panel. The figure
+        computes no test of its own; a pathway without an FDR gets no label.
 
     Returns
     -------
-    tuple of (fig, pathway_stats)
-        fig: matplotlib Figure
-        pathway_stats: dict of {pathway: {p_value, p_corrected, disease_mean, ...}}
+    matplotlib.figure.Figure
     """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from scipy.stats import mannwhitneyu
-    from kosmic.numerical import bh_fdr
 
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
-
+    fdr_by_pathway = fdr_by_pathway or {}
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes
         font_sizes = default_font_sizes()
 
+    from kosmic.visualisation.style import CONTROL_COLOR, DISEASE_COLOR, FG
     tc = theme_colors or {}
-    control_color = tc.get('plot_control', '#3498DB')
-    disease_color = tc.get('plot_disease', '#E74C3C')
-
-    # Stats
-    pathway_stats = {}
-    p_values = []
-    pw_for_correction = []
-
-    for pw in pathway_names:
-        raw_col = f'{pw}_raw'
-        d_scores = sample_df[sample_df['condition'] == disease_label][raw_col].values
-        c_scores = sample_df[sample_df['condition'] == control_label][raw_col].values
-        if len(d_scores) >= 2 and len(c_scores) >= 2:
-            try:
-                stat, pval = mannwhitneyu(d_scores, c_scores, alternative='two-sided')
-                pathway_stats[pw] = {
-                    'p_value': pval,
-                    'disease_mean': np.mean(d_scores),
-                    'control_mean': np.mean(c_scores),
-                    'disease_sem': np.std(d_scores) / np.sqrt(len(d_scores)),
-                    'control_sem': np.std(c_scores) / np.sqrt(len(c_scores)),
-                    'disease_var': np.var(d_scores, ddof=1),
-                    'control_var': np.var(c_scores, ddof=1),
-                    'n_disease': len(d_scores),
-                    'n_control': len(c_scores),
-                }
-                p_values.append(pval)
-                pw_for_correction.append(pw)
-            except Exception:
-                pathway_stats[pw] = {'p_value': np.nan}
-        else:
-            pathway_stats[pw] = {'p_value': np.nan}
-
-    if p_values:
-        p_corrected = bh_fdr(p_values)
-        for i, pw in enumerate(pw_for_correction):
-            pathway_stats[pw]['p_corrected'] = p_corrected[i]
+    control_color = tc.get('plot_control', CONTROL_COLOR)
+    disease_color = tc.get('plot_disease', DISEASE_COLOR)
 
     # Plot
     n_pathways = len(pathway_names)
@@ -176,9 +137,13 @@ def create_patient_dotplot(sample_df, pathway_names, disease_label, control_labe
         ax.set_xlim(-0.5, 1.5)
         ax.set_xticks([0, 1])
         ax.set_xticklabels([control_label, disease_label], ha='center',
-                           fontsize=font_sizes['title'], fontweight='bold')
+                           fontsize=font_sizes['axis_label'])
         ax.set_title(pw.replace('_', ' '), fontsize=font_sizes['title'], fontweight='bold')
-        ax.set_ylabel(ylabel, fontsize=font_sizes['axis_label'], fontweight='bold')
+        if i % n_cols == 0:   # one y label per row
+            ax.set_ylabel(ylabel, fontsize=font_sizes['axis_label'])
+        ax.tick_params(labelsize=font_sizes['tick'])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
         ax.grid(False)
 
     # Y-limits: one shared scale across the grid, or per-subplot.
@@ -198,17 +163,16 @@ def create_patient_dotplot(sample_df, pathway_names, disease_label, control_labe
             span = (hi - lo) or 1.0
             ax.set_ylim((0 if (not centred and lo >= 0) else lo - 0.1 * span),
                         hi + 0.25 * span)
-        st = pathway_stats.get(pw, {})
-        if 'p_corrected' in st:
-            pval = st['p_corrected']
-            label = ('*' if pval < DEFAULT_FDR
-                     else 'p < 0.001' if pval < 0.001
-                     else f'p = {pval:.3f}' if pval < 0.01 else f'p = {pval:.2f}')
+        pval = fdr_by_pathway.get(pw)
+        if pval is not None and np.isfinite(pval):
+            # The Pathway DE result for this pathway.
+            label = ('FDR < 0.001' if pval < 0.001
+                     else f'FDR = {pval:.3f}' if pval < 0.01 else f'FDR = {pval:.2f}')
             ax.plot([0.2, 0.8], [0.9, 0.9], transform=ax.transAxes,
-                    color='black', linewidth=1, solid_capstyle='butt',
+                    color=FG, linewidth=0.8, solid_capstyle='butt',
                     clip_on=False)
             ax.text(0.5, 0.92, label, transform=ax.transAxes, ha='center',
-                    va='bottom', fontsize=font_sizes['tick'], fontweight='bold')
+                    va='bottom', fontsize=font_sizes['tick'], color=FG)
 
     for i in range(n_pathways, n_rows * n_cols):
         axes[i // n_cols, i % n_cols].set_visible(False)
@@ -220,7 +184,7 @@ def create_patient_dotplot(sample_df, pathway_names, disease_label, control_labe
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)
 
-    return fig, pathway_stats
+    return fig
 
 
 def create_gene_dotplot(sample_df, pathway_genes, pathway_name,
@@ -248,9 +212,6 @@ def create_gene_dotplot(sample_df, pathway_genes, pathway_name,
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
 
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes

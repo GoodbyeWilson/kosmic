@@ -101,18 +101,14 @@ class LibraryGseaMountainPage(FigurePage):
         hits = d['hits']
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
-        from kosmic.gui.shared.theme import get_color
-        theme_colors = {'plot_disease': get_color('plot_disease'),
-                        'fg': get_color('plot_fg')}
-
         def _render(rc=res_curve, h=hits, t=term, nes=nes, fdr=fdr, dl=dl, cl=cl,
-                    f=font_sizes, sz=figsize, tc=theme_colors):
+                    f=font_sizes, sz=figsize):
             from kosmic.visualisation.de.gsea_mountain import (
                 create_gsea_mountain_plot,
             )
             return create_gsea_mountain_plot(
                 rc, h, t, nes=nes, fdr=fdr, disease_label=dl, control_label=cl,
-                figsize=sz, font_sizes=f, theme_colors=tc)
+                figsize=sz, font_sizes=f)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

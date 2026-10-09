@@ -47,7 +47,8 @@ class PCAElbowPage(FigurePage):
                 find_elbow, create_elbow_plot,
             )
             suggested = find_elbow(variance_ratio)
-            return create_elbow_plot(variance_ratio, suggested_pcs=suggested)
+            return create_elbow_plot(variance_ratio, suggested_pcs=suggested,
+                                     dark_mode=False)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

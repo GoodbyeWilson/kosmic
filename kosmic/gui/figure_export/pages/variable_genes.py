@@ -1,4 +1,4 @@
-# Highly Variable Genes page (scanpy dispersion plot).
+# Highly Variable Genes page: mean against normalised variance per gene.
 #
 # Reads from 'workspace.scrna_ws.current_adata' after HVG selection has run.
 
@@ -18,7 +18,7 @@ class VariableGenesPage(FigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        return FigureControls(default_w=10, default_h=8)
+        return FigureControls(default_w=7, default_h=5)
 
     def _adata(self):
         scrna = self.workspace.scrna_ws
@@ -38,16 +38,13 @@ class VariableGenesPage(FigurePage):
         if not self.dependencies_met():
             return None
         figsize = self._controls.figsize.get_figsize()
+        var = adata.var
+        flavor = adata.uns['hvg'].get('flavor', 'seurat')
+        font_sizes = self._font_sizes()
 
-        def _render(adata=adata, sz=figsize):
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            import scanpy as sc
-            sc.pl.highly_variable_genes(adata, show=False)
-            fig = plt.gcf()
-            fig.set_size_inches(*sz)
-            return fig
+        def _render(var=var, flavor=flavor, sz=figsize, f=font_sizes):
+            from kosmic.visualisation.scrna.hvg_plot import create_hvg_plot
+            return create_hvg_plot(var, flavor, figsize=sz, font_sizes=f)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

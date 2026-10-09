@@ -62,8 +62,13 @@ def load_fgsea_results(path):
     return df
 
 
+#: Permutations per run. A p or FDR of 0 means none of them reached the
+#: observed score, i.e. the value is below 1 / PERMUTATIONS.
+PERMUTATIONS = 1000
+
+
 def run_fgsea(gene_de_results, pathway_gene_sets, rank_by='logfoldchanges',
-              min_size=3, max_size=5000, permutation_num=1000, seed=0,
+              min_size=3, max_size=5000, permutation_num=PERMUTATIONS, seed=0,
               threads=4, return_details=False):
     """Preranked GSEA of pathways against the ranked gene-level DE results.
 

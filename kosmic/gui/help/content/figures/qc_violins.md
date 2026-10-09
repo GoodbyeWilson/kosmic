@@ -1,7 +1,6 @@
 # QC Violins
 
-Per-sample distributions of cell-level QC metrics (n_genes, total_counts, pct_mito).
-
-## What each panel shows
-
-*TODO.*
+Distributions of three cell-level QC metrics across all cells of the
+loaded dataset: genes detected per cell, total counts per cell, and the
+percentage of counts from mitochondrial (MT-) genes. The line in each
+violin marks the median.

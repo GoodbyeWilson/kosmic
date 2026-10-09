@@ -36,10 +36,38 @@ def _soft_palette(n, scheme='Default'):
     return [base[i % len(base)] for i in range(n)]
 
 
+def _corner_axes(ax, embedding_name, fontsize):
+    """Plain left and bottom axis lines with the axis names at the corner,
+    no ticks."""
+    from kosmic.visualisation.style import FG
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for side in ('top', 'right'):
+        ax.spines[side].set_visible(False)
+    for side in ('left', 'bottom'):
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_color(FG)
+    ax.set_xlabel(f'{embedding_name}1', loc='left', fontsize=fontsize)
+    ax.set_ylabel(f'{embedding_name}2', loc='bottom', fontsize=fontsize)
+
+
+def _label_centres(ax, coords, labels, values, fontsize):
+    """Write each value's name in bold at the median position of its cells,
+    largest groups first, without overlap. Call once the layout is final."""
+    from kosmic.visualisation.labels import place_labels
+    sizes = {v: int((labels == v).sum()) for v in values}
+    centres = [(v, *np.median(coords[labels == v], axis=0))
+               for v in sorted(values, key=sizes.get, reverse=True) if sizes[v]]
+    # Labels may run past the axes, so a long name stays on its cluster.
+    place_labels(ax, centres, fontsize, centred=True, fontweight='bold',
+                 avoid_points=False, within='figure')
+
+
+
 def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
                           figsize=(12, 10), point_size=3, alpha=0.7,
                           dpi=150, rasterized=True, font_sizes=None,
-                          scheme='Default'):
+                          scheme='Default', labels_on_plot=False):
     """Create a single embedding scatter plot colored by categorical labels.
 
     Parameters
@@ -62,6 +90,10 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
         Resolution for rasterized elements.
     rasterized : bool
         Rasterize scatter for publication PDFs.
+    labels_on_plot : bool
+        Write each category's name in bold at the median position of its
+        cells, without overlap, instead of drawing a legend; the axes then
+        show plain left and bottom axis lines.
 
     Returns
     -------
@@ -70,11 +102,6 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-
-    # Keep text/axes as editable vector objects in PDF/SVG (Illustrator);
-    # only the dense scatter is rasterized (below).
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
 
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes
@@ -100,13 +127,21 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
             linewidths=0,
         )
 
-    ax.set_xlabel(f'{embedding_name} 1', fontsize=font_sizes['axis_label'])
-    ax.set_ylabel(f'{embedding_name} 2', fontsize=font_sizes['axis_label'])
     if title:
         ax.set_title(title, fontsize=font_sizes['title'], fontweight='bold')
     ax.set_aspect('equal')
     ax.set_xticks([])
     ax.set_yticks([])
+
+    if labels_on_plot:
+        # Category names on the plot instead of a legend.
+        _corner_axes(ax, embedding_name, font_sizes['legend'])
+        plt.tight_layout()
+        _label_centres(ax, coords, labels, unique_vals, font_sizes['annotation'])
+        return fig
+
+    ax.set_xlabel(f'{embedding_name} 1', fontsize=font_sizes['axis_label'])
+    ax.set_ylabel(f'{embedding_name} 2', fontsize=font_sizes['axis_label'])
     for spine in ax.spines.values():
         spine.set_visible(False)
 
@@ -132,7 +167,7 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
 def create_highlight_plot(coords, labels, highlight_values, title='',
                           embedding_name='UMAP', figsize=(12, 10),
                           point_size=3, alpha=0.8, dpi=150, rasterized=True,
-                          font_sizes=None, scheme='Default'):
+                          font_sizes=None, scheme='Default', labels_on_plot=False):
     """Embedding plot with only the chosen categories coloured, the rest grey.
 
     Parameters
@@ -145,6 +180,8 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
         Value(s) to colour; every other cell is drawn grey in the background.
     point_size : float
         Size of the highlighted points (background uses a smaller size).
+    labels_on_plot : bool
+        Name the highlighted categories on the plot instead of in a legend.
 
     Returns
     -------
@@ -153,9 +190,6 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-
-    matplotlib.rcParams['pdf.fonttype'] = 42
-    matplotlib.rcParams['ps.fonttype'] = 42
 
     if font_sizes is None:
         from kosmic.visualisation import default_font_sizes
@@ -181,11 +215,17 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
                    rasterized=rasterized, edgecolors='none', linewidths=0,
                    label=f"{val} ({m.sum():,})")
 
-    ax.set_xlabel(f'{embedding_name} 1', fontsize=font_sizes['axis_label'])
-    ax.set_ylabel(f'{embedding_name} 2', fontsize=font_sizes['axis_label'])
     if title:
         ax.set_title(title, fontsize=font_sizes['title'], fontweight='bold')
     ax.set_aspect('equal')
+    if labels_on_plot:
+        _corner_axes(ax, embedding_name, font_sizes['legend'])
+        plt.tight_layout()
+        _label_centres(ax, coords, labels, highlight, font_sizes['annotation'])
+        return fig
+
+    ax.set_xlabel(f'{embedding_name} 1', fontsize=font_sizes['axis_label'])
+    ax.set_ylabel(f'{embedding_name} 2', fontsize=font_sizes['axis_label'])
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():

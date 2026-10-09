@@ -594,6 +594,7 @@ class AppWindow(QMainWindow):
             return
         ws.set_scrna_workspace(self._scrna_workspace)
         ws.set_de_workspace(self._de_workspace)
+        ws.set_meta_workspace(self._meta_workspace)
         ws.on_activated()
 
     def _activate_meta(self):
@@ -878,6 +879,7 @@ class AppWindow(QMainWindow):
             workspace = FigureExportWorkspace(
                 scrna_workspace=self._scrna_workspace,
                 de_workspace=self._de_workspace,
+                meta_workspace=self._meta_workspace,
             )
             # No workflow steps; reads project dir from upstream workspaces.
             self._connect_workspace_signals(

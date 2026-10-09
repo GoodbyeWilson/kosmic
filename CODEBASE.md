@@ -77,7 +77,7 @@ kosmic/                 the installable package
   de/                   pseudobulk DE, pathway scoring, enrichment, per-cell-type batch runs
   meta_analysis/        pooling methods, consensus, leave-one-out, permutation calibration
   combine/              shared atlas: concatenation, gene merging, label propagation
-  visualisation/        matplotlib figures
+  visualisation/        matplotlib figures; style.py writes every exported figure (ADR-009)
   reference/            bundled reference data (HGNC, gene sets, markers, GO, GWAS, Olink)
   gui/                  the PyQt6 layer
     shared/             theme, widgets, page archetypes, Explorer pane, plot widgets
@@ -152,7 +152,11 @@ subfolder holds that selection's result tables and its meta-analysis
 per-study workspaces in memory.
 
 **Figures** renders figures from the datasets and results currently
-held by the scRNA and Differential Expression workspaces.
+held by the scRNA, Differential Expression and Meta-Analysis workspaces.
+It reads the Meta-Analysis workspace only through
+`MetaAnalysisWorkspace.figure_inputs()`: the pooled gene and pathway
+tables of the latest runs and the studies' own DE tables for the current
+selection (ADR-010).
 
 **Combine** is a dialog opened from the Project workspace. It reads the
 selected studies' processed files, writes the shared atlas to

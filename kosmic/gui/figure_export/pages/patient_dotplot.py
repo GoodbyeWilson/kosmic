@@ -84,22 +84,23 @@ class PatientDotplotPage(FigurePage):
         standardize = self._controls.standardize.isChecked()
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
-        from kosmic.gui.shared.theme import get_color
-        theme_colors = {'plot_control': get_color('plot_control'),
-                        'plot_disease': get_color('plot_disease')}
+        # The Pathway DE FDR for each pathway, shown above its panel.
+        fdr = {}
+        pdr = getattr(de, 'pathway_de_results', None)
+        if pdr is not None and {'names', 'pvals_adj'} <= set(pdr.columns):
+            fdr = dict(zip(pdr['names'], pdr['pvals_adj'].astype(float)))
 
         def _render(data=data, d=d, c=c, std=standardize,
-                    f=font_sizes, sz=figsize, tc=theme_colors):
+                    f=font_sizes, sz=figsize, fdr=fdr):
             from kosmic.visualisation.de.dotplots import (
                 pathway_scores_to_sample_df, create_patient_dotplot,
             )
             sdf, pn = pathway_scores_to_sample_df(data, standardize=std)
             ylabel = ("Pathway score (z-scored)" if std
                       else "Pathway score (per donor)")
-            fig, _ = create_patient_dotplot(
+            return create_patient_dotplot(
                 sdf, pn, d, c, font_sizes=f, figsize=sz, ylabel=ylabel,
-                shared_y=std, theme_colors=tc)
-            return fig
+                shared_y=std, fdr_by_pathway=fdr)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

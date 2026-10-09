@@ -38,10 +38,11 @@ class QCViolinsPage(FigurePage):
             return None
         obs = adata.obs
         figsize = self._controls.figsize.get_figsize()
+        font_sizes = self._font_sizes()
 
-        def _render(obs=obs, sz=figsize):
+        def _render(obs=obs, sz=figsize, f=font_sizes):
             from kosmic.visualisation.scrna.qc_plots import create_qc_violin_plots
-            return create_qc_violin_plots(obs, figsize=sz)
+            return create_qc_violin_plots(obs, figsize=sz, dark_mode=False, font_sizes=f)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

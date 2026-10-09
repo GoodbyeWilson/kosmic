@@ -18,6 +18,7 @@ from kosmic.gui.shared.theme import get_export_dpi, get_font_sizes
 from kosmic.gui.shared.widgets import (
     BaseWorker, SecondaryButton, SecondaryLabel, SidebarPage,
 )
+from kosmic.visualisation import save_figure
 
 
 def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
@@ -30,27 +31,6 @@ def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
-
-
-def _save_png_pdf(fig, png_path: Path) -> Path:
-    """Save fig to png_path and a sibling .pdf at the user-configured DPI.
-
-    facecolor is preserved so dark-mode previews export accurately.
-    Closes the figure.
-    """
-    import matplotlib.pyplot as plt
-
-    dpi = get_export_dpi()
-    fig.savefig(png_path, dpi=dpi, bbox_inches='tight',
-                facecolor=fig.get_facecolor(), edgecolor='none')
-    if png_path.suffix.lower() == '.png':
-        # Vector PDF with editable text/axes; any rasterized artist (e.g. a
-        # dense UMAP scatter) is rendered crisply, not at the ~100 dpi default.
-        fig.savefig(png_path.with_suffix('.pdf'), dpi=max(dpi, 400),
-                    bbox_inches='tight',
-                    facecolor=fig.get_facecolor(), edgecolor='none')
-    plt.close(fig)
-    return png_path
 
 
 class RenderWorker(BaseWorker):
@@ -118,7 +98,7 @@ class FigurePage(SidebarPage):
 
         self.sidebar_layout.addStretch()
 
-        self._export_btn = SecondaryButton("Export PNG + PDF")
+        self._export_btn = SecondaryButton("Export figure…")
         self._export_btn.clicked.connect(self._export_current)
         self.sidebar_layout.addWidget(self._export_btn)
 
@@ -259,25 +239,37 @@ class FigurePage(SidebarPage):
         else:
             default_path = f"{self._default_export_basename()}.png"
 
-        path, _ = QFileDialog.getSaveFileName(
+        path, chosen = QFileDialog.getSaveFileName(
             self, f"Export {self.TITLE}", default_path,
             "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)",
         )
         if not path:
             return
+        if not Path(path).suffix:
+            path += '.' + chosen.split()[0].lower()   # "PDF (*.pdf)" -> ".pdf"
 
         try:
             fig = func()
             if fig is None:
                 self._status_lbl.setText("Render returned no figure; export aborted.")
                 return
-            saved = _save_png_pdf(fig, Path(path))
-            self._status_lbl.setText(f"Exported to {saved}")
+            saved = save_figure(fig, path, dpi=get_export_dpi())
+            extra = self._export_companions(saved)
+            msg = f"Exported to {saved}"
+            if extra:
+                msg += " (+ " + ", ".join(p.name for p in extra) + ")"
+            self._status_lbl.setText(msg)
             self.log_message.emit(f"Figure exported: {saved}")
         except Exception as e:
             self._status_lbl.setText(f"Export failed: {e}")
 
     # -- Hooks ----------------------------------------------------------
+
+    def _export_companions(self, fig_path: Path) -> list[Path]:
+        """Override to write files next to the exported figure, such as a
+        text file of the numbers behind it (ADR-010). Returns the paths
+        written. Default: none."""
+        return []
 
     def dependencies_met(self) -> bool:
         """Override: return True iff the workspace state can drive a render."""
