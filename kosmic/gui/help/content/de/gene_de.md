@@ -125,6 +125,11 @@ Y = -log10 FDR. Dots above the horizontal line and beyond the vertical
 lines pass the current significance thresholds. Click a dot to select
 the gene in the table and other tabs.
 
+After **Run per cell type...**, and when a study whose results were
+saved per cell type is reopened, a **Cell type** list appears under the
+volcano. The cell type chosen there is shown in the volcano, the DE
+Results table and the Figures workspace's volcano plot.
+
 ### DE Results table
 
 Sortable, filterable. The sidebar's display filters apply to this tab
