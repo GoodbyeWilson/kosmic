@@ -43,6 +43,10 @@ def create_marker_dotplot(mean, pct, owner, *, title='Marker genes',
     """Dot plot of marker genes (columns, grouped by the cell type they mark)
     against the data's cell types (rows).
 
+    Dot area is proportional to the percentage of cells expressing the
+    gene. The colour scale is capped at the 99.5th percentile of the mean
+    expression shown; an arrow on the colour bar marks the cap.
+
     Parameters
     ----------
     mean, pct : pandas.DataFrame
@@ -53,10 +57,6 @@ def create_marker_dotplot(mean, pct, owner, *, title='Marker genes',
         with a bracket over each panel's genes.
     colour_label : str
         Colour bar label, naming the expression unit.
-
-    Dot area is proportional to the percentage of cells expressing the
-    gene. The colour scale is capped at the 99.5th percentile of the mean
-    expression shown; an arrow on the colour bar marks the cap.
     """
     import matplotlib
     matplotlib.use('Agg')
