@@ -122,6 +122,9 @@ nav:
       - Variable genes: figures/variable_genes.md
       - Elbow: figures/elbow.md
       - UMAP: figures/umap.md
+      - Marker dot plot: figures/marker_dotplot.md
+      - Marker score UMAPs: figures/marker_scores.md
+      - Cell-type composition: figures/composition.md
       - Gene heatmap: figures/gene_heatmap.md
       - Patient dot plot: figures/patient_dotplot.md
       - Volcano: figures/volcano.md

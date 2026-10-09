@@ -36,6 +36,14 @@ def _soft_palette(n, scheme='Default'):
     return [base[i % len(base)] for i in range(n)]
 
 
+def category_colours(labels, scheme='Default'):
+    """``{category: colour}`` as the embedding plots assign them (sorted
+    categories, in palette order), so another figure of the same column
+    uses the same colours."""
+    values = sorted(set(np.asarray(labels, dtype=str)))
+    return dict(zip(values, _soft_palette(len(values), scheme)))
+
+
 def _corner_axes(ax, embedding_name, fontsize):
     """Plain left and bottom axis lines with the axis names at the corner,
     no ticks."""

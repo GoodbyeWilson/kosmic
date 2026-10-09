@@ -14,6 +14,9 @@ from PyQt6.QtWidgets import (
 
 from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.shared import borderless
+from kosmic.gui.figure_export.pages.cell_types import (
+    CompositionPage, MarkerDotPlotPage, MarkerScoreUMAPPage,
+)
 from kosmic.gui.figure_export.pages.dataset_summary import DatasetSummaryPage
 from kosmic.gui.figure_export.pages.elbow import PCAElbowPage
 from kosmic.gui.figure_export.pages.enriched_terms import EnrichedTermsPage
@@ -39,6 +42,10 @@ from kosmic.gui.figure_export.pages.volcano import VolcanoPage
 _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     # Embeddings
     ("Embeddings", UMAPPage),
+    # Cell types
+    ("Cell Types", MarkerDotPlotPage),
+    ("Cell Types", MarkerScoreUMAPPage),
+    ("Cell Types", CompositionPage),
     # Single-cell QC
     ("Single-cell QC", QCViolinsPage),
     ("Single-cell QC", VariableGenesPage),
