@@ -1368,6 +1368,10 @@ class GeneDEPage(SidebarTabbedPage):
 
         path = de_result_path(self.ws.project_dir, gse_id, label)
         if not path.is_file():
+            # A study analysed per cell type has one result file per cell
+            # type and no whole-study file: offer them in the picker.
+            self._batch_runs = self._load_cell_type_runs(stats_dir, gse_id, label)
+            self._populate_batch_view()
             return
         try:
             de_results = pd.read_csv(path)
@@ -1376,6 +1380,36 @@ class GeneDEPage(SidebarTabbedPage):
             self._apply_loaded_results(de_results, path.name)
         except Exception as e:
             self.ws.log_message.emit(f"Could not load previous DE results: {e}")
+
+    def _load_cell_type_runs(self, stats_dir, accession, label):
+        """Saved per-cell-type results ('{accession}_{cell type}_DE_{label}.csv')."""
+        import pandas as pd
+
+        from kosmic.de.batch import CellTypeRun
+        from kosmic.de.de_analysis import significant_subset
+
+        runs = []
+        prefix, suffix = f"{accession}_", f"_DE_{label}.csv"
+        for path in sorted(stats_dir.glob(f"{prefix}*{suffix}")):
+            slug = path.name[len(prefix):-len(suffix)]
+            try:
+                df = pd.read_csv(path)
+            except Exception as e:
+                self.ws.log_message.emit(f"Could not load {path.name}: {e}")
+                continue
+            if df.empty or 'names' not in df.columns:
+                continue
+            donors = sum(int(df[c].iloc[0]) for c in
+                         ('disease_samples', 'control_samples') if c in df.columns)
+            runs.append(CellTypeRun(
+                cell_type=slug, slug=slug, accession=f"{accession}_{slug}",
+                status='ok', n_samples=donors,
+                n_genes_tested=len(df),
+                n_significant=len(significant_subset(
+                    df, fdr=self.pval_filter.value(), lfc=self.fc_filter.value())),
+                de_path=path, de_results=df,
+            ))
+        return runs
 
     def _apply_loaded_results(self, de_results, source_name):
         """Apply loaded DE results to the workspace and refresh the UI."""
