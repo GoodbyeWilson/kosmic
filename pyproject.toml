@@ -141,6 +141,7 @@ exclude = ["tests*", "dev*"]
 "kosmic.gui.help.tutorial" = ["*.toml"]
 "kosmic.reference.cell_type_focus" = ["*.json"]
 "kosmic.reference.contamination" = ["*.json"]
+"kosmic.reference.marker_panels" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

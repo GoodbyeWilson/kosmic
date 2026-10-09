@@ -67,3 +67,18 @@ def place_labels(ax, labels, fontsize, *, centred=False, fontweight='normal',
                 break
             ann.remove()
     return placed
+
+
+def draw_bracket(ax, x0, x1, text, fontsize, *, y=1.01, height=0.012, rotation=0):
+    """Bracket over the data x range *x0*..*x1* (inclusive positions) just
+    above the axes, with *text* over its centre. *y* and *height* are in
+    axes fractions; the bracket is drawn outside the axes, so the figure's
+    tight layout keeps room for it."""
+    from matplotlib.transforms import blended_transform_factory
+
+    tr = blended_transform_factory(ax.transData, ax.transAxes)
+    a, b = x0 - 0.35, x1 + 0.35
+    ax.plot([a, a, b, b], [y, y + height, y + height, y], color=FG, lw=0.8,
+            transform=tr, clip_on=False)
+    ax.text((x0 + x1) / 2, y + height * 1.6, text, transform=tr, fontsize=fontsize,
+            ha='center', va='bottom', rotation=rotation, color=FG, clip_on=False)

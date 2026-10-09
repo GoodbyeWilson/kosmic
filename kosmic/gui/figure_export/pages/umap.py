@@ -29,6 +29,26 @@ def _count_title(labels, col: str) -> str:
     return f"{len(labels):,} cells across {k} {noun}"
 
 
+def label_columns(adata) -> list[str]:
+    """Categorical obs columns suitable for colouring or grouping, coarse-to-
+    fine label columns first. The cap is high enough to include fine subtype
+    columns (e.g. 'predicted_labels', ~70 categories)."""
+    out: list[str] = []
+    for c in ('cell_type', 'Names', 'predicted_labels', 'leiden',
+              'clusters', 'seurat_clusters', 'condition', 'sample', 'batch'):
+        if c in adata.obs.columns and c not in out:
+            out.append(c)
+    for c in adata.obs.columns:
+        if c in out or c.startswith('_'):   # '_' columns are internal
+            continue
+        dtype = adata.obs[c].dtype
+        if str(dtype) == 'category' or dtype == 'object':
+            n = adata.obs[c].nunique()
+            if 1 < n <= 100:
+                out.append(c)
+    return out
+
+
 # Highlight selector default: colour every category (no single-category focus).
 HL_NONE = "(show all categories)"
 
@@ -150,29 +170,10 @@ class UMAPPage(FigurePage):
     def on_activated(self):
         adata = self._adata()
         if adata is not None:
-            cols = self._available_columns(adata)
+            cols = label_columns(adata)
             self._controls.populate_columns(cols)
             self._sync_highlight(adata)
         super().on_activated()
-
-    def _available_columns(self, adata) -> list[str]:
-        """Categorical columns suitable for colouring, coarse-to-fine label
-        columns first. The cap is high enough to include fine subtype columns
-        (e.g. 'predicted_labels', ~70 categories)."""
-        out: list[str] = []
-        for c in ('cell_type', 'Names', 'predicted_labels', 'leiden',
-                  'clusters', 'seurat_clusters', 'condition', 'sample', 'batch'):
-            if c in adata.obs.columns and c not in out:
-                out.append(c)
-        for c in adata.obs.columns:
-            if c in out or c.startswith('_'):   # '_' columns are internal
-                continue
-            dtype = adata.obs[c].dtype
-            if str(dtype) == 'category' or dtype == 'object':
-                n = adata.obs[c].nunique()
-                if 1 < n <= 100:
-                    out.append(c)
-        return out
 
     def _make_render_func(self):
         adata = self._adata()

@@ -48,6 +48,16 @@ def diverging_cmap():
                                              [DOWN_COLOR, '#F7F7F7', UP_COLOR])
 
 
+def sequential_cmap():
+    """Light grey - red - dark red colour map for values that start at zero,
+    such as expression and module scores. The low end stays visible on a
+    white background."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    return LinearSegmentedColormap.from_list('kosmic_sequential',
+                                             ['#D9D9D9', UP_COLOR, '#7A1F1F'])
+
+
 def apply_export_rcparams() -> None:
     """Set the export rcParams for the whole process."""
     import matplotlib

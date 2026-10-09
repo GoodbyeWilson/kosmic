@@ -1,0 +1,20 @@
+{
+  "name": "Cardiac (human, curated)",
+  "species": "Human",
+  "panels": {
+    "Cardiomyocyte": ["TNNT2", "SMYD1", "MYH6", "MYBPC3", "TRDN"],
+    "Fibroblast": ["DCN", "COL6A3", "CCDC80", "PDGFRA", "LUM", "MEG3"],
+    "Pericyte": ["RGS5", "ABCC9", "EGFLAM", "NOTCH3", "KCNJ8"],
+    "Endothelial": ["VWF", "PTPRB", "BTNL9", "CLIC5", "MGLL"],
+    "vSMC": ["MYH11", "ACTA2", "TAGLN", "MYLK", "NTRK3"],
+    "Endocardial": ["PKHD1L1", "CDH11", "PCDH15", "MYRIP", "LEPR"],
+    "Lymphatic endothelial": ["CCL21", "MMRN1", "FLT4", "PARD6G", "TBX1"],
+    "T_NK": ["CD247", "SLFN12L", "BCL11B", "THEMIS", "SAMD3"],
+    "B cell": ["BANK1", "MS4A1", "MZB1", "POU2AF1", "IGKC", "IGHM"],
+    "Myeloid": ["F13A1", "CD163", "MS4A6A", "MERTK", "CSF1R"],
+    "Mast": ["CPA3", "KIT", "TPSAB1", "HDC"],
+    "Adipocyte": ["PLIN1", "GPAM", "SLC19A3", "ADIPOQ", "PPARG", "FASN"],
+    "Epicardial": ["PRG4", "HAS1", "ITLN1", "FAM110C", "WT1"],
+    "Glial": ["NRXN1", "NRXN3", "PLP1", "SOX10"]
+  }
+}
