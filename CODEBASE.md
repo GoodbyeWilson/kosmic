@@ -155,8 +155,9 @@ per-study workspaces in memory.
 held by the scRNA, Differential Expression and Meta-Analysis workspaces.
 It reads the Meta-Analysis workspace only through
 `MetaAnalysisWorkspace.figure_inputs()`: the pooled gene and pathway
-tables of the latest runs and the studies' own DE tables for the current
-selection (ADR-010).
+tables of the latest runs, the studies' own DE tables for the current
+selection and the Enrichment step's last runs on the pooled gene list
+(ADR-010).
 
 **Combine** is a dialog opened from the Project workspace. It reads the
 selected studies' processed files, writes the shared atlas to

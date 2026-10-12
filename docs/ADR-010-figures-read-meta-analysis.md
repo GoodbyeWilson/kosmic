@@ -35,6 +35,29 @@ leave-one-out plot also needs each study's effect and standard error.
    per-study or per-fold rows). `FigurePage` gains a hook,
    `_export_companions`, that pages override to write such files.
 
+## Amendment (2026-10-12): meta-analysis enrichment
+
+The Meta-Analysis workspace's Enrichment step (GO / Enrichr
+over-representation and preranked GSEA of the pooled gene list) kept its
+results to itself, so the enrichment figure pages showed only DE
+workspace runs.
+
+6. `figure_inputs()` also returns the Enrichment step's last runs:
+   `enrichment_results`, `gsea_library_results`, `gsea_library_details`,
+   `gsea_library_name`, and `enrichment_ranking` (the pooled table the
+   genes came from, for fold changes). They are None until a run has
+   finished in this session.
+7. The Enriched Terms, Enriched Term Links, Library GSEA and running
+   enrichment pages read either source through a shared base
+   (`pages/_enrichment.py`). When both workspaces hold a run, a Source
+   selector chooses between them, starting on the meta-analysis; exports
+   from the meta-analysis source go to its output folder. The fgsea page
+   for the a-priori pathway panel stays DE-only: the meta-analysis has no
+   equivalent run.
+8. Meta-analysis enrichment results are not saved and reloaded; as with
+   the DE workspace's GO / Enrichr results, a run is needed in each
+   session.
+
 ## Consequences
 
 - Meta-analysis figures are available only after a meta-analysis has run
