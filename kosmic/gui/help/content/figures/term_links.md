@@ -1,8 +1,21 @@
 # Enriched term links
 
 Shows which DE genes are behind the top enriched terms, as a chord diagram
-or a grid. It reads the last enrichment run in the DE workspace (GO, or an
-Enrichr library) and the genes' log2 fold changes from Gene DE.
+or a grid. It reads the last enrichment run (GO, or an Enrichr library)
+and the genes' log2 fold changes: from Gene DE for the DE workspace's
+run, and the pooled log2 fold changes for the Meta-Analysis workspace's
+run.
+
+## Source
+
+The run can come from the DE workspace's Enrichment page (one study's
+DE) or from the Meta-Analysis workspace's Enrichment step (the pooled
+gene list). When both have been run in this session, a **Source**
+selector chooses between them; it starts on *Meta-analysis*. With only
+one run, that run is shown and the selector is hidden. A meta-analysis
+figure is titled with the cell type followed by "(pooled)", and its
+export is saved to the meta-analysis output folder for that cell type,
+with file names starting `meta_`.
 
 ## Which terms and genes
 

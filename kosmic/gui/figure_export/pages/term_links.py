@@ -1,18 +1,15 @@
 # Enriched term links page: the top enriched terms and the DE genes behind
 # them, as a chord diagram or a gene x term grid.
 #
-# Reads 'workspace.de_ws.enrichment_results' (the last enrichment run in the
-# DE workspace: GO or an Enrichr library) and 'de_ws.de_results' for the
-# genes' log2 fold changes.
+# Reads the last enrichment run (GO or an Enrichr library) and the genes'
+# log2 fold changes from the DE workspace or, for the Meta-Analysis
+# workspace's Enrichment step, the pooled table (see _enrichment.py).
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
 from PyQt6.QtWidgets import QCheckBox, QComboBox, QSpinBox
 
-from kosmic.gui.figure_export.pages._base import FigurePage
+from kosmic.gui.figure_export.pages._enrichment import EnrichmentFigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
 VIEW_CHORD, VIEW_GRID = "Chord", "Grid"
@@ -56,34 +53,33 @@ class _TermLinksControls(FigureControls):
         self.add_row("", self.exclude_mt)
 
 
-class TermLinksPage(FigurePage):
+class TermLinksPage(EnrichmentFigurePage):
     TITLE = "Enriched Term Links"
     CHECKS_DE_STALENESS = True
     UNAVAILABLE_MESSAGE = (
-        "Run enrichment (GO or an Enrichr library) in the DE workflow to view "
-        "this figure."
+        "Run enrichment (GO or an Enrichr library) in the DE or Meta-Analysis "
+        "workspace to view this figure."
     )
 
     def _build_controls(self) -> _TermLinksControls:
-        return _TermLinksControls()
+        return self._add_source_row(_TermLinksControls())
 
-    def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        enr = getattr(de, 'enrichment_results', None)
-        dr = getattr(de, 'de_results', None)
+    def _has_run(self, src, is_meta: bool) -> bool:
+        # The ribbons need the genes' fold changes as well as the terms.
+        enr = getattr(src, 'enrichment_results', None)
+        dr = getattr(src, 'de_results', None)
         return (enr is not None and not enr.empty and 'Genes' in enr.columns
-                and dr is not None and not dr.empty)
+                and dr is not None and not dr.empty
+                and {'names', 'logfoldchanges'} <= set(dr.columns))
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        src = self._source()
+        if src is None:
             return None
-        de = self.workspace.de_ws
-        enr = de.enrichment_results.copy()
-        dr = de.de_results[['names', 'logfoldchanges']].copy()
+        enr = src.enrichment_results.copy()
+        dr = src.de_results[['names', 'logfoldchanges']].copy()
         label = enr.attrs.get('significance_label', 'FDR')
-        d, c = de.disease_label, de.control_label
+        contrast = self._contrast(src)
         ctrl = self._controls
         chord = ctrl.view.currentText() == VIEW_CHORD
         order = 'lfc' if ctrl.order.currentText() == ORDER_LFC else 'term'
@@ -92,15 +88,15 @@ class TermLinksPage(FigurePage):
         figsize = ctrl.figsize.get_figsize()
         font_sizes = self._font_sizes()
 
-        def _render(enr=enr, dr=dr, label=label, d=d, c=c, chord=chord, order=order,
-                    n_terms=n_terms, per_term=per_term, exclude=exclude,
+        def _render(enr=enr, dr=dr, label=label, contrast=contrast, chord=chord,
+                    order=order, n_terms=n_terms, per_term=per_term, exclude=exclude,
                     sz=figsize, f=font_sizes):
             from kosmic.visualisation.de.term_links import (
                 create_term_chord, create_term_grid, select_term_genes,
             )
             members, lfc, n_passing = select_term_genes(
                 enr, dr, n_terms, per_term, exclude_groups=exclude)
-            title = f'Top enriched terms: {d} vs {c}'
+            title = f'Top enriched terms: {contrast}' if contrast else 'Top enriched terms'
             if not n_passing:
                 title += f'\n(no term at {label} < 0.05)'
             make = create_term_chord if chord else create_term_grid
@@ -108,13 +104,7 @@ class TermLinksPage(FigurePage):
                         font_sizes=f)
         return _render
 
-    def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
-
     def _default_export_basename(self) -> str:
         view = self._controls.view.currentText().lower()
-        return f"enriched_term_links_{view}"
+        prefix = 'meta_' if self._is_meta() else ''
+        return f"{prefix}enriched_term_links_{view}"

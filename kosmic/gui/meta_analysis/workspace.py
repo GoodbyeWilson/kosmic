@@ -131,10 +131,23 @@ class MetaAnalysisWorkspace(QWidget):
         'pathway_studies' (lists of (study name, DE table) for the current
         selection, as loaded from each study's DE file), 'selection' (the
         selection's folder name, e.g. the cell type) and 'project_folder'.
+
+        The Enrichment step's last runs on the pooled gene list, None until
+        one has run: 'enrichment_results' (GO / Enrichr over-representation,
+        in the DE workspace's normalised form), 'gsea_library_results',
+        'gsea_library_details' and 'gsea_library_name' (preranked GSEA), and
+        'enrichment_ranking' (the pooled table the genes were taken from).
         """
         gene_page = getattr(self, '_gene_ma_page', None)
         pw_page = getattr(self, '_pw_ma_page', None)
+        enr_page = getattr(self, '_enrichment_page', None)
+        ctx = enr_page.context if enr_page is not None else None
         return {
+            'enrichment_results': getattr(ctx, 'enrichment_results', None),
+            'gsea_library_results': getattr(ctx, 'gsea_library_results', None),
+            'gsea_library_details': getattr(ctx, 'gsea_library_details', None),
+            'gsea_library_name': getattr(ctx, 'gsea_library_name', None),
+            'enrichment_ranking': getattr(ctx, 'de_results', None),
             'gene_results': getattr(gene_page, '_meta_df', None),
             'pathway_results': getattr(pw_page, '_meta_df', None),
             'gene_studies': [(d['name'], d['df']) for d in self.datasets],

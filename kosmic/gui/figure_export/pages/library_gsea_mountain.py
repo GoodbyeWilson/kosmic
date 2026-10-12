@@ -1,16 +1,14 @@
 # Library GSEA running-enrichment ("mountain") plot page.
 #
 # Draws the running-enrichment curve for one gene set from the last library
-# GSEA run on the DE Enrichment tab. The curves are held in memory by that
-# run ('de_ws.gsea_library_details'), so this figure is generated in the same
-# session as the GSEA -- it is not reloaded from disk.
+# GSEA run on the DE Enrichment tab or the Meta-Analysis Enrichment step (see
+# _enrichment.py). The curves are held in memory by that run
+# ('gsea_library_details'), so this figure is generated in the same session
+# as the GSEA -- it is not reloaded from disk.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
-from kosmic.gui.figure_export.pages._base import FigurePage
+from kosmic.gui.figure_export.pages._enrichment import EnrichmentFigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 from kosmic.gui.shared.theme import NoScrollComboBox
 
@@ -25,24 +23,30 @@ class _MountainControls(FigureControls):
         self.add_row("Gene set:", self.term_combo)
 
 
-class LibraryGseaMountainPage(FigurePage):
+class LibraryGseaMountainPage(EnrichmentFigurePage):
     TITLE = "Library GSEA (running enrichment)"
     CHECKS_DE_STALENESS = True
+    KIND = 'gsea'
     UNAVAILABLE_MESSAGE = (
-        "Run preranked GSEA against a library on the DE Enrichment tab first -- "
-        "this figure draws the running-enrichment curve from that run."
+        "Run preranked GSEA against a library on the DE or Meta-Analysis "
+        "Enrichment step first -- this figure draws the running-enrichment "
+        "curve from that run."
     )
 
     def _build_controls(self) -> FigureControls:
-        return _MountainControls()
+        ctrl = self._add_source_row(_MountainControls())
+        # Each source has its own gene sets.
+        ctrl.source.currentIndexChanged.connect(self._sync_terms)
+        return ctrl
 
     # -- data access ----------------------------------------------------
 
+    def _has_run(self, src, is_meta: bool) -> bool:
+        return bool(getattr(src, 'gsea_library_details', None))
+
     def _details(self):
-        de = self.workspace.de_ws
-        if de is None:
-            return None
-        return getattr(de, 'gsea_library_details', None) or None
+        src = self._source()
+        return getattr(src, 'gsea_library_details', None) or None
 
     def _ordered_terms(self):
         """Gene sets with a stored curve, most down-regulated (lowest NES) first
@@ -56,6 +60,7 @@ class LibraryGseaMountainPage(FigurePage):
     # -- lifecycle ------------------------------------------------------
 
     def on_activated(self):
+        self._sync_sources()
         self._sync_terms()
         self.invalidate()  # curves live in memory and may have changed
         super().on_activated()
@@ -71,12 +76,10 @@ class LibraryGseaMountainPage(FigurePage):
             combo.setCurrentText(current)
         combo.blockSignals(False)
 
-    def dependencies_met(self) -> bool:
-        return bool(self._ordered_terms())
-
     # -- render ---------------------------------------------------------
 
     def _make_render_func(self):
+        src = self._source()
         det = self._details()
         terms = self._ordered_terms()
         if not det or not terms:
@@ -86,17 +89,16 @@ class LibraryGseaMountainPage(FigurePage):
             term = terms[0]
         d = det[term]
 
-        de = self.workspace.de_ws
         nes = d.get('nes')
         fdr = None
-        summary = getattr(de, 'gsea_library_results', None)
+        summary = getattr(src, 'gsea_library_results', None)
         if summary is not None and len(summary):
             hit = summary[summary['names'].astype(str) == term]
             if len(hit):
                 import pandas as pd
                 fdr = pd.to_numeric(hit['pvals_adj'], errors='coerce').iloc[0]
-        dl = getattr(de, 'disease_label', None)
-        cl = getattr(de, 'control_label', None)
+        dl = getattr(src, 'disease_label', None)
+        cl = getattr(src, 'control_label', None)
         res_curve = d['RES']
         hits = d['hits']
         font_sizes = self._font_sizes()
@@ -111,12 +113,6 @@ class LibraryGseaMountainPage(FigurePage):
                 figsize=sz, font_sizes=f)
         return _render
 
-    def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
-
     def _default_export_basename(self) -> str:
-        return "library_gsea_running_enrichment"
+        prefix = 'meta_' if self._is_meta() else ''
+        return f"{prefix}library_gsea_running_enrichment"

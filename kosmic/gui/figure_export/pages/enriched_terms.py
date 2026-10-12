@@ -1,17 +1,14 @@
 # Enriched terms page: the top terms of the last enrichment run, as a dot
 # plot (fold enrichment, gene count, significance) or a bar plot.
 #
-# Reads from 'workspace.de_ws.enrichment_results' (populated after running
-# discovery-mode enrichment in the DE workspace).
+# Reads 'enrichment_results' from the DE workspace's Enrichment page or the
+# Meta-Analysis workspace's Enrichment step (see _enrichment.py).
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
 from PyQt6.QtWidgets import QComboBox, QSpinBox
 
-from kosmic.gui.figure_export.pages._base import FigurePage
+from kosmic.gui.figure_export.pages._enrichment import EnrichmentFigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
 VIEW_DOT, VIEW_BAR = "Dot", "Bar"
@@ -32,48 +29,40 @@ class _EnrichedTermsControls(FigureControls):
         self.add_row("Terms:", self.top_n)
 
 
-class EnrichedTermsPage(FigurePage):
+class EnrichedTermsPage(EnrichmentFigurePage):
     TITLE = "Enriched Terms"
     CHECKS_DE_STALENESS = True
     UNAVAILABLE_MESSAGE = (
-        "Run pathway enrichment in the DE workflow to view this figure."
+        "Run enrichment (GO or an Enrichr library) in the DE or Meta-Analysis "
+        "workspace to view this figure."
     )
 
     def _build_controls(self) -> _EnrichedTermsControls:
-        return _EnrichedTermsControls()
-
-    def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        enr = getattr(de, 'enrichment_results', None)
-        return enr is not None and not enr.empty
+        return self._add_source_row(_EnrichedTermsControls())
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        src = self._source()
+        if src is None:
             return None
-        df = self.workspace.de_ws.enrichment_results.copy()
+        df = src.enrichment_results.copy()
         label = df.attrs.get('significance_label', 'FDR')
+        contrast = self._contrast(src)
+        title = f'Top enriched terms: {contrast}' if contrast else 'Top enriched terms'
         dot = self._controls.view.currentText() == VIEW_DOT
         top_n = self._controls.top_n.value()
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
 
-        def _render(df=df, label=label, dot=dot, top_n=top_n, f=font_sizes, sz=figsize):
+        def _render(df=df, label=label, title=title, dot=dot, top_n=top_n,
+                    f=font_sizes, sz=figsize):
             from kosmic.visualisation.de.enrichment import (
                 create_enrichment_bar_plot, create_enrichment_dot_plot,
             )
             make = create_enrichment_dot_plot if dot else create_enrichment_bar_plot
-            return make(df, top_n=top_n, figsize=sz, font_sizes=f,
+            return make(df, top_n=top_n, figsize=sz, font_sizes=f, title=title,
                         significance_label=label)
         return _render
 
-    def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
-
     def _default_export_basename(self) -> str:
-        return f"enriched_terms_{self._controls.view.currentText().lower()}"
+        prefix = 'meta_' if self._is_meta() else ''
+        return f"{prefix}enriched_terms_{self._controls.view.currentText().lower()}"
