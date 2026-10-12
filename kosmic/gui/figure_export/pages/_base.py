@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -21,6 +22,13 @@ from kosmic.gui.shared.widgets import (
 from kosmic.visualisation import save_figure
 
 
+#: Held while a figure is built and drawn. Matplotlib is not thread-safe
+#: (its mathtext parser fails on concurrent use), and a preview draws on a
+#: worker thread while an export draws on the main thread, so the two take
+#: turns: an export started during a preview waits for it.
+MPL_LOCK = threading.Lock()
+
+
 def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
     """Serialise a matplotlib Figure to PNG bytes and close it."""
     import matplotlib.pyplot as plt
@@ -31,6 +39,36 @@ def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+# Preview renders still running. Qt aborts the process when a QThread is
+# destroyed while it runs, which happened when KOSMIC was closed during a
+# render (or a test ended during one). A render cannot be stopped part-way
+# -- matplotlib has no cancellation point -- so KOSMIC waits for these to
+# finish before it quits. The window is already closed by then.
+_LIVE_RENDERS: set = set()
+_quit_hooked = False
+
+
+def wait_for_renders() -> None:
+    """Block until every running preview render has finished."""
+    for worker in list(_LIVE_RENDERS):
+        worker.wait()
+        _LIVE_RENDERS.discard(worker)
+
+
+def _track(worker) -> None:
+    """Record *worker* until it finishes, and make sure the application waits
+    for running renders before it quits."""
+    global _quit_hooked
+    _LIVE_RENDERS.add(worker)
+    worker.finished.connect(lambda w=worker: _LIVE_RENDERS.discard(w))
+    if not _quit_hooked:
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(wait_for_renders)
+            _quit_hooked = True
 
 
 class RenderWorker(BaseWorker):
@@ -44,10 +82,11 @@ class RenderWorker(BaseWorker):
         self._func = func
 
     def _run(self):
-        fig = self._func()
-        if fig is None:
-            return b''
-        return _fig_to_png_bytes(fig)
+        with MPL_LOCK:
+            fig = self._func()
+            if fig is None:
+                return b''
+            return _fig_to_png_bytes(fig)
 
 
 class FigurePage(SidebarPage):
@@ -183,6 +222,7 @@ class FigurePage(SidebarPage):
 
         self._status_lbl.setText("Rendering...")
         self._render_worker = RenderWorker(func, parent=self)
+        _track(self._render_worker)
         run_worker(
             self._render_worker,
             on_finished=self._on_render_finished,
@@ -249,11 +289,12 @@ class FigurePage(SidebarPage):
             path += '.' + chosen.split()[0].lower()   # "PDF (*.pdf)" -> ".pdf"
 
         try:
-            fig = func()
-            if fig is None:
-                self._status_lbl.setText("Render returned no figure; export aborted.")
-                return
-            saved = save_figure(fig, path, dpi=get_export_dpi())
+            with MPL_LOCK:
+                fig = func()
+                if fig is None:
+                    self._status_lbl.setText("Render returned no figure; export aborted.")
+                    return
+                saved = save_figure(fig, path, dpi=get_export_dpi())
             extra = self._export_companions(saved)
             msg = f"Exported to {saved}"
             if extra:

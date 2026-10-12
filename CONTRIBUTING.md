@@ -182,6 +182,22 @@ traceback. Every widget needs a parent or a layout. In tests, hold the
 QApplication([])` as a bare statement collects it immediately and
 crashes mid-test.
 
+**A running `QThread` must not be destroyed.** Qt aborts the whole
+process ("QThread: Destroyed while thread is still running") when a
+worker is deleted mid-run, for example with the page that owns it when
+the application quits or a test ends. Wait for the worker first. Figure
+previews are tracked for this: the application waits for them before it
+quits, and a test that opens a figure page calls
+`kosmic.gui.figure_export.pages._base.wait_for_renders()` before the
+page is discarded.
+
+**Matplotlib is not thread-safe.** Two figures drawn at once on
+different threads fail at random, most often in the mathtext parser
+(`ParseException` on a label such as `Log$_2$`). Figure previews draw on
+a worker thread and exports on the main thread, so both hold
+`_base.MPL_LOCK` while they build and draw a figure. Hold it in any new
+code that draws a figure off the main thread.
+
 **A parentless `QWidget` is a window.** Calling `setVisible(True)` on
 one before adding it to a layout flashes an empty frame on screen.
 

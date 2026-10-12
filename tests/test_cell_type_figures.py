@@ -105,7 +105,20 @@ def test_plots_render():
 def qapp():
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PyQt6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
+    from kosmic.gui.figure_export.pages._base import wait_for_renders
+    yield QApplication.instance() or QApplication([])
+    # A page discarded while its preview renders would take the thread with it.
+    wait_for_renders()
+
+
+def _open(page, qapp):
+    """Open *page* as the Figures workspace does, wait for the preview it
+    starts, and check the preview was drawn."""
+    from kosmic.gui.figure_export.pages._base import wait_for_renders
+    page.on_activated()
+    wait_for_renders()
+    qapp.processEvents()   # deliver the finished render to the page
+    assert page._preview._pixmap is not None, page._status_lbl.text()
 
 
 def _workspace(a):
@@ -125,8 +138,7 @@ def test_dot_plot_page_exports_numbers_without_unlabelled_cells(qapp, tmp_path):
     a = _adata()
     assert 'log1p(CP10K)' in _expression_label(a)
     page = MarkerDotPlotPage(_workspace(a))
-    page._controls.blockSignals(True)
-    page.on_activated()
+    _open(page, qapp)
     _export(page, tmp_path / 'dot.png')
     table = pd.read_csv(tmp_path / 'dot.csv')
     assert 'Unknown' not in set(table['cell_type'])
@@ -136,8 +148,7 @@ def test_dot_plot_page_exports_numbers_without_unlabelled_cells(qapp, tmp_path):
 def test_score_page_renders(qapp, tmp_path):
     from kosmic.gui.figure_export.pages.cell_types import MarkerScoreUMAPPage
     page = MarkerScoreUMAPPage(_workspace(_adata()))
-    page._controls.blockSignals(True)
-    assert page.dependencies_met()
+    _open(page, qapp)
     _export(page, tmp_path / 'scores.png')
 
 
@@ -145,13 +156,31 @@ def test_score_page_renders(qapp, tmp_path):
 def test_composition_page(qapp, tmp_path, by_sample):
     from kosmic.gui.figure_export.pages.cell_types import BARS_SAMPLE, CompositionPage
     page = CompositionPage(_workspace(_adata()))
-    page._controls.blockSignals(True)
-    page.on_activated()
+    _open(page, qapp)
     if by_sample:
+        # Changing a control starts a new preview, as in the app.
         page._controls.bars.setCurrentText(BARS_SAMPLE)
+        _open(page, qapp)
     _export(page, tmp_path / 'comp.png')
     table = pd.read_csv(tmp_path / 'comp.csv', index_col='cell_type')
     assert 'Unknown' not in table.index
     assert list(table.columns) == ([f's{i}' for i in (0, 2, 4, 1, 3, 5)] if by_sample
                                    else ['Control', 'Disease'])
     assert np.allclose(table.sum(), 100, atol=0.01)
+
+
+def test_quitting_waits_for_a_running_preview(qapp):
+    """A preview still rendering is waited for, not destroyed mid-run."""
+    import time
+    from kosmic.gui.figure_export.pages import _base
+    from kosmic.gui.figure_export.pages.cell_types import CompositionPage
+
+    page = CompositionPage(_workspace(_adata()))
+    page.on_activated()
+    slow = page._make_render_func()
+    page._make_render_func = lambda: (lambda: (time.sleep(0.5), slow())[1])
+    page._render()
+    assert _base._LIVE_RENDERS
+    _base.wait_for_renders()
+    assert not _base._LIVE_RENDERS
+    del page   # destroying the page now leaves no thread running
