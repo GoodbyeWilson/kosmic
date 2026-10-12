@@ -67,3 +67,31 @@ def test_elbow_plot_does_not_change_global_style():
     create_elbow_plot(np.linspace(0.2, 0.01, 30), suggested_pcs=5, dark_mode=True)
     assert matplotlib.rcParams['axes.facecolor'] == before
     plt.close('all')
+
+
+def test_preview_and_export_draw_under_one_lock(tmp_path):
+    """Matplotlib is not thread-safe: a preview (worker thread) and an export
+    (main thread) drawing at once failed in mathtext. Both hold MPL_LOCK."""
+    import os
+    from types import SimpleNamespace
+    from unittest import mock
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication, QFileDialog
+    from kosmic.gui.figure_export.pages._base import MPL_LOCK, FigurePage, RenderWorker
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841 (held for the test)
+    held = []
+
+    def func():
+        held.append(MPL_LOCK.locked())
+        return _figure()
+
+    RenderWorker(func)._run()
+
+    page = FigurePage(SimpleNamespace(data_version=lambda: 0))
+    page._make_render_func = lambda: func
+    with mock.patch.object(QFileDialog, 'getSaveFileName',
+                           return_value=(str(tmp_path / 'f.png'), '')):
+        page._export_current()
+    assert held == [True, True]
+    assert not MPL_LOCK.locked()
