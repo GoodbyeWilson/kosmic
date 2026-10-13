@@ -95,3 +95,119 @@ def test_preview_and_export_draw_under_one_lock(tmp_path):
         page._export_current()
     assert held == [True, True]
     assert not MPL_LOCK.locked()
+
+
+class _Settings:
+    """In-memory QSettings, so a test never changes the user's saved settings."""
+    store: dict = {}
+
+    def __init__(self, *_):
+        pass
+
+    def value(self, key, default=None):
+        return self.store.get(key, default)
+
+    def setValue(self, key, value):
+        self.store[key] = value
+
+
+def _export(page, tmp_path, chosen=None):
+    """Export *page*, the dialog accepting its suggested name and type unless
+    *chosen* (a type picked in the dialog) is given. Returns the dialog mock."""
+    from unittest import mock
+    from PyQt6.QtWidgets import QFileDialog
+
+    def dialog(_parent, _title, path, _filters, initial):
+        return path, chosen or initial
+
+    page._default_export_dir = lambda: tmp_path
+    with mock.patch.object(QFileDialog, 'getSaveFileName', side_effect=dialog) as m:
+        page._export_current()
+    return m
+
+
+def test_format_dropdown_sets_the_export_format(tmp_path):
+    """Every figure page has a Format drop-down beside Export. The dialog
+    opens on that format, and the choice is shared by every page."""
+    import os
+    from types import SimpleNamespace
+    from unittest import mock
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    from kosmic.gui.figure_export.pages import _base
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841 (held for the test)
+    _Settings.store = {}
+    with mock.patch.object(_base, 'QSettings', _Settings):
+        ws = SimpleNamespace(data_version=lambda: 0)
+        page, other = _base.FigurePage(ws), _base.FigurePage(ws)
+        page._make_render_func = lambda: _figure
+        assert page._format.currentData() == 'png'
+
+        page._format.setCurrentIndex(page._format.findData('pdf'))
+        dialog = _export(page, tmp_path)
+        assert dialog.call_args.args[4] == 'PDF (*.pdf)'
+        assert (tmp_path / 'figure.pdf').exists()
+
+        other.on_activated()
+        assert other._format.currentData() == 'pdf'
+
+
+def test_type_changed_in_the_dialog_sets_the_format(tmp_path):
+    """The suggested name has no extension, so a type changed in the dialog
+    still decides the format. A suggested '.png' used to stay."""
+    import os
+    from types import SimpleNamespace
+    from unittest import mock
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    from kosmic.gui.figure_export.pages import _base
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841 (held for the test)
+    _Settings.store = {}
+    with mock.patch.object(_base, 'QSettings', _Settings):
+        page = _base.FigurePage(SimpleNamespace(data_version=lambda: 0))
+        page._make_render_func = lambda: _figure
+        dialog = _export(page, tmp_path, chosen='SVG (*.svg)')
+    assert dialog.call_args.args[2] == str(tmp_path / 'figure')
+    assert (tmp_path / 'figure.svg').exists()
+
+
+def test_every_figure_page_has_the_format_dropdown():
+    import os
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    from kosmic.gui.figure_export.workspace import FigureExportWorkspace
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841 (held for the test)
+    ws = FigureExportWorkspace()
+    assert ws._pages
+    for page in ws._pages:
+        formats = [page._format.itemData(i) for i in range(page._format.count())]
+        assert formats == ['png', 'pdf', 'svg'], page.TITLE
+
+
+def test_existing_file_is_replaced_only_when_confirmed(tmp_path):
+    """The dialog sees the name without its extension and cannot warn that
+    figure.pdf exists, so the page asks before replacing it."""
+    import os
+    from types import SimpleNamespace
+    from unittest import mock
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    from kosmic.gui.figure_export.pages import _base
+
+    app = QApplication.instance() or QApplication([])  # noqa: F841 (held for the test)
+    target = tmp_path / 'figure.pdf'
+    target.write_bytes(b'old')
+    _Settings.store = {}
+    with mock.patch.object(_base, 'QSettings', _Settings):
+        page = _base.FigurePage(SimpleNamespace(data_version=lambda: 0))
+        page._make_render_func = lambda: _figure
+        page._format.setCurrentIndex(page._format.findData('pdf'))
+        with mock.patch.object(_base.dialogs, 'confirm', return_value=False) as ask:
+            _export(page, tmp_path)
+        assert ask.called and target.read_bytes() == b'old'
+        with mock.patch.object(_base.dialogs, 'confirm', return_value=True):
+            _export(page, tmp_path)
+    assert target.read_bytes().startswith(b'%PDF')

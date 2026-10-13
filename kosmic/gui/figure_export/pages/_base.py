@@ -9,12 +9,12 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QSettings, pyqtSignal
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QFileDialog, QLabel
+from PyQt6.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel
 
 from kosmic.gui.figure_export.shared.preview_pane import PreviewPane
-from kosmic.gui.shared import run_worker
+from kosmic.gui.shared import dialogs, run_worker
 from kosmic.gui.shared.theme import get_export_dpi, get_font_sizes
 from kosmic.gui.shared.widgets import (
     BaseWorker, SecondaryButton, SecondaryLabel, SidebarPage,
@@ -27,6 +27,17 @@ from kosmic.visualisation import save_figure
 #: worker thread while an export draws on the main thread, so the two take
 #: turns: an export started during a preview waits for it.
 MPL_LOCK = threading.Lock()
+
+#: Export formats offered beside the Export button: (label, extension). The
+#: choice is stored in QSettings, so every figure page shares it.
+EXPORT_FORMATS = (('PNG', 'png'), ('PDF', 'pdf'), ('SVG', 'svg'))
+_FORMAT_KEY = "plot/export_format"
+
+
+def export_format() -> str:
+    """The extension of the export format last chosen on a figure page."""
+    fmt = QSettings("KOSMIC", "KOSMIC").value(_FORMAT_KEY, 'png')
+    return fmt if fmt in {ext for _, ext in EXPORT_FORMATS} else 'png'
 
 
 def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
@@ -137,6 +148,17 @@ class FigurePage(SidebarPage):
 
         self.sidebar_layout.addStretch()
 
+        format_row = QHBoxLayout()
+        format_row.addWidget(QLabel("Format:"))
+        self._format = QComboBox()
+        for label, ext in EXPORT_FORMATS:
+            self._format.addItem(label, ext)
+        self._sync_format()
+        self._format.currentIndexChanged.connect(
+            lambda: QSettings("KOSMIC", "KOSMIC").setValue(_FORMAT_KEY, self._format.currentData()))
+        format_row.addWidget(self._format, 1)
+        self.sidebar_layout.addLayout(format_row)
+
         self._export_btn = SecondaryButton("Export figure…")
         self._export_btn.clicked.connect(self._export_current)
         self.sidebar_layout.addWidget(self._export_btn)
@@ -165,8 +187,15 @@ class FigurePage(SidebarPage):
 
     # -- Lifecycle ------------------------------------------------------
 
+    def _sync_format(self):
+        """Show the format last chosen on any figure page."""
+        self._format.blockSignals(True)
+        self._format.setCurrentIndex(self._format.findData(export_format()))
+        self._format.blockSignals(False)
+
     def on_activated(self):
         """Called by the workspace when this page becomes the visible one."""
+        self._sync_format()
         if not self.dependencies_met():
             self._staleness_banner.setVisible(False)
             self._preview.set_message(self.UNAVAILABLE_MESSAGE)
@@ -272,22 +301,39 @@ class FigurePage(SidebarPage):
             self._status_lbl.setText("Nothing to export.")
             return
 
+        # The dialog opens on the format chosen beside the Export button. The
+        # suggested name has no extension, so a type changed in the dialog
+        # still sets the format (a suggested '.png' stayed when PDF was picked).
         default_dir = self._default_export_dir()
         if default_dir:
             default_dir.mkdir(parents=True, exist_ok=True)
-            default_path = str(default_dir / f"{self._default_export_basename()}.png")
+            default_path = str(default_dir / self._default_export_basename())
         else:
-            default_path = f"{self._default_export_basename()}.png"
+            default_path = self._default_export_basename()
 
+        filters = {ext: f"{label} (*.{ext})" for label, ext in EXPORT_FORMATS}
         path, chosen = QFileDialog.getSaveFileName(
             self, f"Export {self.TITLE}", default_path,
-            "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)",
+            ";;".join(filters.values()), filters[self._format.currentData()],
         )
         if not path:
             return
-        if not Path(path).suffix:
-            path += '.' + chosen.split()[0].lower()   # "PDF (*.pdf)" -> ".pdf"
+        if Path(path).suffix.lower().lstrip('.') not in filters:
+            ext = next((e for e, f in filters.items() if f == chosen), self._format.currentData())
+            path += '.' + ext
+            # The dialog checked the name without this extension, so it could
+            # not warn that the file already exists.
+            if Path(path).exists() and not dialogs.confirm(
+                    self, "Replace file?", f"{Path(path).name} already exists. Replace it?"):
+                return
 
+        # The export draws on this thread; on a large dataset (scoring every
+        # cell, say) that takes many seconds, so show that it is working.
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QApplication
+        self._status_lbl.setText("Exporting...")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
         try:
             with MPL_LOCK:
                 fig = func()
@@ -303,6 +349,8 @@ class FigurePage(SidebarPage):
             self.log_message.emit(f"Figure exported: {saved}")
         except Exception as e:
             self._status_lbl.setText(f"Export failed: {e}")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     # -- Hooks ----------------------------------------------------------
 
