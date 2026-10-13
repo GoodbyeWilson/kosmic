@@ -3,8 +3,9 @@
 # Two operations:
 #   - concat_studies(): build a master h5ad from per-study h5ads using
 #     disk-backed concat so peak RAM stays bounded to one study at a
-#     time. Uses each study's raw integer counts (from .raw.to_adata()
-#     when available, else .X). Optional per-study subsample.
+#     time. Uses each study's counts as kosmic.scrna.counts resolves them
+#     (layers['counts'], else .raw, else X), or a named layer such as the
+#     per-study DecontX counts (ADR-011). Optional per-study subsample.
 #   - propagate_labels(): after the user clusters + annotates the master
 #     in the scRNA pipeline, write the cell-type labels back to each
 #     per-study h5ad. Uses obs-only barcode join when every cell is
@@ -82,14 +83,16 @@ def concat_studies(
     role_map: Optional[dict] = None,
     drop_genes: Optional[Sequence[str]] = None,
     drop_excluded: bool = False,
+    counts_layer: Optional[str] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Path:
     """Build a master h5ad from per-study h5ads using disk-backed concat.
 
     For each input h5ad:
       1. Load it (one at a time -- peak RAM = single study).
-      2. Put the raw counts in '.X' (from layers['counts'], else '.raw',
-         else X itself) so the temp holds integer counts.
+      2. Put the counts in '.X' (from 'counts_layer' when given, else
+         layers['counts'], else '.raw', else X itself) so the temp holds
+         integer counts.
       3. Optional subsample to 'cap_per_study'.
       4. Strip obsm / varm / uns / layers; keep a tight obs subset.
       5. Write to a temp h5ad.
@@ -127,6 +130,13 @@ def concat_studies(
         (see 'kosmic.combine.gene_merge'), where the same column name is a
         sum of two features in one cohort and a single feature in another.
         Names absent from a study are ignored.
+    counts_layer : str, optional
+        Build the master from this layer of every study instead of its
+        original counts -- 'decontX_counts' for the counts each study's
+        DecontX step corrected for ambient RNA (ADR-011). Every study must
+        have the layer. The master then holds those counts as its own: its
+        'layers['counts']' after QC are the corrected counts, and the
+        'combine' provenance stage records the layer.
     progress_callback : callable, optional
         Status string callback.
 
@@ -155,13 +165,17 @@ def concat_studies(
             path = Path(path)
             accession = path.parent.parent.name
             if progress_callback:
+                what = f"'{counts_layer}' counts" if counts_layer else "raw counts"
                 progress_callback(
-                    f"Extracting raw counts: {accession} (from {path.parent.name}/)...")
+                    f"Extracting {what}: {accession} (from {path.parent.name}/)...")
 
             a = ad.read_h5ad(path)
             sex_col = a.uns.get('sex_column') if isinstance(a.uns, dict) else None
             from kosmic.scrna.counts import counts_adata
-            a = counts_adata(a, copy=False)
+            try:
+                a = counts_adata(a, counts_layer=counts_layer, copy=False)
+            except ValueError as exc:
+                raise ValueError(f"{accession}: {exc}") from exc
 
             if cap_per_study is not None and a.n_obs > cap_per_study:
                 idx = np.sort(

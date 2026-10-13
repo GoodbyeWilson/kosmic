@@ -193,6 +193,18 @@ def last_stage(record_or_dir, stage_name: str) -> Optional[dict]:
     return None
 
 
+def combined_counts_layer(record_or_dir) -> Optional[str]:
+    """The study layer a combined dataset was built from ('decontX_counts'),
+    or None for the original counts or a dataset that was not combined.
+
+    A master built from the per-study DecontX counts holds them as its own
+    counts (ADR-011), so a DE run on its "raw" counts is a DE on corrected
+    counts; this is how a reader of the record tells the two apart.
+    """
+    st = last_stage(record_or_dir, 'combine')
+    return (st.get('params') or {}).get('counts_layer') if st else None
+
+
 def staleness(study_dir, adata, sample_col: Optional[str] = None,
               condition_col: Optional[str] = None, h5ad_path=None) -> str:
     """Compare the recorded fingerprint to the current data.

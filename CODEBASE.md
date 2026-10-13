@@ -183,6 +183,10 @@ list.
 Differential expression is computed from those counts, never from the
 normalised matrix. DecontX writes its output to
 `adata.layers['decontX_counts']` and leaves the originals unchanged.
+The one exception is a shared atlas that Combine built from the
+studies' DecontX counts: its `layers['counts']` are those corrected
+counts, and only the `combine` provenance stage
+(`provenance.combined_counts_layer()`) says so (ADR-011).
 
 Because the counts live in a layer, anndata's backed mode is not a cheap
 read of a study: `read_h5ad(path, backed='r')` keeps only `X` on disk

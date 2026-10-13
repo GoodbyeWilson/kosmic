@@ -89,8 +89,9 @@ def _read_obs_metadata(h5ad_path: Path) -> dict:
     values: dict[str, list[str]] = {}
     n_obs = 0
     with h5py.File(h5ad_path, 'r') as h:
+        layers = sorted(h['layers'].keys()) if 'layers' in h else []
         if 'obs' not in h:
-            return {'columns': [], 'values': {}, 'n_obs': 0}
+            return {'columns': [], 'values': {}, 'n_obs': 0, 'layers': layers}
         obs_group = h['obs']
         # n_obs: length of the index. read_elem handles whatever encoding
         # it was written with -- a raw '.shape[0]' breaks on pandas' now
@@ -131,7 +132,7 @@ def _read_obs_metadata(h5ad_path: Path) -> dict:
             # this UI (the role-mapping uses categorical cols anyway).
 
     return {'columns': columns, 'values': values, 'n_obs': n_obs,
-            'n_excluded': n_excluded}
+            'n_excluded': n_excluded, 'layers': layers}
 
 
 def _pick_source_h5ad(study_dir: Path) -> Optional[Path]:
@@ -210,7 +211,7 @@ class _CombineWorker(BaseWorker):
 
     def __init__(self, study_paths, cap_per_study, output_path,
                  role_map=None, drop_genes=None, drop_excluded=False,
-                 parent=None):
+                 counts_layer=None, parent=None):
         super().__init__(parent)
         self._study_paths = list(study_paths)
         self._cap = cap_per_study
@@ -218,6 +219,7 @@ class _CombineWorker(BaseWorker):
         self._role_map = role_map
         self._drop_genes = list(drop_genes or ())
         self._drop_excluded = bool(drop_excluded)
+        self._counts_layer = counts_layer
 
     def _run(self):
         concat_studies(
@@ -227,6 +229,7 @@ class _CombineWorker(BaseWorker):
             role_map=self._role_map,
             drop_genes=self._drop_genes,
             drop_excluded=self._drop_excluded,
+            counts_layer=self._counts_layer,
             progress_callback=lambda msg: self.progress.emit(msg),
         )
         # Shape only; a backed read would load the master's counts layer.
@@ -249,6 +252,8 @@ class _CombineWorker(BaseWorker):
                     'dropped_reason': ('merged inconsistently across studies'
                                        if self._drop_genes else None),
                     'excluded_cells_dropped': self._drop_excluded,
+                    # None: the studies' original counts (ADR-011).
+                    'counts_layer': self._counts_layer,
                 })
         except Exception as exc:            # provenance never blocks a build
             self.progress.emit(f"Could not record provenance: {exc}")
@@ -258,6 +263,7 @@ class _CombineWorker(BaseWorker):
             'n_cells': n_cells,
             'n_genes': n_genes,
             'dropped_genes': self._drop_genes,
+            'counts_layer': self._counts_layer,
         }
 
 
@@ -420,6 +426,21 @@ class CombineDialog(QDialog):
             "decides what goes into the master.")
         self._drop_excluded_check.toggled.connect(self._refresh_estimates)
         layout.addWidget(self._drop_excluded_check)
+
+        # ADR-011: build the master from each study's DecontX-corrected
+        # counts. Offered only when every selected study has them.
+        self._decontx_check = QCheckBox("Use DecontX-corrected counts")
+        self._decontx_check.setToolTip(
+            "Build the master from each study's DecontX output\n"
+            "(layers['decontX_counts']) instead of its original counts.\n"
+            "Clustering, annotation and a DE on the master then all use\n"
+            "the corrected counts. Run Decontaminate on every study first.")
+        self._decontx_check.setEnabled(False)
+        layout.addWidget(self._decontx_check)
+        self._decontx_label = SecondaryLabel("")
+        self._decontx_label.setWordWrap(True)
+        self._decontx_label.setVisible(False)
+        layout.addWidget(self._decontx_label)
 
         self._drop_label = SecondaryLabel("")
         self._drop_label.setWordWrap(True)
@@ -767,6 +788,27 @@ class CombineDialog(QDialog):
             f"{n_selected} stud{'y' if n_selected == 1 else 'ies'} ({cap_note}{excl_note}).")
 
         self._refresh_merge_asymmetry()
+        self._refresh_decontx_option()
+
+    def _refresh_decontx_option(self) -> None:
+        """Offer DecontX counts only when every selected study has them."""
+        from kosmic.scrna.qc.decontx import DECONTX_LAYER
+        selected = self._selected_accessions()
+        missing = [a for a in selected
+                   if DECONTX_LAYER not in self._study_obs.get(a, {}).get('layers', [])]
+        available = bool(selected) and not missing
+        self._decontx_check.setEnabled(available)
+        if not available:
+            self._decontx_check.setChecked(False)
+        self._decontx_label.setText(
+            f"No DecontX counts in: {', '.join(missing)}." if missing else "")
+        self._decontx_label.setVisible(bool(missing))
+
+    def _counts_layer(self):
+        """The study layer the master is built from, or None for the
+        original counts."""
+        from kosmic.scrna.qc.decontx import DECONTX_LAYER
+        return DECONTX_LAYER if self._decontx_check.isChecked() else None
 
     def _refresh_merge_asymmetry(self) -> None:
         """Recheck which genes the selected studies merged inconsistently.
@@ -880,7 +922,8 @@ class CombineDialog(QDialog):
 
         self._worker = _CombineWorker(
             paths, cap, output, role_map=role_map, drop_genes=drop_genes,
-            drop_excluded=self._drop_excluded_check.isChecked(), parent=self)
+            drop_excluded=self._drop_excluded_check.isChecked(),
+            counts_layer=self._counts_layer(), parent=self)
         run_worker(
             self._worker,
             on_finished=self._on_build_finished,
@@ -894,6 +937,8 @@ class CombineDialog(QDialog):
         dropped = result.get('dropped_genes') or []
         note = (f", {len(dropped):,} inconsistently-merged gene(s) excluded"
                 if dropped else "")
+        if result.get('counts_layer'):
+            note += ", from DecontX-corrected counts"
         self._status_label.setText(
             f"Master built: {result['n_cells']:,} cells x "
             f"{result['n_genes']:,} genes{note}")
