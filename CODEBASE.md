@@ -132,10 +132,17 @@ stage.
 **Differential Expression** operates on one study. When the workspace
 is opened it first checks whether the scRNA workspace holds the same
 study and whether that dataset is ready for differential expression
-(sample and condition columns and roles set, normalised). If so, it uses
-the in-memory AnnData object; otherwise it loads the study's processed
-file from disk. The hand-off is one-way: Differential Expression never
-modifies the scRNA workspace's state. Results are written to the study's
+(sample and condition columns and roles set, normalised). It then reads
+its own copy of the study from the processed file -- obs, var and one
+count matrix -- and the scRNA workspace releases its copy; only a
+dataset with no file is shared in memory. The count matrix is the
+original counts, or the DecontX-corrected counts
+(`layers['decontX_counts']`) when they are chosen on the Dataset page,
+and `uns['counts_loaded_from']` records which. Every DE step, pathway
+score and export reads that matrix. The hand-off is one-way:
+Differential Expression never modifies the scRNA workspace's state, and
+writes to the study's file only an obs column it adds (Combine
+Conditions). Results are written to the study's
 `results/de_analysis/statistics/` folder as
 `{accession}_DE_{method}.csv`, with the pseudobulk count matrix beside
 it as `{accession}_pseudobulk.csv`.

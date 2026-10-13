@@ -89,6 +89,10 @@ class DEWorkspace(QWidget):
         self.current_adata = None
         self.h5ad_path = None
         self.project_dir = None
+        # Which counts a study is loaded with: None for the original
+        # counts, or a layer ('decontX_counts'). Chosen on the Dataset
+        # page; kept for the session, so each study loaded next uses it.
+        self.counts_choice = None
         # scRNA cross-push bookkeeping: the scrna._adata_version last
         # synced into this workspace, and whether the user has since
         # loaded their own file (which then takes precedence -- an

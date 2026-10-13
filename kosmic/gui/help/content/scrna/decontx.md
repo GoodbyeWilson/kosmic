@@ -48,16 +48,18 @@ one sample's worth, so a 150,000-nucleus dataset is fine on a
 workstation.
 
 Decontaminated counts go to **`layers['decontX_counts']`**. The
-original counts in `X` and `.raw` are **never overwritten**, so the step
-is reversible and you can run DE on either and compare — which is worth
-doing at least once, to see how much the soup was contributing.
+original counts are **never overwritten**, so the step is reversible and
+you can run DE on either and compare — which is worth doing at least
+once, to see how much the soup was contributing.
 
 ## Downstream
 
 - **Subset** carries the layer into the new study automatically.
-- **Differential Expression** has a *Count source* setting: *Raw
-  counts* or *Decontaminated (DecontX)*. The second is offered only when
-  the layer exists.
+- **Differential Expression** reads them when **Counts** on its Load
+  Data page is set to *DecontX-corrected counts*. The study is then
+  loaded with those counts, and every DE step, the pathway scores and
+  the pseudobulk exported for the meta-analysis use them; the Gene and
+  Pathway DE pages show which counts are loaded.
 - The choice is recorded in provenance either way, so Methods will say
   which counts each result came from.
 

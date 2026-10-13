@@ -207,6 +207,20 @@ def test_run_written_pseudobulk_has_a_role_column(tmp_path):
     assert len(pb) == 6
 
 
+def test_run_exports_the_pseudobulk_of_the_counts_it_tested(tmp_path):
+    """Given a counts layer, the exported pseudobulk sums that layer, as the
+    DE does; it used to sum the original counts whatever was tested."""
+    a = _adata()
+    a.layers['decontX_counts'] = np.floor(a.X * 0.5)
+    runs = B.run_de_by_cell_type(
+        a, 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
+        cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+        detection_min_pct=0.0, counts_layer='decontX_counts')
+    pb = pd.read_csv(runs[0].pseudobulk_path, index_col=0)
+    d1 = ((a.obs['cell_type'] == 'Endothelial') & (a.obs['donor'] == 'D1')).to_numpy()
+    assert pb.loc['D1', 'GENE0'] == a.layers['decontX_counts'][d1, 0].sum()
+
+
 def test_run_skips_ineligible_without_touching_disk(tmp_path):
     adata = _adata()
     obs = adata.obs.copy()

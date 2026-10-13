@@ -9,7 +9,8 @@
 # the same idea for var.
 from __future__ import annotations
 
-from typing import Tuple
+from pathlib import Path
+from typing import Optional, Tuple
 
 import pandas as pd
 
@@ -51,6 +52,14 @@ def read_shape(h5ad_path) -> Tuple[int, int]:
         return int(X.shape[0]), int(X.shape[1])
 
 
+def read_layer_names(h5ad_path) -> list[str]:
+    """The names of the file's layers (none of them is read)."""
+    import h5py
+
+    with h5py.File(str(h5ad_path), 'r') as f:
+        return list(f['layers'].keys()) if 'layers' in f else []
+
+
 def write_obs(h5ad_path, obs: pd.DataFrame) -> None:
     """Replace the obs group of an h5ad in place; nothing else is touched.
 
@@ -69,20 +78,23 @@ def write_obs(h5ad_path, obs: pd.DataFrame) -> None:
         write_elem(f, 'obs', obs)
 
 
-def read_counts_adata(h5ad_path, *, uns: bool = True):
+def read_counts_adata(h5ad_path, *, counts_layer: Optional[str] = None,
+                      uns: bool = True):
     """An AnnData holding only what pseudobulk analysis needs: obs, var and
     the counts as X.
 
     The counts come from ``layers['counts']`` when the file has it (a
     study after QC), otherwise from ``X`` (a file QC has not touched) --
-    the same precedence as ``kosmic.scrna.counts.count_source``. The
-    normalised matrix, embeddings, graphs and other layers are never
-    read, so a study costs half of what a full load does (Reichart-LV
-    16.7 GB -> 8 GB; the DCM atlas 27 GB -> 14 GB). ``uns`` is small and
-    carries the role map, so it is read unless told otherwise.
+    the same precedence as ``kosmic.scrna.counts.count_source``. A named
+    ``counts_layer`` (``'decontX_counts'``) is read instead, and must be
+    in the file. The normalised matrix, embeddings, graphs and other
+    layers are never read, so a study costs half of what a full load does
+    (Reichart-LV 16.7 GB -> 8 GB; the DCM atlas 27 GB -> 14 GB). ``uns`` is
+    small and carries the role map, so it is read unless told otherwise.
 
     The result is a dataset in the "counts in X, no layers" state every
-    KOSMIC reader already understands.
+    KOSMIC reader already understands; ``uns['counts_loaded_from']`` says
+    which counts X holds.
     """
     import anndata as ad
     import h5py
@@ -91,8 +103,15 @@ def read_counts_adata(h5ad_path, *, uns: bool = True):
     with h5py.File(str(h5ad_path), 'r') as f:
         obs = read_elem(f['obs'])
         var = read_elem(f['var'])
-        if 'layers' in f and 'counts' in f['layers']:
-            X = read_elem(f['layers']['counts'])
+        layers = f['layers'] if 'layers' in f else {}
+        if counts_layer is not None:
+            if counts_layer not in layers:
+                raise ValueError(
+                    f"{Path(str(h5ad_path)).name} has no layer '{counts_layer}'.")
+            X = read_elem(layers[counts_layer])
+            source = f'layers:{counts_layer}'
+        elif 'counts' in layers:
+            X = read_elem(layers['counts'])
             source = 'layers:counts'
         else:
             X = read_elem(f['X'])
