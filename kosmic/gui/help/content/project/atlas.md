@@ -60,6 +60,16 @@ which are unmapped.
 - **Cell cap** — subsample each study to a fixed number of cells to
   keep the atlas tractable, or **Use all cells**. A cap affects how
   labels come back in step 5.
+- **Use DecontX-corrected counts** builds the atlas from each study's
+  DecontX output instead of its original counts, so clustering,
+  annotation and a DE on the atlas all use counts corrected for ambient
+  RNA. It is available only when every ticked study has been through
+  Decontaminate; otherwise the dialog names the studies without it.
+  Ambient RNA can carry one cell type's transcripts into another's
+  nuclei strongly enough to mislead clustering and annotation, which
+  this avoids. The atlas then holds the corrected counts as its own;
+  the Methods page and the record say so. Do not run Decontaminate on
+  such an atlas again.
 
 Cells are named `<barcode>-<accession>` in the atlas, and an
 `obs['study']` column records which study each came from. From each
@@ -130,10 +140,14 @@ worth understanding before you build on either.
 
 - **Combining does not filter cells by QC.** It takes each study as it
   stands; QC belongs in step 1.
-- **The atlas's `.X` is raw counts.** Combining promotes `.raw` so the
-  atlas can be normalised and clustered from scratch.
+- **The atlas's `.X` is counts.** Combining promotes the studies' counts
+  (the original ones, or the DecontX-corrected ones when that option is
+  ticked) so the atlas can be normalised and clustered from scratch.
 - **Re-creating the atlas overwrites it.** Any clustering or annotation
-  on it is lost; the source studies are unaffected. Labels that were
+  on it is lost; the source studies are unaffected. To keep the current
+  atlas — for example to compare an atlas built from DecontX counts with
+  one built from the original counts — move the project's `_master`
+  folder out of the project before combining again. Labels that were
   already propagated come back in as `cell_type_atlas`, so an atlas
   re-created after propagation — with every cell, for the mega-analysis
   differential expression — is labelled without being clustered again.

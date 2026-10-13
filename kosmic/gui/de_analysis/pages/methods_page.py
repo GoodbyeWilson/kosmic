@@ -230,17 +230,36 @@ class MethodsPage(SimplePage):
         from kosmic import provenance
         return provenance.load(Path(h5ad).parent)
 
+    @staticmethod
+    def _decontaminated(cs, prov) -> bool:
+        """True when the counts that fed a run were DecontX-corrected: the
+        run named the DecontX layer, or it used the counts of a master
+        combined from the studies' DecontX counts (ADR-011)."""
+        if cs in ('decontX_counts', 'decontx'):
+            return True
+        if cs in (None, 'raw') and prov:
+            from kosmic import provenance
+            return provenance.combined_counts_layer(prov) == 'decontX_counts'
+        return False
+
+    @classmethod
+    def _count_source_text(cls, cs, prov) -> str:
+        if cls._decontaminated(cs, prov):
+            if cs in (None, 'raw'):
+                return "decontaminated (DecontX, per study before combining)"
+            return "decontaminated (DecontX)"
+        if cs in (None, 'raw'):
+            return "raw counts"
+        return str(cs)
+
     def _count_source_label(self):
         """Which counts fed the DE: prefer the recorded run, fall back to the
         live selection. Returns a display string or None."""
-        def _label(cs):
-            if cs in ('decontX_counts', 'decontx'):
-                return "decontaminated (DecontX)"
-            if cs in (None, 'raw'):
-                return "raw counts"
-            return str(cs)
-
         prov = self._load_provenance()
+
+        def _label(cs):
+            return self._count_source_text(cs, prov)
+
         if prov:
             from kosmic import provenance
             st = provenance.last_stage(prov, 'gene_de')
@@ -371,10 +390,8 @@ class MethodsPage(SimplePage):
             elif method_key in ('deseq2', 'deseq2_vst', 'deseq2_vst_zscore'):
                 used_refs.add('deseq2')
         if cs is not None:
-            items.append(("Count source:",
-                          "decontaminated (DecontX)"
-                          if cs in ('decontX_counts', 'decontx') else "raw counts"))
-            if cs in ('decontX_counts', 'decontx'):
+            items.append(("Count source:", self._count_source_text(cs, prov)))
+            if self._decontaminated(cs, prov):
                 used_refs.add('decontx')
         if gdp is not None:
             items.append(("Gene detection filter:",

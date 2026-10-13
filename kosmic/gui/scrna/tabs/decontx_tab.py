@@ -278,6 +278,21 @@ class DecontXTab(SimplePage):
             dialogs.warning(self, "Cannot run DecontX", reason)
             return
 
+        # A master combined from the studies' DecontX counts (ADR-011) is
+        # already corrected; a second pass would remove ambient RNA twice.
+        h5ad = getattr(self.main_window, 'current_h5ad_path', None)
+        if h5ad:
+            from pathlib import Path
+            from kosmic import provenance
+            from kosmic.scrna.qc.decontx import DECONTX_LAYER
+            if provenance.combined_counts_layer(Path(h5ad).parent) == DECONTX_LAYER:
+                if not dialogs.confirm(
+                        self, "Counts already decontaminated",
+                        "This dataset was combined from each study's DecontX-"
+                        "corrected counts. Running DecontX again would remove "
+                        "ambient RNA a second time.\n\nRun it anyway?"):
+                    return
+
         n_samples = adata.obs[sample_col].nunique()
         if not dialogs.confirm(
                 self, "Run DecontX",
