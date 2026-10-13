@@ -631,6 +631,25 @@ def _label_sort_key(label):
     return (1, 0, natural_key(text))
 
 
+class _LegendRow(QWidget):
+    """One legend entry that selects its group when clicked; Ctrl-click
+    adds or removes it, as on the plot. Small or overlapping groups (Leiden
+    clusters at a high resolution) are hard to hit on the plot itself."""
+
+    picked = pyqtSignal(str, bool)   # group, Ctrl held
+
+    def __init__(self, group: str):
+        super().__init__()
+        self._group = group
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            ctrl = bool(ev.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            self.picked.emit(self._group, ctrl)
+        ev.accept()
+
+
 class _UMAPWidget(QWidget):
     """
     Interactive pyqtgraph scatter plot for UMAP/t-SNE embeddings.
@@ -638,9 +657,10 @@ class _UMAPWidget(QWidget):
     Supports coloring by categorical obs columns (discrete tab20 palette),
     continuous obs columns (viridis gradient), or gene expression.
 
-    With a categorical column shown, clicking a cell selects its group
-    and Ctrl-click adds or removes groups of the same column; the other
-    groups are greyed out. Clicking empty space clears the selection.
+    With a categorical column shown, clicking a cell or a legend row
+    selects its group and Ctrl-click adds or removes groups of the same
+    column; the other groups are greyed out. Clicking empty space clears
+    the selection.
     """
 
     color_by_changed = pyqtSignal(str)  # emitted when user changes selection
@@ -713,7 +733,9 @@ class _UMAPWidget(QWidget):
         self._key_btn.setVisible(False)
 
         # Legend state
-        self._legend_entries = []  # list of (color_hex, label_str)
+        self._legend_entries = []  # list of (color_hex, text, group)
+        self._legend_scroll = None    # the legend's scroll area while shown
+        self._legend_scroll_y = 0     # scroll position to restore after a pick
         self._legend_overlay = None
         self._legend_auto_show = True  # auto-show legend after categorical plot
 
@@ -823,7 +845,7 @@ class _UMAPWidget(QWidget):
         # Legend counts are over every cell, whatever is drawn below.
         self._legend_entries = [
             (_TAB20[i % len(_TAB20)],
-             f"{lb}   ({int((label_arr == lb).sum()):,})")
+             f"{lb}   ({int((label_arr == lb).sum()):,})", str(lb))
             for i, lb in enumerate(unique)
         ]
         self._key_btn.setVisible(True)
@@ -1221,10 +1243,8 @@ class _UMAPWidget(QWidget):
 
     def _on_plot_clicked(self, ev):
         """Click: select the clicked group; Ctrl-click: add or remove it."""
-        col = self._color_key
-        if (not self._selectable or self._is_continuous or self._drawn is None
-                or ev.button() != Qt.MouseButton.LeftButton
-                or self._adata is None or col not in self._adata.obs.columns):
+        if (not self._can_select() or self._drawn is None
+                or ev.button() != Qt.MouseButton.LeftButton):
             return
         ctrl = bool(ev.modifiers() & Qt.KeyboardModifier.ControlModifier)
         label = self._label_at(ev.scenePos())
@@ -1232,6 +1252,18 @@ class _UMAPWidget(QWidget):
             if not ctrl:
                 self.clear_selection()
             return
+        self._pick_group(label, ctrl)
+
+    def _can_select(self) -> bool:
+        return (self._selectable and not self._is_continuous and self._adata is not None
+                and self._color_key in self._adata.obs.columns)
+
+    def _pick_group(self, label: str, ctrl: bool):
+        """Select *label*'s group; with Ctrl, add or remove it. Shared by
+        clicks on the plot and on the legend."""
+        col = self._color_key
+        if self._legend_overlay is not None and self._legend_scroll is not None:
+            self._legend_scroll_y = self._legend_scroll.verticalScrollBar().value()
         groups = self._sel_groups if self._sel_col == col else []
         if ctrl:
             groups = ([g for g in groups if g != label] if label in groups
@@ -1306,15 +1338,25 @@ class _UMAPWidget(QWidget):
             self._legend_overlay.deleteLater()
             self._legend_overlay = None
 
-        overlay = QWidget(self._plot)
+        overlay = QFrame(self._plot)
         overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        lay = QVBoxLayout(overlay)
+        overlay.setObjectName("legend_overlay")
+        outer = QVBoxLayout(overlay)
+        outer.setContentsMargins(0, 0, 0, 0)
+        # Rows scroll when there are more groups than fit beside the plot
+        # (Leiden clusters at a high resolution).
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rows = QWidget()
+        lay = QVBoxLayout(rows)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(2)
 
-        overlay.setObjectName("legend_overlay")
-
-        for color, label in self._legend_entries:
+        clickable = self._can_select()
+        selected = set(self._sel_groups) if self._sel_col == self._color_key else set()
+        for color, label, group in self._legend_entries:
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(6)
@@ -1333,19 +1375,42 @@ class _UMAPWidget(QWidget):
 
             text = QLabel(label)
             text.setProperty("role", "legend_text")
+            text.setProperty("selected", "true" if group in selected else "false")
             row.addWidget(text, 1)
 
-            container = QWidget()
+            container = _LegendRow(group) if clickable else QWidget()
+            if clickable:
+                container.picked.connect(self._pick_group)
             container.setLayout(row)
             lay.addWidget(container)
 
-        overlay.adjustSize()
+        scroll.setWidget(rows)
+        outer.addWidget(scroll)
+        overlay.ensurePolished()    # bold (selected) rows are measured bold
+        rows.adjustSize()
         plot_rect = self._plot.rect()
+        bar = scroll.verticalScrollBar().sizeHint().width()
+        height = min(rows.sizeHint().height(), max(80, plot_rect.height() - 20))
+        width = rows.sizeHint().width() + (bar if height < rows.sizeHint().height() else 0)
+        overlay.resize(width, height)
         overlay.move(plot_rect.width() - overlay.width() - 10, 10)
         overlay.show()
         overlay.raise_()
+        # A pick redraws the legend; keep its scroll position so the next
+        # Ctrl-click down a long list lands where the last one was.
+        keep, self._legend_scroll_y = self._legend_scroll_y, 0
+        if keep:
+            QTimer.singleShot(0, lambda: self._restore_legend_scroll(scroll, keep))
+        self._legend_scroll = scroll
         self._legend_overlay = overlay
         self._key_btn.setText("Hide Legend")
+
+    @staticmethod
+    def _restore_legend_scroll(scroll, value):
+        try:
+            scroll.verticalScrollBar().setValue(value)
+        except RuntimeError:   # the legend was rebuilt again meanwhile
+            pass
 
     def refresh_theme(self):
         style_pg_plot(self._plot, title='UMAP',
@@ -1814,8 +1879,8 @@ class ClusterTab(SidebarPage):
         focus_layout.setSpacing(8)
 
         focus_hint = SecondaryLabel(
-            "Click a cluster or cell type on the UMAP to select it; "
-            "Ctrl-click adds groups of the same column. The selection gets "
+            "Click a cluster or cell type on the UMAP or in its legend to "
+            "select it; Ctrl-click adds groups of the same column. The selection gets "
             "its own genes, PCA, graph, UMAP and clusters, and is annotated "
             "on its own. The study is not changed until you apply the "
             "result.")
@@ -2943,8 +3008,8 @@ class ClusterTab(SidebarPage):
             selection = self._umap_widget.selection()
             if selection is None:
                 dialogs.info(self, "Nothing selected",
-                             "Click a group on the UMAP first; Ctrl-click "
-                             "adds more groups of the same column.")
+                             "Click a group on the UMAP or in its legend "
+                             "first; Ctrl-click adds more groups of the same column.")
                 return
             column, groups, n_cells = selection
             if n_cells < MIN_CELLS:

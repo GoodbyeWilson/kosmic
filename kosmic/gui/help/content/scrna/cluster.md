@@ -177,11 +177,14 @@ components chosen over every cell are the ones that separate the major
 cell types, not the states within one of them.
 
 1. Colour the UMAP by the column that defines the population, usually
-   `leiden` or `cell_type`, and click a cell of it. The other groups
-   turn grey, and a bar above the plot names the selection and its cell
+   `leiden` or `cell_type`, and click a cell of it, or its row in the
+   legend. The other groups turn grey, the selected rows in the legend
+   turn bold, and a bar above the plot names the selection and its cell
    count. Ctrl-click adds or removes groups of the same column, so two
    clusters of one cell type can be subclustered together. Clicking
-   empty space clears the selection.
+   empty space clears the selection. The legend is the easier way to
+   pick a small cluster, or one that overlaps others on the plot; with
+   many clusters it scrolls.
 2. Check the settings in the **Subcluster** card. They start from how
    the study itself was embedded and clustered: HVG count, Harmony and
    its batch key, PCs, neighbours and resolution. Click **Subcluster** in

@@ -160,3 +160,51 @@ def test_select_subcluster_annotate_apply_and_close(app, scripted, tmp_path):
     ws.release_dataset()
     assert tab._focus is None and ws.current_adata is None
     assert len(provenance.load(path.parent)['stages']) == n_stages
+
+
+def _legend_rows(w):
+    from kosmic.gui.scrna.tabs.cluster_tab import _LegendRow
+    w._build_legend()
+    return {r._group: r for r in w._legend_overlay.findChildren(_LegendRow)}
+
+
+def _press(row, ctrl=False):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    mods = Qt.KeyboardModifier.ControlModifier if ctrl else Qt.KeyboardModifier.NoModifier
+    QTest.mouseClick(row, Qt.MouseButton.LeftButton, mods)
+
+
+def test_legend_selects_groups_like_the_plot(app, scripted, tmp_path):
+    """Clicking a legend row selects that group and Ctrl-click adds or
+    removes one, so a small cluster can be picked without hitting it on
+    the plot. The selected rows are bold."""
+    from kosmic.gui.scrna.workspace import ScRNAWorkspace
+
+    path = tmp_path / 'processed_data' / 'S.h5ad'
+    path.parent.mkdir()
+    a = _study(path)
+    ws = ScRNAWorkspace(embedded=True)
+    ws.resize(1400, 900)
+    ws.show()
+    ws.set_adata(a, str(path))
+    tab = ws.cluster_tab
+    ws.switch_tab(ws.stack.indexOf(tab))
+    tab.set_data(a, str(path))
+    tab._show_embedding(a, 'leiden')
+    app.processEvents()
+    w = tab._umap_widget
+
+    _press(_legend_rows(w)['1'])
+    assert w.selection() == ('leiden', ['1'], 240)
+    _press(_legend_rows(w)['2'], ctrl=True)
+    assert w.selection() == ('leiden', ['1', '2'], 350)
+    rows = _legend_rows(w)
+    marked = {g for g, r in rows.items()
+              if any(lb.property('selected') == 'true' for lb in r.findChildren(type(w._info_label)))}
+    assert marked == {'1', '2'}
+    _press(rows['1'], ctrl=True)
+    assert w.selection() == ('leiden', ['2'], 110)
+
+    w.set_selectable(False)        # an open focus: the legend is not clickable
+    assert not _legend_rows(w)

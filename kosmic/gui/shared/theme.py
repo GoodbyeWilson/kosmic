@@ -1568,6 +1568,14 @@ def get_stylesheet() -> str:
         border: none;
     }}
 
+    QFrame#legend_overlay QLabel[role="legend_text"][selected="true"] {{
+        font-weight: bold;
+    }}
+
+    QFrame#legend_overlay QScrollArea, QFrame#legend_overlay QScrollArea > QWidget > QWidget {{
+        background-color: transparent;
+    }}
+
     /* === Cluster-tab compact toggle buttons (color/label/key) ======== */
 
     QPushButton[role="toggle"] {{
