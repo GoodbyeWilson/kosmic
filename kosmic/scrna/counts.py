@@ -54,6 +54,26 @@ def count_var_names(adata) -> list:
     return count_source(adata)[1]
 
 
+#: How each count source is named in the interface.
+COUNT_SOURCE_TEXT = {'raw': "Original counts",
+                     'decontX_counts': "DecontX-corrected counts"}
+
+
+def loaded_count_source(adata) -> str:
+    """Which counts a counts-only dataset holds in X: a layer name such as
+    ``'decontX_counts'`` when that layer was loaded, else ``'raw'``.
+
+    Reads ``uns['counts_loaded_from']``, which
+    :func:`kosmic.scrna.load.h5ad_meta.read_counts_adata` sets; a dataset
+    without it holds its original counts.
+    """
+    uns = getattr(adata, 'uns', None) or {}
+    where = str(uns.get('counts_loaded_from', ''))
+    if where.startswith('layers:') and where != 'layers:counts':
+        return where.split(':', 1)[1]
+    return 'raw'
+
+
 def has_counts_layer(adata) -> bool:
     """True when ``layers['counts']`` or ``.raw`` holds the original counts."""
     return 'counts' in adata.layers or getattr(adata, 'raw', None) is not None

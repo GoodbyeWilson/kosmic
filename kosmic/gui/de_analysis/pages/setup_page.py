@@ -29,19 +29,27 @@ SAMPLE_COLUMN_MAX_VALUES = 5000
 class _CountsLoadWorker(BaseWorker):
     """Load a study for DE: obs, var and the counts as X, nothing else.
 
-    Emits 'finished_ok' with '(adata, path, message)' like the intake
-    loader, so the Setup page's handler is shared.
+    'counts_layer' names the counts to load instead of the original ones
+    ('decontX_counts'); a file without that layer loads its original
+    counts, and the message says so. Emits 'finished_ok' with
+    '(adata, path, message)' like the intake loader, so the Setup page's
+    handler is shared.
     """
 
-    def __init__(self, h5ad_path: str):
+    def __init__(self, h5ad_path: str, counts_layer=None):
         super().__init__()
         self.h5ad_path = h5ad_path
+        self.counts_layer = counts_layer
 
     def _run(self):
-        from kosmic.scrna.load.h5ad_meta import read_counts_adata
-        adata = read_counts_adata(self.h5ad_path)
+        from kosmic.scrna.load.h5ad_meta import read_counts_adata, read_layer_names
+        layer, note = self.counts_layer, ""
+        if layer is not None and layer not in read_layer_names(self.h5ad_path):
+            note = f"; the file has no '{layer}' layer, so its original counts were loaded"
+            layer = None
+        adata = read_counts_adata(self.h5ad_path, counts_layer=layer)
         msg = (f"{adata.n_obs:,} cells x {adata.n_vars:,} genes "
-               f"(counts from {adata.uns.get('counts_loaded_from', '?')})")
+               f"(counts from {adata.uns.get('counts_loaded_from', '?')}{note})")
         return (adata, self.h5ad_path, msg)
 
 
@@ -84,10 +92,24 @@ class SetupPage(SimplePage):
         self._import_btn.setToolTip(
             "Load an h5ad from outside the project (one-off analyses).")
         self._import_btn.clicked.connect(self._load_h5ad)
+        self._counts_btn = ov.add_action(SecondaryButton(""))
+        self._counts_btn.setToolTip(
+            "Which counts the analysis reads: the original counts, or the\n"
+            "DecontX-corrected counts (layers['decontX_counts']) of a study\n"
+            "run through the Decontaminate step. Changing it reloads the\n"
+            "study, and the choice applies to each study loaded after it.")
+        self._counts_menu = QMenu(self._counts_btn)
+        self._counts_menu.aboutToShow.connect(self._populate_counts_menu)
+        self._counts_btn.setMenu(self._counts_menu)
+        self._sync_counts_button()
 
         self._dataset_panel = ov.add_panel(InfoPanel("DATASET"))
         self._dataset_panel.add_row('source', "Source")
         self._dataset_panel.add_row('file', "File")
+        self._dataset_panel.add_row(
+            'counts', "Counts",
+            "The count matrix every DE step reads, and the pseudobulk it "
+            "exports.")
         self._dataset_panel.add_row(
             'sample_col', "Sample column",
             "Column with patient/sample IDs -- each unique value becomes "
@@ -447,6 +469,47 @@ class SetupPage(SimplePage):
                         lambda _c=False, p=str(f): self._do_load_h5ad(p))
 
     # ------------------------------------------------------------------
+    # Counts: the original counts or a corrected layer
+    # ------------------------------------------------------------------
+
+    _COUNTS_OPTIONS = ((None, "Original counts"),
+                       ('decontX_counts', "DecontX-corrected counts"))
+
+    def _sync_counts_button(self):
+        short = {None: "original", 'decontX_counts': "DecontX"}
+        self._counts_btn.setText(
+            f"Counts: {short.get(self.ws.counts_choice, self.ws.counts_choice)}")
+
+    def _populate_counts_menu(self):
+        """Offer the counts the study's file holds; tick the one chosen."""
+        from kosmic.scrna.load.h5ad_meta import read_layer_names
+        menu = self._counts_menu
+        menu.clear()
+        path = getattr(self.ws, 'h5ad_path', None) or self._registered_h5ad()
+        try:
+            layers = read_layer_names(path) if path else None
+        except OSError:
+            layers = None
+        for layer, label in self._COUNTS_OPTIONS:
+            missing = layer is not None and layers is not None and layer not in layers
+            act = menu.addAction(f"{label} (not in this study)" if missing else label)
+            act.setCheckable(True)
+            act.setChecked(layer == self.ws.counts_choice)
+            act.setEnabled(not missing)
+            act.triggered.connect(lambda _c=False, ly=layer: self._choose_counts(ly))
+
+    def _choose_counts(self, layer):
+        """Read 'layer' (None: the original counts) from now on, reloading
+        the study that is open so the analysis reads them."""
+        if layer == self.ws.counts_choice:
+            return
+        self.ws.counts_choice = layer
+        self._sync_counts_button()
+        path = getattr(self.ws, 'h5ad_path', None)
+        if path and self.ws.current_adata is not None:
+            self._start_load(str(path))
+
+    # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
 
@@ -486,8 +549,10 @@ class SetupPage(SimplePage):
         # Counts, obs and var only: differential expression never reads
         # the normalised matrix, the embeddings or the graph, and loading
         # them doubled the memory of every study (the atlas did not fit).
+        # One count matrix, the one chosen under Counts.
         self._load_study_dir = self.ws.project_dir
-        self._load_worker = _CountsLoadWorker(path)
+        self._counts_btn.setEnabled(False)
+        self._load_worker = _CountsLoadWorker(path, counts_layer=self.ws.counts_choice)
         run_worker(
             self._load_worker,
             on_finished=self._on_loaded,
@@ -495,7 +560,8 @@ class SetupPage(SimplePage):
         )
 
     def _on_loaded(self, payload) -> None:
-        adata, path, _message = payload
+        adata, path, message = payload
+        self._counts_btn.setEnabled(True)
         # The active study can change while a load is in flight (a
         # second load request is ignored while one runs). The file that
         # arrives then belongs to the previous study; keeping it would
@@ -539,12 +605,12 @@ class SetupPage(SimplePage):
             label=f"Data loaded: {adata.n_obs:,} cells x {adata.n_vars:,} genes",
             detail=str(path),
         )
-        self.ws.log_message.emit(
-            f"Loaded h5ad: {path} ({adata.n_obs:,} cells x {adata.n_vars:,} genes)")
+        self.ws.log_message.emit(f"Loaded h5ad: {path}: {message}")
         self.ws.status_message.emit(f"DE: Loaded {path} ({adata.n_obs:,} cells)")
         self.ws.mark_step_complete(0)  # Step 0 = Load Data
 
     def _on_load_failed(self, message: str) -> None:
+        self._counts_btn.setEnabled(True)
         self._study_card.show()
         self._no_dataset_frame.hide()
         self._not_ready_frame.hide()
@@ -779,6 +845,16 @@ class SetupPage(SimplePage):
         self._dataset_panel.set_value(
             'file', file_name, tooltip=str(h5ad_path) if h5ad_path else None)
 
+        from kosmic.scrna.counts import loaded_count_source
+        loaded = loaded_count_source(adata)
+        text = dict(self._COUNTS_OPTIONS).get(None if loaded == 'raw' else loaded, loaded)
+        if loaded == (self.ws.counts_choice or 'raw'):
+            self._dataset_panel.set_value('counts', text, ok=True)
+        else:
+            self._dataset_panel.set_value(
+                'counts', f"{text} (the chosen counts are not in this study)",
+                ok=False)
+
         sample_col = self.ws.sample_col
         if sample_col and sample_col in adata.obs.columns:
             n_samples = adata.obs[sample_col].nunique()
@@ -983,21 +1059,34 @@ class SetupPage(SimplePage):
 
             self.ws.log_message.emit(f"Created new column '{new_col}': {', '.join(selected)} -> {new_name}")
 
-            # Save adata so the grouped column persists across sessions
-            h5ad_path = getattr(self.ws, 'h5ad_path', None)
-            if h5ad_path:
-                try:
-                    self.ws.current_adata.write_h5ad(h5ad_path)
-                    self.ws.log_message.emit(f"Saved updated data to {h5ad_path}")
-                except Exception as e:
-                    self.ws.log_message.emit(f"Warning: could not save — {e}")
-
+            self._save_obs_column(new_col)
             dialog.accept()
 
         apply_btn.clicked.connect(apply_grouping)
         cancel_btn.clicked.connect(dialog.reject)
 
         dialog.exec()
+
+    def _save_obs_column(self, col: str) -> None:
+        """Write one obs column of the loaded dataset into the study's file.
+
+        Only the column: the dataset here is DE's counts-only copy, and
+        writing it whole replaced the study's file with it, losing the
+        normalised matrix, the embeddings, the graph and every other layer.
+        """
+        h5ad_path = getattr(self.ws, 'h5ad_path', None)
+        if not h5ad_path:
+            return
+        try:
+            from kosmic.scrna.load.h5ad_meta import read_obs, write_obs
+            obs = read_obs(h5ad_path)
+            if len(obs) != self.ws.current_adata.n_obs:
+                raise ValueError("the file's cells no longer match the loaded dataset")
+            obs[col] = self.ws.current_adata.obs[col].to_numpy()
+            write_obs(h5ad_path, obs)
+            self.ws.log_message.emit(f"Saved '{col}' to {h5ad_path}")
+        except Exception as e:
+            self.ws.log_message.emit(f"Warning: could not save — {e}")
 
     def refresh_theme(self):
         """No-op: every widget on this page is styled via theme roles."""

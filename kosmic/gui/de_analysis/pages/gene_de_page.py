@@ -21,6 +21,7 @@ from kosmic.paths import (
 )
 from kosmic.de.de_analysis import required_donor_count
 from kosmic.numerical import neg_log10
+from kosmic.scrna.counts import COUNT_SOURCE_TEXT
 from kosmic.gui.shared.plots import InteractiveHeatmap, InteractiveVolcano
 from kosmic.gui.de_analysis.workers import (
     CellTypeBatchWorker, MetabolicDEWorker, MetaExportWorker,
@@ -511,16 +512,13 @@ class GeneDEPage(SidebarTabbedPage):
                                       self.filter_min_samples_spin)
 
         model_lay.addWidget(QLabel("Count source:"))
-        self.count_source_combo = NoScrollComboBox()
-        self.count_source_combo.addItems(["Raw counts", "Decontaminated (DecontX)"])
-        self.count_source_combo.setCurrentIndex(0)
-        self.count_source_combo.setToolTip(
-            "Raw counts: use the original counts.\n"
-            "Decontaminated: use DecontX-corrected counts "
-            "(layers['decontX_counts']).\n"
-            "Available only after running the Decontaminate step before Subset."
-        )
-        model_lay.addWidget(self.count_source_combo)
+        self.count_source_label = SecondaryLabel(COUNT_SOURCE_TEXT['raw'])
+        self.count_source_label.setToolTip(
+            "The counts every step here reads: the original counts, or the\n"
+            "DecontX-corrected counts (layers['decontX_counts']) of a study\n"
+            "run through the Decontaminate step. Choose under Counts on the\n"
+            "Dataset page.")
+        model_lay.addWidget(self.count_source_label)
 
         filters_lay.addWidget(self.detection_study_check)
 
@@ -592,7 +590,6 @@ class GeneDEPage(SidebarTabbedPage):
                      self.detection_donor_frac_spin.valueChanged,
                      self.filter_min_count_spin.valueChanged,
                      self.filter_min_samples_spin.valueChanged,
-                     self.count_source_combo.currentIndexChanged,
                      self.detection_study_check.toggled,
                      self.exclude_mt_check.toggled,
                      self.exclude_ribo_check.toggled,
@@ -620,7 +617,6 @@ class GeneDEPage(SidebarTabbedPage):
                      self.detection_study_check.toggled,
                      self.exclude_mt_check.toggled,
                      self.exclude_ribo_check.toggled,
-                     self.count_source_combo.currentIndexChanged,
                      self.de_method_combo.currentIndexChanged,
                      self.unit_combo.currentIndexChanged,
                      self.eb_checkbox.toggled,
@@ -1088,14 +1084,9 @@ class GeneDEPage(SidebarTabbedPage):
     # --- Pathway-UI visibility ---
 
     def _refresh_count_source(self):
-        """Enable the DecontX count source only when the layer is present."""
-        adata = self.ws.current_adata
-        has_decontx = (adata is not None
-                       and 'decontX_counts' in getattr(adata, 'layers', {}))
-        model = self.count_source_combo.model()
-        model.item(1).setEnabled(has_decontx)
-        if not has_decontx and self.count_source_combo.currentIndex() == 1:
-            self.count_source_combo.setCurrentIndex(0)
+        """Show which counts the loaded dataset holds."""
+        self.count_source_label.setText(
+            COUNT_SOURCE_TEXT.get(self._count_source(), self._count_source()))
 
     def _excluded_gene_groups(self):
         """Gene groups ticked for exclusion, as run_de_pipeline names them."""
@@ -1103,11 +1094,14 @@ class GeneDEPage(SidebarTabbedPage):
                                       ('ribosomal', self.exclude_ribo_check))
                      if box.isChecked())
 
-    def _selected_counts_layer(self):
-        """Return the counts layer name to feed DE, or None for raw counts."""
-        if self.count_source_combo.currentIndex() == 1:
-            return 'decontX_counts'
-        return None
+    def _count_source(self):
+        """Which counts the loaded dataset holds: 'raw' or a layer name.
+
+        The Dataset page loads the chosen counts as the dataset's matrix,
+        so every analysis here reads them without naming a layer.
+        """
+        from kosmic.scrna.counts import loaded_count_source
+        return loaded_count_source(self.ws.current_adata)
 
     def _refresh_pathway_ui_visibility(self):
         """Hide the pathway-driven views when there are no pathways.
@@ -1239,7 +1233,7 @@ class GeneDEPage(SidebarTabbedPage):
                 self.detection_donor_frac_spin.value(), 4),
             'gene_filter_per_study': bool(self._per_study_filter_col()),
             'gene_universe': self._gene_universe_record(),
-            'counts_layer': self._selected_counts_layer() or 'raw',
+            'counts_layer': self._count_source(),
             'excluded_gene_groups': self._excluded_gene_groups(),
             'indep_filter': self.indep_filter_check.isChecked(),
             'cooks_filter': self.cooks_filter_check.isChecked(),
@@ -1294,7 +1288,7 @@ class GeneDEPage(SidebarTabbedPage):
                 'gene_universe': self._gene_universe_record(),
                 'filter_min_count': self.filter_min_count_spin.value(),
                 'filter_min_samples': int(self.filter_min_samples_spin.value()),
-                'count_source': self._selected_counts_layer() or 'raw',
+                'count_source': self._count_source(),
                 'excluded_gene_groups': list(self._excluded_gene_groups()),
                 'independent_filter': self.indep_filter_check.isChecked(),
                 'cooks_filter': self.cooks_filter_check.isChecked(),
@@ -1721,7 +1715,7 @@ class GeneDEPage(SidebarTabbedPage):
                 else "per cell (pseudoreplicated)")
         engine = ("Wilcoxon" if self.ws.unit == 'cell'
                   else self.de_method_combo.currentText())
-        counts = self.count_source_combo.currentText()
+        counts = COUNT_SOURCE_TEXT.get(self._count_source(), self._count_source())
         model_lines = [engine, f"{unit} \u00b7 {counts}"]
         if self.ws.unit == 'sample' and self.eb_checkbox.isChecked():
             model_lines[1] += " \u00b7 EB"
@@ -1993,7 +1987,6 @@ class GeneDEPage(SidebarTabbedPage):
             de_method=de_method, full_genome=full_genome,
             moderate=self.eb_checkbox.isChecked(),
             unit=self.ws.unit,
-            counts_layer=self._selected_counts_layer(),
             detection_min_pct=self.detection_pct_spin.value() / 100.0,
             detection_min_donor_frac=(
                 self.detection_donor_frac_spin.value() / 100.0),
@@ -2204,7 +2197,6 @@ class GeneDEPage(SidebarTabbedPage):
 
         min_cells = self.min_cells_spin.value()
         min_counts = self.min_counts_spin.value()
-        counts_layer = self._selected_counts_layer()
 
         def _checked_types():
             return [type_list.item(i).data(Qt.ItemDataRole.UserRole)
@@ -2227,7 +2219,7 @@ class GeneDEPage(SidebarTabbedPage):
             try:
                 plans = plan_cell_types(
                     adata, col, self.ws.sample_col, min_cells=min_cells,
-                    min_counts=min_counts, counts_layer=counts_layer)
+                    min_counts=min_counts)
             except ValueError as exc:
                 summary.setText(str(exc))
                 return
@@ -2322,7 +2314,6 @@ class GeneDEPage(SidebarTabbedPage):
             min_counts=self.min_counts_spin.value(),
             pathway_gene_sets=self.ws.pathway_gene_sets,
             fdr_genes=self._committed_fdr_genes(),
-            counts_layer=self._selected_counts_layer(),
             detection_min_pct=self.detection_pct_spin.value() / 100.0,
             detection_min_donor_frac=(
                 self.detection_donor_frac_spin.value() / 100.0),
@@ -3042,9 +3033,7 @@ class GeneDEPage(SidebarTabbedPage):
         adata = self.ws.current_adata
         if adata is None or not self.ws.sample_col or not self.ws.condition_col:
             return None
-        counts_layer = self._selected_counts_layer()
-        key = (id(adata), counts_layer, self.ws.sample_col,
-               self.ws.condition_col, norm)
+        key = (id(adata), self.ws.sample_col, self.ws.condition_col, norm)
         cache = getattr(self, '_expr_cache', None)
         if cache is None:
             cache = self._expr_cache = {}
@@ -3063,7 +3052,7 @@ class GeneDEPage(SidebarTabbedPage):
         try:
             df = pseudobulk_expression_matrix(
                 adata, self.ws.sample_col, self.ws.condition_col,
-                normalization=norm, counts_layer=counts_layer,
+                normalization=norm,
                 min_cells=self.ws.min_cells, min_counts=self.ws.min_counts)
         finally:
             self.status_label.setText("")

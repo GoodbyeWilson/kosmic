@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from kosmic.de.pathway_scoring import SCORING_METHODS, SCORING_METHOD_HELP, DEFAULT_METHOD
+from kosmic.scrna.counts import COUNT_SOURCE_TEXT
 from kosmic.paths import de_analysis_dir, de_pathway_scoring_dir
 from kosmic import PATHWAY_GENE_DETECTION_PCT, PATHWAY_MIN_COVERAGE
 from kosmic.gui.shared.theme import get_color, NoScrollComboBox, NoScrollDoubleSpinBox
@@ -64,13 +65,13 @@ class PathwayDEPage(SidebarTabbedPage):
 
         count_row = QHBoxLayout()
         count_row.addWidget(QLabel("Count source:"))
-        self.count_source_combo = NoScrollComboBox()
-        self.count_source_combo.addItems(["Raw counts", "Decontaminated (DecontX)"])
-        self.count_source_combo.setToolTip(
-            "Raw counts, or DecontX-corrected counts (layers['decontX_counts']).\n"
-            "Decontaminated is available once the Decontaminate step has run."
-        )
-        count_row.addWidget(self.count_source_combo)
+        self.count_source_label = SecondaryLabel(COUNT_SOURCE_TEXT['raw'])
+        self.count_source_label.setToolTip(
+            "The counts the scores are computed from: the original counts, or\n"
+            "the DecontX-corrected counts (layers['decontX_counts']) of a study\n"
+            "run through the Decontaminate step. Choose under Counts on the\n"
+            "Dataset page.")
+        count_row.addWidget(self.count_source_label, 1)
         method_group.add_layout(count_row)
 
         # Gene detection + pathway coverage thresholds. Genes below the
@@ -380,19 +381,18 @@ class PathwayDEPage(SidebarTabbedPage):
         return self.scoring_method_combo.currentData() or DEFAULT_METHOD
 
     def _refresh_count_source(self):
-        """Enable the DecontX count source only when the layer is present."""
-        adata = self.ws.current_adata
-        has_decontx = (adata is not None
-                       and 'decontX_counts' in getattr(adata, 'layers', {}))
-        self.count_source_combo.model().item(1).setEnabled(has_decontx)
-        if not has_decontx and self.count_source_combo.currentIndex() == 1:
-            self.count_source_combo.setCurrentIndex(0)
+        """Show which counts the loaded dataset holds."""
+        self.count_source_label.setText(
+            COUNT_SOURCE_TEXT.get(self._count_source(), self._count_source()))
 
-    def _selected_counts_layer(self):
-        """Return the counts layer to score, or None for raw counts."""
-        if self.count_source_combo.currentIndex() == 1:
-            return 'decontX_counts'
-        return None
+    def _count_source(self):
+        """Which counts the loaded dataset holds: 'raw' or a layer name.
+
+        The Dataset page loads the chosen counts as the dataset's matrix,
+        so the scoring reads them without naming a layer.
+        """
+        from kosmic.scrna.counts import loaded_count_source
+        return loaded_count_source(self.ws.current_adata)
 
     def _coverage_kwargs(self):
         """Gene-detection + pathway-coverage thresholds from the spinboxes."""
@@ -435,7 +435,6 @@ class PathwayDEPage(SidebarTabbedPage):
             self.ws.pathway_gene_sets, output_dir,
             method=method,
             gene_de_results=gene_de,
-            counts_layer=self._selected_counts_layer(),
             **self._coverage_kwargs(),
         )
         if self.ws.progress_bar:
@@ -501,7 +500,6 @@ class PathwayDEPage(SidebarTabbedPage):
             self.ws.control_label, self.ws.disease_label,
             self.ws.parent_gene_sets, output_dir,
             level_label='parent_', method=method,
-            counts_layer=self._selected_counts_layer(),
             **self._coverage_kwargs(),
         )
         run_worker(
@@ -549,7 +547,7 @@ class PathwayDEPage(SidebarTabbedPage):
             cov = self._coverage_kwargs()
             params = {
                 'scoring_method': self._get_scoring_method(),
-                'count_source': self._selected_counts_layer() or 'raw',
+                'count_source': self._count_source(),
                 'gene_detection_pct': round(cov['gene_detection_pct'], 4),
                 'min_coverage': round(cov['min_coverage'], 4),
                 'n_gene_sets': len(self.ws.pathway_gene_sets or {}),
@@ -621,7 +619,6 @@ class PathwayDEPage(SidebarTabbedPage):
             self.ws.disease_label, self.ws.control_label,
             pathway_name,
             method=method,
-            counts_layer=self._selected_counts_layer(),
             precomputed_scores=self._stored_pathway_score(pathway_name),
             allowed_genes=tested_gene_set(getattr(self.ws, 'de_results', None)),
         )
@@ -771,7 +768,6 @@ class PathwayDEPage(SidebarTabbedPage):
             self.ws.sample_col, self.ws.condition_col,
             self.ws.disease_label, self.ws.control_label, contam_key,
             method=self._get_scoring_method(),
-            counts_layer=self._selected_counts_layer(),
         )
         run_worker(
             self._spill_worker,

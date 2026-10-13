@@ -205,3 +205,89 @@ def test_scrna_discards_a_load_that_finishes_after_the_study_changed(app, tmp_pa
     ws.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+def _with_decontx(path):
+    """Add a DecontX layer, distinct from the counts, to a study file."""
+    a = ad.read_h5ad(path)
+    a.layers['decontX_counts'] = sp.csr_matrix(np.floor(a.layers['counts'].toarray() * 0.5))
+    a.write_h5ad(path)
+    return a.layers['decontX_counts']
+
+
+def test_read_counts_adata_takes_a_named_layer_instead(tmp_path):
+    from kosmic.scrna.counts import loaded_count_source
+    from kosmic.scrna.load.h5ad_meta import read_layer_names
+    path = tmp_path / 's.h5ad'
+    _study(path)
+    decontx = _with_decontx(path)
+    assert set(read_layer_names(path)) == {'counts', 'decontX_counts'}
+    a = read_counts_adata(path, counts_layer='decontX_counts')
+    assert (a.X != decontx).nnz == 0 and not a.layers
+    assert loaded_count_source(a) == 'decontX_counts'
+    assert loaded_count_source(read_counts_adata(path)) == 'raw'
+    with pytest.raises(ValueError, match="no layer 'soupX_counts'"):
+        read_counts_adata(path, counts_layer='soupX_counts')
+
+
+def test_de_reads_the_decontx_counts_when_chosen(app, tmp_path, monkeypatch):
+    """DecontX counts are chosen on the Dataset page and loaded as the
+    dataset's one matrix, so every step reads them; a study without them
+    loads its original counts and the page says so."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.de_analysis.pages import setup_page
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    with_layer, without = tmp_path / 'a.h5ad', tmp_path / 'b.h5ad'
+    _study(with_layer)
+    decontx = _with_decontx(with_layer)
+    _study(without)
+
+    def run_now(worker, *, on_finished, on_failed=None, **_kw):
+        on_finished(worker._run())
+        return worker
+
+    monkeypatch.setattr(setup_page, 'run_worker', run_now)
+    ws = DEWorkspace()
+    page = ws.setup_page
+    page._start_load(str(with_layer))
+    assert ws.gene_de_page._count_source() == 'raw'
+
+    page._choose_counts('decontX_counts')                   # reloads the open study
+    assert (ws.current_adata.X != decontx).nnz == 0
+    assert ws.gene_de_page._count_source() == 'decontX_counts'
+    assert ws.pathway_de_page._count_source() == 'decontX_counts'
+    assert page._dataset_panel._rows['counts'][0].text() == "DecontX-corrected counts"
+    assert page._counts_btn.text() == "Counts: DecontX"
+
+    page._start_load(str(without))                         # the choice stays; this study has none
+    assert ws.gene_de_page._count_source() == 'raw'
+    assert 'not in this study' in page._dataset_panel._rows['counts'][0].text()
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
+def test_combine_conditions_saves_the_column_only(app, tmp_path):
+    """DE holds a counts-only copy; saving it whole replaced the study's
+    file with it. Only the new column may reach the file."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    path = tmp_path / 's.h5ad'
+    _study(path)
+    _with_decontx(path)
+    before = ad.read_h5ad(path)
+    ws = DEWorkspace()
+    ws.current_adata = read_counts_adata(path)
+    ws.h5ad_path = str(path)
+    ws.current_adata.obs['grouped'] = ['HF'] * ws.current_adata.n_obs
+    ws.setup_page._save_obs_column('grouped')
+    after = ad.read_h5ad(path)
+    assert (after.obs['grouped'] == 'HF').all()
+    assert 'counts' in after.layers and 'decontX_counts' in after.layers
+    assert 'X_umap' in after.obsm
+    assert (after.X != before.X).nnz == 0                  # the normalised X is untouched
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()

@@ -374,10 +374,13 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
             significant_subset(de_results, fdr, lfc).to_csv(
                 run.significant_path, index=False)
 
+            # The same counts the DE read, or the exported pseudobulk and
+            # the results it accompanies describe different matrices.
             gene_names = [str(g) for g in de_results['names'].tolist()]
             pb_matrix, pb_sample_df, pb_genes = create_pseudobulk(
                 subset, gene_names, sample_col, condition_col,
-                min_cells=min_cells, min_counts=min_counts, aggregate='sum')
+                min_cells=min_cells, min_counts=min_counts, aggregate='sum',
+                counts_layer=pipeline_kwargs.get('counts_layer'))
             if pb_matrix.size:
                 run.pseudobulk_path = pseudobulk_path(output_dir, run_accession)
                 pseudobulk_frame(pb_matrix, pb_sample_df, pb_genes).to_csv(

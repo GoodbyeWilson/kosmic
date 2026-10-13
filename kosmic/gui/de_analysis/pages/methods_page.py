@@ -250,8 +250,8 @@ class MethodsPage(SimplePage):
                     return _label(cs)
 
         gp = getattr(self.ws, 'gene_de_page', None)
-        if gp is not None and hasattr(gp, '_selected_counts_layer'):
-            return _label(gp._selected_counts_layer())
+        if gp is not None and hasattr(gp, '_count_source'):
+            return _label(gp._count_source())
         return None
 
     def _excluded_genes_label(self):
@@ -353,7 +353,7 @@ class MethodsPage(SimplePage):
             page = getattr(ws, 'pathway_de_page', None)
             if page is not None:
                 method_key = page._get_scoring_method()
-                cs = page._selected_counts_layer() or 'raw'
+                cs = page._count_source()
                 gdp = page.gene_detection_spin.value() / 100.0
                 cov = page.min_coverage_spin.value() / 100.0
                 n_sets = len(getattr(ws, 'pathway_gene_sets', None) or {})
@@ -423,7 +423,8 @@ class MethodsPage(SimplePage):
             used_refs.add('soupx')
         if 'X_pca_harmony' in obsm:
             used_refs.add('harmony')
-        if 'decontX_counts' in layers:
+        if ('decontX_counts' in layers
+                or adata.uns.get('counts_loaded_from') == 'layers:decontX_counts'):
             used_refs.add('decontx')
         # CellTypist's own outputs; other annotation methods also write
         # cell_type_auto, so that column is no evidence of CellTypist.
