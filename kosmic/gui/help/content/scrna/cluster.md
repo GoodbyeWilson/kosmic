@@ -126,6 +126,11 @@ cluster, which is more robust than a raw score when a cluster is small.
 
 The cluster table underneath shows each cluster's assigned type and
 lets you change it by hand — pick from the dropdown, **Save Changes**.
+Once a study has been subclustered, the table lists the subclusters
+(`7.0`, `7.1`, …) in place of the clusters they were split from, with
+every other cluster under its own number, so each subcluster can be
+checked and relabelled on its own; its top genes are ranked against the
+other rows the first time you click one.
 When the file came with the authors' own labels (kept in
 `obs['cell_type_author']`), the *Author Type* column shows the label
 that dominates each cluster and the share of the cluster's labelled

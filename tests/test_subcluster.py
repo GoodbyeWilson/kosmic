@@ -154,3 +154,21 @@ def test_methods_list_every_subclustering(tmp_path):
     provenance.record_stage(tmp_path, 's', 'cluster', {'resolution': 1.0})
     text = provenance.render_methods(provenance.load(tmp_path))
     assert text.count('Subclustering') == 2 and text.count('Clustering') == 1
+
+
+def test_apply_writes_the_fine_labels_focus_mode_gave(focused):
+    """A CellTypist pass in focus mode writes 'cell_type_fine' on the subset;
+    without copying it the study kept the parent cluster's winning label."""
+    study, focus = focused
+    a = study.copy()
+    a.obs['cell_type_fine'] = pd.Categorical(['FB1'] * a.n_obs)
+    sub = focus.adata
+    half = sub.n_obs // 2
+    sub.obs['cell_type_fine'] = pd.Categorical(
+        ['FB4_activated'] * half + ['FB1'] * (sub.n_obs - half))
+    subcluster.apply_focus(a, focus)
+    got = a.obs.loc[sub.obs_names, 'cell_type_fine'].astype(str).to_numpy()
+    assert (got == sub.obs['cell_type_fine'].astype(str).to_numpy()).all()
+    others = ~a.obs_names.isin(sub.obs_names)
+    assert (a.obs.loc[others, 'cell_type_fine'] == 'FB1').all()
+    del sub.obs['cell_type_fine']                       # leave the fixture as found

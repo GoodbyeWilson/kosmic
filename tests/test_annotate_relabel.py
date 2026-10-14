@@ -272,3 +272,63 @@ def test_the_table_shows_agreement_with_each_cells_prediction(app):
     assert tbl.item(0, 9).text().startswith('Mixed: 40% of cells')
     assert tbl.item(1, 7).text() == 'High (100%)'
     assert tbl.item(1, 9).text() == ''
+
+
+def test_a_subclustered_study_lists_and_relabels_its_subclusters(app):
+    """After subclustering the table works on 'leiden_sub', so a subcluster
+    can be relabelled on its own (ADR-008)."""
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+
+    class MW:
+        current_adata = None
+        _adata_version = 0
+
+    t = AnnotateTab(MW())
+    n = 120
+    sub = ['0'] * 60 + ['1.0'] * 40 + ['1.1'] * 20
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['0'] * 60 + ['1'] * 60),
+            'leiden_sub': pd.Categorical(sub, categories=['0', '1.0', '1.1']),
+            'cell_type': pd.Categorical(['CM'] * 60 + ['T Cell'] * 60),
+            'cell_type_auto': pd.Categorical(['CM'] * 60 + ['T Cell'] * 60),
+        }, index=[f'c{i}' for i in range(n)]))
+    t.main_window.current_adata = a
+    t.adata = a
+    t._populate_cluster_table()
+    tbl = t.cluster_table
+    assert [tbl.item(r, 0).text() for r in range(tbl.rowCount())] == ['0', '1.0', '1.1']
+
+    t._apply_cluster_reannotation(2, 'NK Cell')
+    assert (a.obs.loc[a.obs['leiden_sub'] == '1.1', 'cell_type'] == 'NK Cell').all()
+    assert (a.obs.loc[a.obs['leiden_sub'] == '1.0', 'cell_type'] == 'T Cell').all()
+    t._record_manual_relabels()     # no workspace recorder: must not fail
+    assert a.uns['manual_relabels']['cluster'] == ['1.1']
+
+
+def test_fine_type_shows_each_rows_own_predictions(app):
+    """'cell_type_fine' keeps the whole cluster's vote after subclustering;
+    the column shows the row's most common per-cell prediction instead."""
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+
+    class MW:
+        current_adata = None
+        _adata_version = 0
+
+    t = AnnotateTab(MW())
+    n = 100
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['23'] * n),
+            'leiden_sub': pd.Categorical(['23.0'] * 50 + ['23.1'] * 50),
+            'cell_type': pd.Categorical(['T Cell'] * 50 + ['NK Cell'] * 50),
+            'cell_type_auto': pd.Categorical(['CD4+ T Cell'] * n),
+            'cell_type_fine': pd.Categorical(['CD4+T_naive'] * n),   # stale
+            'predicted_labels': ['CD8+T_em'] * 50 + ['NK_CD16hi'] * 50,
+        }, index=[f'c{i}' for i in range(n)]))
+    t.main_window.current_adata = a
+    t.adata = a
+    t._populate_cluster_table()
+    assert [t.cluster_table.item(r, 5).text() for r in range(2)] == ['CD8+T_em', 'NK_CD16hi']

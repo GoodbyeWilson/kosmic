@@ -32,7 +32,7 @@ from kosmic.scrna.annotate.author_labels import (
 )
 from kosmic.scrna.annotate.cluster_qc import flag_clusters, prediction_agreement
 from kosmic.scrna.annotate.labels import cluster_column, cluster_label_summary, set_cell_type
-from kosmic.scrna.cluster.subcluster import EARLIER_EDITS_KEY
+from kosmic.scrna.cluster.subcluster import EARLIER_EDITS_KEY, SUBCLUSTER_COLUMN
 from kosmic.scrna.cluster.workset import apply_annotations, working_subset
 
 
@@ -1218,13 +1218,8 @@ class AnnotateTab(QWidget):
             self._table_updating = False
             return
 
-        if 'leiden' in self.adata.obs.columns:
-            cluster_col = 'leiden'
-        elif 'clusters' in self.adata.obs.columns:
-            cluster_col = 'clusters'
-        elif 'seurat_clusters' in self.adata.obs.columns:
-            cluster_col = 'seurat_clusters'
-        else:
+        cluster_col = self._cluster_col()
+        if cluster_col is None:
             self.cluster_table.set_data(pd.DataFrame())
             self._table_updating = False
             return
@@ -1308,8 +1303,15 @@ class AnnotateTab(QWidget):
             m_found = cluster_details.get('markers_found')
             m_total = cluster_details.get('markers_total')
             if has_fine:
+                # The most common per-cell prediction, which is the label a
+                # majority vote over this row picks; 'cell_type_fine' holds
+                # the vote of the cluster as first annotated, and keeps it
+                # in a file subclustered before it was updated there.
+                fine_col = ('predicted_labels'
+                            if 'predicted_labels' in self.adata.obs.columns
+                            else 'cell_type_fine')
                 fine_types = self.adata.obs.loc[
-                    cluster_mask, 'cell_type_fine'].value_counts()
+                    cluster_mask, fine_col].value_counts()
                 detail_text = (fine_types.index[0]
                                if len(fine_types) > 0 else "")
             elif m_found is not None and m_total is not None:
@@ -1519,13 +1521,8 @@ class AnnotateTab(QWidget):
             return
         cluster_id = cluster_item.text()
 
-        if 'leiden' in self.adata.obs.columns:
-            cluster_col = 'leiden'
-        elif 'clusters' in self.adata.obs.columns:
-            cluster_col = 'clusters'
-        elif 'seurat_clusters' in self.adata.obs.columns:
-            cluster_col = 'seurat_clusters'
-        else:
+        cluster_col = self._cluster_col()
+        if cluster_col is None:
             return
 
         mask = (self.adata.obs[cluster_col].astype(str) == str(cluster_id)).to_numpy()
@@ -1612,8 +1609,11 @@ class AnnotateTab(QWidget):
         cluster_id = cluster_item.text()
         self._current_top_genes_cluster = cluster_id
 
-        # If rank_genes_groups already cached, render straight away.
-        if 'rank_genes_groups' in self.adata.uns:
+        # A cached ranking is reused only when it ranked the clusters the
+        # table lists; one made per 'leiden' cluster has no subclusters.
+        cached = self.adata.uns.get('rank_genes_groups')
+        if cached is not None and (cached.get('params') or {}).get(
+                'groupby') == self._cluster_col():
             self._populate_top_genes_for_cluster(cluster_id)
             return
 
@@ -1687,13 +1687,19 @@ class AnnotateTab(QWidget):
         self._top_genes_table.set_data(df)
 
     def _cluster_col(self) -> Optional[str]:
-        """Return the cluster column to use, preferring 'leiden'."""
+        """The cluster column the table lists, relabels and ranks genes by.
+
+        'leiden_sub' when the study has subclusters (ADR-008): it holds
+        every cell, with a cluster that was never subclustered under its
+        own id, so the table shows the subclusters and can relabel each
+        one. Otherwise the study's cluster column. Automated annotation
+        still votes on 'leiden'.
+        """
         if self.adata is None:
             return None
-        for cand in ('leiden', 'clusters', 'seurat_clusters', 'louvain'):
-            if cand in self.adata.obs.columns:
-                return cand
-        return None
+        if SUBCLUSTER_COLUMN in self.adata.obs.columns:
+            return SUBCLUSTER_COLUMN
+        return cluster_column(self.adata.obs)
 
     def _save_annotations(self):
         """Write the workspace's current dataset to the workspace's current file.
@@ -1771,7 +1777,7 @@ class AnnotateTab(QWidget):
                 for values in zip(*edits.values())]
         self._source.record(
             'annotate_manual',
-            {'cluster_col': cluster_column(self.adata.obs), 'edits': rows},
+            {'cluster_col': self._cluster_col(), 'edits': rows},
             replace=True)
 
     def _undo_annotation_changes(self):

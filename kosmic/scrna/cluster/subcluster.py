@@ -258,7 +258,8 @@ def apply_focus(adata, focus: Focus, *, annotation: Optional[dict] = None,
     skipped and counted. 'leiden_sub' starts as a copy of the study's
     cluster column the first time; the focused cells then get their
     subcluster ids. Each focused cell whose 'cell_type' changed in focus
-    mode gets the new label; the rest keep theirs.
+    mode gets the new label; the rest keep theirs. The focused cells'
+    'cell_type_fine', when focus mode gave them one, is written too.
 
     'annotation' is the settings of the automated annotation run in
     focus mode, as the 'annotate' stage records them, and 'manual_edits'
@@ -299,6 +300,15 @@ def apply_focus(adata, focus: Focus, *, annotation: Optional[dict] = None,
             mask = np.zeros(adata.n_obs, dtype=bool)
             mask[hit[changed & (new == label)]] = True
             n_relabelled += set_cell_type(adata.obs, mask, str(label))
+
+    # The fine labels a CellTypist pass in focus mode gave, so the study's
+    # 'cell_type_fine' does not keep the parent cluster's winning label.
+    if 'cell_type_fine' in sub.obs.columns:
+        fine = (adata.obs['cell_type_fine'].astype(object).to_numpy()
+                if 'cell_type_fine' in adata.obs.columns
+                else np.full(adata.n_obs, np.nan, dtype=object))
+        fine[hit] = sub.obs['cell_type_fine'].astype(object).to_numpy()[found]
+        adata.obs['cell_type_fine'] = pd.Categorical(fine)
 
     parent = focus.parent.to_numpy()
     labels = (sub.obs['cell_type'].astype(object).to_numpy()
