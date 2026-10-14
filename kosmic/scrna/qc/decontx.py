@@ -234,3 +234,77 @@ def _stochastic_round(arr: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     """Round to integers stochastically so column/row totals are preserved."""
     floor = np.floor(arr)
     return (floor + (rng.random(arr.shape) < (arr - floor))).astype(np.float32)
+
+
+# QC re-check on the corrected counts
+#
+# QC measures each cell on its original counts, and DecontX then removes
+# what it attributes to ambient RNA. A cell whose counts were mostly
+# ambient -- a near-empty droplet that just cleared QC -- can be left with
+# a handful of counts. It no longer resembles any cell type, so it forms
+# isolated islands on the UMAP and collects in small or mixed clusters.
+# Re-applying the study's own depth limits to the corrected counts removes
+# such cells, as QC removes any other cell below them. Only the minimums
+# are re-applied: correction only lowers counts, so no cell can newly
+# exceed a maximum, and the mitochondrial share is a property of the
+# measured cell that QC has already judged.
+
+#: The QC limits re-applied to the corrected counts.
+RECHECK_LIMITS = ('min_genes', 'min_counts')
+
+
+def recheck_qc(adata, min_genes: int = 0, min_counts: int = 0,
+               layer: str = DECONTX_LAYER) -> dict:
+    """Remove cells below the QC minimums on the corrected counts, in place.
+
+    Genes detected and total counts are measured on 'layers[layer]',
+    whose values DecontX has already rounded to whole counts. A limit of
+    0 is off. Cells are removed with one in-place row subset, as the QC
+    step removes cells, so every layer, embedding and label stays aligned.
+
+    Returns
+    -------
+    dict
+        The limits and layer used, 'n_cells_before', 'n_cells_after',
+        'n_removed', and how many cells fell below each limit
+        ('n_below_min_genes', 'n_below_min_counts'; a cell below both
+        counts in each).
+    """
+    if layer not in adata.layers:
+        raise ValueError(f"No '{layer}' layer: run DecontX first.")
+    X = adata.layers[layer]
+    if not sp.issparse(X):
+        X = np.asarray(X)
+    counts = np.asarray(X.sum(axis=1)).ravel()
+    genes = np.asarray((X > 0).sum(axis=1)).ravel()
+
+    low_genes = genes < min_genes if min_genes > 0 else np.zeros(adata.n_obs, bool)
+    low_counts = counts < min_counts if min_counts > 0 else np.zeros(adata.n_obs, bool)
+    keep = ~(low_genes | low_counts)
+    n_before = int(adata.n_obs)
+    if not keep.all():
+        adata._inplace_subset_obs(keep)
+    return {
+        'layer': layer,
+        'min_genes': int(min_genes),
+        'min_counts': int(min_counts),
+        'n_cells_before': n_before,
+        'n_cells_after': int(adata.n_obs),
+        'n_removed': int(n_before - adata.n_obs),
+        'n_below_min_genes': int(low_genes.sum()),
+        'n_below_min_counts': int(low_counts.sum()),
+    }
+
+
+def qc_limits(record: Optional[dict]) -> Optional[dict]:
+    """The QC minimums to re-apply, from the study's last 'qc' stage.
+
+    'record' is the loaded provenance record. None when the study has no
+    recorded QC, or when every re-applied limit was off.
+    """
+    from kosmic.provenance import last_stage
+
+    entry = last_stage(record, 'qc') if record else None
+    params = (entry or {}).get('params') or {}
+    limits = {k: int(params.get(k) or 0) for k in RECHECK_LIMITS}
+    return limits if any(limits.values()) else None

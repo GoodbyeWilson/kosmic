@@ -65,3 +65,51 @@ it.**
   project first.
 - Label propagation writes the corrected atlas's labels to the studies
   as before; the studies' own counts are not touched.
+
+## Addendum (2026-10-14): QC limits re-applied after DecontX
+
+### Problem
+
+QC measures each cell on its original counts. DecontX then removes what
+it attributes to ambient RNA, and a cell whose counts were mostly
+ambient, such as a near-empty droplet that just cleared QC, can be left
+with almost nothing. On the DCM atlas built from DecontX counts, 99
+Reichart nuclei that passed QC with about 640 counts each kept a median
+of one count. They formed isolated islands on the UMAP, small Leiden
+clusters of their own and low-confidence CellTypist calls. In all,
+14,913 cells (1.3%) fell below the studies' own QC minimums (300 genes,
+500 counts) on the corrected counts; 1,762 of them sat in the cluster
+labelled Mast Cell, 20.5% of it, predicted cell by cell as
+cardiomyocyte.
+
+### Decision
+
+**Decontaminate re-applies the study's recorded QC minimums to the
+corrected counts and removes the cells below them, as QC removes
+cells.**
+
+1. `recheck_qc(adata, min_genes, min_counts)` measures genes detected
+   and total counts on `layers['decontX_counts']` and removes failing
+   cells with one in-place row subset. Only the minimums are re-applied:
+   correction only lowers counts, so no cell can newly exceed a maximum,
+   and the mitochondrial share is a property of the measured cell that
+   QC has already judged.
+2. The limits are the study's own, from its last `qc` provenance stage
+   (`qc_limits`). A study without recorded QC limits is not re-checked.
+3. The re-check runs after DecontX by default (an option on the
+   Decontaminate page), and a separate button runs it alone on a study
+   decontaminated earlier.
+4. The `qc_recheck` provenance stage records the limits, the layer and
+   the cells removed, so the methods record reports the step with its
+   numbers.
+5. Cells are removed rather than marked excluded. Exclusion is carried
+   by `_role`, which Setup and Combine derive from the condition, so a
+   per-cell exclusion would be lost at the next Combine.
+
+### Consequences
+
+- A study's cells after Decontaminate can be fewer than after QC. The
+  methods record lists the removal next to the DecontX stage.
+- Re-running DecontX afterwards starts from the remaining cells. The
+  original counts of the removed cells are not kept in the study file;
+  keep a copy of the study before Decontaminate if they may be needed.

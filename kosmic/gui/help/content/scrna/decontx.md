@@ -48,9 +48,27 @@ one sample's worth, so a 150,000-nucleus dataset is fine on a
 workstation.
 
 Decontaminated counts go to **`layers['decontX_counts']`**. The
-original counts are **never overwritten**, so the step is reversible and
-you can run DE on either and compare — which is worth doing at least
-once, to see how much the soup was contributing.
+original counts are **never overwritten**, so you can run DE on either
+and compare — which is worth doing at least once, to see how much the
+soup was contributing.
+
+## QC limits on the corrected counts
+
+QC judged each cell on its original counts. A near-empty droplet that
+only just cleared QC can be left with almost nothing once its ambient
+RNA is removed: it no longer resembles any cell type, sits on its own
+on the UMAP and ends up in small or mixed clusters. **Re-apply the QC
+limits to the corrected counts**, on by default, removes the cells that
+fall below this study's own QC minimums (genes detected and total
+counts, as set on the QC page) on the corrected counts. The option
+names the limits it will use; it is unavailable when the study has no
+QC recorded.
+
+Cells are removed from the study file, as QC removes cells. The number
+removed is shown when the run finishes and recorded in provenance, so
+Methods reports it with the limits. For a study decontaminated before
+this option existed, **Re-apply QC limits only** does the same without
+running DecontX again.
 
 ## Downstream
 

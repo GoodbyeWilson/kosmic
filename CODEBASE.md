@@ -189,7 +189,9 @@ highly variable genes, so `adata.var_names` is always the full gene
 list.
 Differential expression is computed from those counts, never from the
 normalised matrix. DecontX writes its output to
-`adata.layers['decontX_counts']` and leaves the originals unchanged.
+`adata.layers['decontX_counts']` and leaves the originals unchanged; by
+default it then removes the cells that fall below the study's recorded
+QC minimums on the corrected counts (`qc_recheck` stage, ADR-011).
 The one exception is a shared atlas that Combine built from the
 studies' DecontX counts: its `layers['counts']` are those corrected
 counts, and only the `combine` provenance stage

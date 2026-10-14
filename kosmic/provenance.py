@@ -224,6 +224,7 @@ def staleness(study_dir, adata, sample_col: Optional[str] = None,
 _STAGE_TITLES = {
     'load': 'Load', 'qc': 'Quality control', 'normalize': 'Normalisation',
     'cluster': 'Clustering', 'decontx': 'DecontX decontamination',
+    'qc_recheck': 'QC limits re-applied to the decontaminated counts',
     'doublets': 'Doublet detection',
     'annotate': 'Cell-type annotation',
     'annotate_manual': 'Manual cell-type relabelling',

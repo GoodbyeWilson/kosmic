@@ -8,23 +8,32 @@
 # set); when any fails the Run button is disabled with a one-line reason.
 #
 # Decontaminated counts are written to layers['decontX_counts']; raw
-# counts are left untouched, so the step is reversible and DE can run on
-# either. The layer carries through the Subset step automatically.
+# counts are left untouched, so DE can run on either. The layer carries
+# through the Subset step automatically.
+#
+# DecontX can leave a near-empty droplet that cleared QC with almost no
+# counts. By default the study's own QC minimums are then re-applied to
+# the corrected counts and the cells below them removed, as QC removes
+# cells ('recheck_qc'); a separate button does the same for a study
+# decontaminated before this existed.
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QGridLayout, QGroupBox, QLabel, QProgressBar
+from PyQt6.QtWidgets import QCheckBox, QGridLayout, QGroupBox, QLabel, QProgressBar
 
 from kosmic.gui.shared import dialogs, run_worker
 from kosmic.gui.shared.theme import NoScrollComboBox
 from kosmic.gui.shared.widgets import (
-    BaseWorker, PrimaryButton, SecondaryLabel, SimplePage, StatusLabel,
+    BaseWorker, PrimaryButton, SecondaryButton, SecondaryLabel, SimplePage,
+    StatusLabel,
 )
 
 from kosmic.scrna.qc.decontx import (
     CELL_TYPE_COL,
     DECONTX_LAYER,
     check_decontx_prerequisites,
+    qc_limits,
+    recheck_qc,
     run_decontx,
 )
 
@@ -38,28 +47,38 @@ _MAX_SAMPLES = 200
 
 
 class DecontXWorker(BaseWorker):
-    """Run supervised per-sample DecontX off the UI thread.
+    """Run supervised per-sample DecontX off the UI thread, then re-apply
+    the QC minimums in 'limits' to the corrected counts when given.
 
-    Emits 'finished_ok' with '(adata, info)'.
+    With 'sample_col' None, DecontX is skipped and only the re-check runs.
+    Emits 'finished_ok' with '(adata, info, recheck)', 'info' None when
+    DecontX did not run and 'recheck' None when the re-check did not.
     """
 
-    def __init__(self, adata, sample_col: str, cell_type_col: str, output_path=None):
+    def __init__(self, adata, sample_col, cell_type_col, output_path=None,
+                 limits=None):
         super().__init__()
         self.adata = adata
         self.sample_col = sample_col
         self.cell_type_col = cell_type_col
         self.output_path = output_path
+        self.limits = limits
 
     def _run(self):
-        self.adata, info = run_decontx(
-            self.adata, self.sample_col, self.cell_type_col,
-            progress_callback=lambda m: self.progress.emit(m),
-            progress_pct_callback=lambda p: self.progress_pct.emit(p))
+        info = recheck = None
+        if self.sample_col:
+            self.adata, info = run_decontx(
+                self.adata, self.sample_col, self.cell_type_col,
+                progress_callback=lambda m: self.progress.emit(m),
+                progress_pct_callback=lambda p: self.progress_pct.emit(p))
+        if self.limits:
+            self.progress.emit("Re-applying the QC limits to the corrected counts...")
+            recheck = recheck_qc(self.adata, **self.limits)
 
         if self.output_path:
             self.progress.emit("Saving decontaminated dataset...")
             self.adata.write_h5ad(self.output_path)
-        return (self.adata, info)
+        return (self.adata, info, recheck)
 
 
 class DecontXTab(SimplePage):
@@ -124,6 +143,14 @@ class DecontXTab(SimplePage):
         grid.addWidget(self._label_combo, 1, 1)
         grid.setColumnStretch(1, 1)
 
+        self._recheck_check = QCheckBox("Re-apply the QC limits to the corrected counts")
+        self._recheck_check.setChecked(True)
+        self._recheck_check.setToolTip(
+            "DecontX can leave a near-empty droplet that passed QC with "
+            "almost no counts. Cells below this study's QC minimums on the "
+            "corrected counts are removed, as QC removes cells.")
+        grid.addWidget(self._recheck_check, 2, 0, 1, 2)
+
         layout.addWidget(controls)
 
         self._gate_label = StatusLabel("")
@@ -134,6 +161,15 @@ class DecontXTab(SimplePage):
         self._run_btn.clicked.connect(self._run_decontx)
         self._run_btn.setEnabled(False)
         layout.addWidget(self._run_btn)
+
+        # For a study decontaminated before the re-check existed.
+        self._recheck_btn = SecondaryButton("Re-apply QC limits only")
+        self._recheck_btn.setToolTip(
+            "Remove cells below this study's QC minimums on the existing "
+            "corrected counts, without running DecontX again.")
+        self._recheck_btn.clicked.connect(self._run_recheck_only)
+        self._recheck_btn.setVisible(False)
+        layout.addWidget(self._recheck_btn)
 
         self._progress_bar = QProgressBar()
         self._progress_bar.setRange(0, 100)
@@ -179,6 +215,7 @@ class DecontXTab(SimplePage):
         self._result_label.setText("")
         self._status_label.setText("")
         self._run_btn.setEnabled(False)
+        self._recheck_btn.setVisible(False)
 
     def refresh_theme(self):
         return
@@ -230,11 +267,40 @@ class DecontXTab(SimplePage):
             return
         self._refresh_gate()
 
+    def _qc_limits(self):
+        """The study's recorded QC minimums, or None."""
+        h5ad = getattr(self.main_window, 'current_h5ad_path', None)
+        if not h5ad:
+            return None
+        from pathlib import Path
+        from kosmic import provenance
+        return qc_limits(provenance.load(Path(h5ad).parent))
+
+    def _refresh_recheck(self, adata):
+        """Name the limits on the option, and offer the re-check alone
+        when the study is already decontaminated."""
+        limits = self._qc_limits()
+        if limits:
+            parts = [f"at least {limits['min_genes']:,} genes" if limits['min_genes'] else '',
+                     f"{limits['min_counts']:,} counts" if limits['min_counts'] else '']
+            self._recheck_check.setText(
+                "Re-apply the QC limits to the corrected counts ("
+                + ", ".join(p for p in parts if p) + ")")
+            self._recheck_check.setEnabled(True)
+        else:
+            self._recheck_check.setText(
+                "Re-apply the QC limits to the corrected counts "
+                "(no QC limits recorded for this study)")
+            self._recheck_check.setEnabled(False)
+        self._recheck_btn.setVisible(bool(limits) and DECONTX_LAYER in adata.layers)
+
     def _refresh_gate(self):
         adata = self.main_window.current_adata
         if adata is None:
             self._run_btn.setEnabled(False)
+            self._recheck_btn.setVisible(False)
             return
+        self._refresh_recheck(adata)
 
         sample_col = self._selected_sample_col()
         label_col = self._selected_label_col()
@@ -294,12 +360,16 @@ class DecontXTab(SimplePage):
                     return
 
         n_samples = adata.obs[sample_col].nunique()
+        limits = (self._qc_limits() if self._recheck_check.isEnabled()
+                  and self._recheck_check.isChecked() else None)
+        recheck_note = ("Cells left below this study's QC minimums on the "
+                        "corrected counts are then removed.\n\n" if limits else "")
         if not dialogs.confirm(
                 self, "Run DecontX",
                 "This estimates and removes ambient RNA per sample using "
                 f"the '{label_col}' labels, across {n_samples} sample(s). "
-                "Raw counts are kept alongside the corrected counts, so "
-                "the step is reversible.\n\nProceed?"):
+                "Raw counts are kept alongside the corrected counts.\n\n"
+                + recheck_note + "Proceed?"):
             return
 
         self._run_btn.setEnabled(False)
@@ -310,13 +380,37 @@ class DecontXTab(SimplePage):
 
         output_path = getattr(self.main_window, 'current_h5ad_path', None)
         self._worker = DecontXWorker(adata, sample_col, label_col,
-                                     output_path=output_path)
+                                     output_path=output_path, limits=limits)
         run_worker(
             self._worker,
             on_finished=self._on_finished,
             on_failed=self._on_failed,
             on_progress=self._on_progress,
             on_progress_pct=self._on_progress_pct,
+        )
+
+    def _run_recheck_only(self):
+        adata = self.main_window.current_adata
+        limits = self._qc_limits()
+        if adata is None or not limits or DECONTX_LAYER not in adata.layers:
+            return
+        if not dialogs.confirm(
+                self, "Re-apply QC limits",
+                "Cells below this study's QC minimums on the corrected counts "
+                "are removed from the study file, as QC removes cells. "
+                "DecontX is not run again.\n\nProceed?"):
+            return
+        self._run_btn.setEnabled(False)
+        self._recheck_btn.setEnabled(False)
+        self._set_status("Re-applying QC limits...")
+        self._worker = DecontXWorker(
+            adata, None, None, limits=limits,
+            output_path=getattr(self.main_window, 'current_h5ad_path', None))
+        run_worker(
+            self._worker,
+            on_finished=self._on_finished,
+            on_failed=self._on_failed,
+            on_progress=self._on_progress,
         )
 
     def _set_status(self, msg: str):
@@ -333,9 +427,19 @@ class DecontXTab(SimplePage):
         self._progress_bar.setValue(int(pct))
 
     def _on_finished(self, payload):
-        adata, info = payload
+        adata, info, recheck = payload
         output_path = getattr(self.main_window, 'current_h5ad_path', None)
         self.main_window.set_adata(adata, output_path, switch=False)
+        self._recheck_btn.setEnabled(True)
+        if info is None:   # the re-check alone
+            self._record_recheck(recheck)
+            self._set_status("QC limits re-applied")
+            self._refresh_gate()
+            text = self._recheck_text(recheck)
+            self._result_label.setText(text)
+            self.log_message.emit(text)
+            dialogs.info(self, "QC Limits Re-applied", text)
+            return
         if hasattr(self.main_window, 'record_provenance'):
             self.main_window.record_provenance('decontx', {
                 'sample_col': self._selected_sample_col(),
@@ -345,6 +449,7 @@ class DecontXTab(SimplePage):
                 'n_samples': info.get('n_samples'),
                 'n_samples_skipped': info.get('n_samples_skipped', 0),
             })
+        self._record_recheck(recheck)
         self._progress_bar.setValue(100)
         self._progress_bar.setVisible(False)
 
@@ -369,15 +474,34 @@ class DecontXTab(SimplePage):
             f"{info.get('n_samples', '?')} sample(s)"
             + (f" -- {verdict}." if verdict else ".")
             + f"{skip_note} Corrected counts are stored alongside the raw "
-            f"counts; the DE step can use either.")
+            f"counts; the DE step can use either."
+            + (f" {self._recheck_text(recheck)}" if recheck else ""))
         self._set_status("Decontamination complete")
         self.main_window.mark_step_complete(_STEP_INDEX)
         self._refresh_gate()
         self.log_message.emit(info.get('message', "DecontX complete"))
-        dialogs.info(self, "DecontX Complete", info.get('message', "Done."))
+        if recheck:
+            self.log_message.emit(self._recheck_text(recheck))
+        dialogs.info(self, "DecontX Complete", info.get('message', "Done.")
+                     + (f"\n\n{self._recheck_text(recheck)}" if recheck else ""))
+
+    def _record_recheck(self, recheck):
+        if recheck and hasattr(self.main_window, 'record_provenance'):
+            self.main_window.record_provenance('qc_recheck', recheck)
+
+    @staticmethod
+    def _recheck_text(r) -> str:
+        """One sentence on what the re-check removed."""
+        limits = " or ".join(
+            t for t in (f"{r['min_genes']:,} genes" if r['min_genes'] else '',
+                        f"{r['min_counts']:,} counts" if r['min_counts'] else '') if t)
+        return (f"QC limits re-applied to the corrected counts: {r['n_removed']:,} "
+                f"of {r['n_cells_before']:,} cells were below {limits} and "
+                f"were removed.")
 
     def _on_failed(self, message: str):
         self._run_btn.setEnabled(True)
+        self._recheck_btn.setEnabled(True)
         self._progress_bar.setVisible(False)
         self._set_status("DecontX failed")
         self._result_label.setText("")
