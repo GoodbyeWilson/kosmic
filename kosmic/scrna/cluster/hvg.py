@@ -70,7 +70,10 @@ def find_hvg(adata, n_hvg: int = 2000, flavor: str = 'auto',
         the studies differ score highly -- the selection then encodes the
         batch effect it is meant to be blind to, and the study with the
         most cells or the deepest sequencing dominates. Ignored when
-        absent from 'obs' or when it has only one level.
+        absent from 'obs' or when it has only one level. When the
+        'seurat_v3' fit fails within a batch (too few cells), genes are
+        selected across all cells instead. The key used, or '' for
+        none, is stored in 'uns['hvg']['batch_key']'.
 
     Returns
     -------
@@ -99,16 +102,31 @@ def find_hvg(adata, n_hvg: int = 2000, flavor: str = 'auto',
             use_batch = batch_key
 
     try:
-        sc.pp.highly_variable_genes(
-            adata, n_top_genes=n_hvg, flavor=flavor, batch_key=use_batch)
-    except ImportError:
-        # seurat_v3 delegates its loess fit to scikit-misc. Fall back
-        # rather than fail the whole clustering run.
-        sc.pp.highly_variable_genes(
-            adata, n_top_genes=n_hvg, flavor='seurat', batch_key=use_batch)
-
-    if raw_backup is not None:
-        adata.raw = raw_backup
+        try:
+            sc.pp.highly_variable_genes(
+                adata, n_top_genes=n_hvg, flavor=flavor, batch_key=use_batch)
+        except ImportError:
+            # seurat_v3 delegates its loess fit to scikit-misc. Fall back
+            # rather than fail the whole clustering run.
+            flavor = 'seurat'
+            sc.pp.highly_variable_genes(
+                adata, n_top_genes=n_hvg, flavor=flavor, batch_key=use_batch)
+        except ValueError:
+            # seurat_v3 fits its loess curve within each batch, and the fit
+            # is singular when a batch has only a few cells -- common for a
+            # small population drawn from several studies. Select across
+            # all cells instead.
+            if not (flavor == 'seurat_v3' and use_batch):
+                raise
+            use_batch = None
+            sc.pp.highly_variable_genes(
+                adata, n_top_genes=n_hvg, flavor=flavor, batch_key=None)
+    finally:
+        if raw_backup is not None:
+            adata.raw = raw_backup
+    # The batch key actually used, so the methods record can report it
+    # ('' rather than None, which an h5ad cannot store).
+    adata.uns.setdefault('hvg', {})['batch_key'] = use_batch or ''
 
     if subset:
         adata = adata[:, adata.var['highly_variable']].copy()

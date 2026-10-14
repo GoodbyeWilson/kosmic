@@ -43,6 +43,11 @@ def _refresh_style(widget) -> None:
         style.polish(widget)
 
 
+#: Floors for embedding points: smallest size (px) and alpha (0-255).
+_MIN_POINT_SIZE = 2
+_MIN_ALPHA = 150
+
+
 # ---------------------------------------------------------------------------
 # Workers: thin wrappers around the analysis package
 # ---------------------------------------------------------------------------
@@ -870,7 +875,9 @@ class _UMAPWidget(QWidget):
         # whichever happens to be drawn last (which otherwise makes densely
         # overplotted regions look like arbitrary noise even when the underlying
         # clusters separate cleanly -- most visible above ~100k cells).
-        alpha = int(max(60, min(255, 3_000_000 / n_shown)))
+        # The floors keep a small pocket of cells visible on an atlas, where
+        # 1 px at a quarter opacity made it disappear.
+        alpha = int(max(_MIN_ALPHA, min(255, 3_000_000 / n_shown)))
 
         # One brush per category, shared by every point of that category:
         # building a dict and a QBrush per cell was the slow part for
@@ -894,7 +901,7 @@ class _UMAPWidget(QWidget):
         )
         self._plot.hide_unavailable_message()
         # Auto-size points for cell count
-        auto_size = max(1, min(4, 5000 / n_shown))
+        auto_size = max(_MIN_POINT_SIZE, min(4, 5000 / n_shown))
         self._point_size = int(auto_size)
         if selected is not None:
             # Two pixels larger: a selected group whose palette colour is
@@ -933,7 +940,7 @@ class _UMAPWidget(QWidget):
         shown = shown[np.argsort(values[shown], kind='stable')]
         n_shown = len(shown)
         # See set_data_categorical for why alpha scales down with cell count.
-        alpha = int(max(60, min(255, 3_000_000 / n_shown)))
+        alpha = int(max(_MIN_ALPHA, min(255, 3_000_000 / n_shown)))
 
         # Quantise the colour scale to 64 shared brushes instead of one per cell.
         n_levels = 64
@@ -951,7 +958,7 @@ class _UMAPWidget(QWidget):
             data=values[shown].tolist(),
         )
         self._plot.hide_unavailable_message()
-        auto_size = max(1, min(4, 5000 / n_shown))
+        auto_size = max(_MIN_POINT_SIZE, min(4, 5000 / n_shown))
         self._point_size = int(auto_size)
         self._scatter.setSize(self._point_size)
 
@@ -2811,8 +2818,9 @@ class ClusterTab(SidebarPage):
             self.main_window.record_provenance('embedding', {
                 'n_hvg': int(self.hvg_spin.value()),
                 'hvg_flavor': str(adata.uns.get('hvg', {}).get('flavor', '')),
-                'hvg_batch_key': (self.batch_combo.currentText().strip()
-                                  if harmony_on else None),
+                'hvg_batch_key': adata.uns.get('hvg', {}).get(
+                    'batch_key', (self.batch_combo.currentText().strip()
+                                  if harmony_on else None)) or None,
                 'scaled': bool(self.scale_check.isChecked()),
                 'n_pcs_computed': int(self.pca_compute_spin.value()),
                 'harmony': harmony_on,

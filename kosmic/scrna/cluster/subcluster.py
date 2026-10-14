@@ -159,6 +159,11 @@ def embed_and_cluster(focus: Focus, settings: dict,
     say(f"Selecting up to {int(s['n_hvg']):,} highly variable genes"
         + (f" within '{batch}'..." if batch else "..."))
     find_hvg(sub, n_hvg=int(s['n_hvg']), subset=False, batch_key=batch)
+    hvg_batch = sub.uns.get('hvg', {}).get('batch_key', batch) or None
+    if batch and not hvg_batch:
+        say(f"Some values of '{batch}' have too few of these cells to select "
+            "variable genes within each, so they were selected across all "
+            "cells.")
     if counts:
         say("Log-normalising these cells' counts (10,000 per cell)...")
         if not np.issubdtype(sub.X.dtype, np.floating):
@@ -192,7 +197,7 @@ def embed_and_cluster(focus: Focus, settings: dict,
     focus.settings = {
         'n_hvg': int(hvg.sum()),
         'hvg_flavor': str(sub.uns.get('hvg', {}).get('flavor', '')),
-        'hvg_batch_key': batch,
+        'hvg_batch_key': hvg_batch,
         'scaled': bool(s['scale']),
         'n_pcs': n_pcs,
         'harmony': bool(batch),
