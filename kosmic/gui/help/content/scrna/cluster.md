@@ -133,7 +133,11 @@ cells it covers; hover for the full breakdown. The line above the table
 gives the overall figure: the percentage of author-labelled cells that
 carry their cluster's dominant label. It measures how cleanly the
 clustering reproduces the authors' partition, not whether the names
-agree, and cells the authors left unlabelled are counted separately.
+agree, and cells the authors left unlabelled are counted separately. In
+a combined atlas each study's authors named the types their own way, so
+the comparison is made within each study: a cell agrees when it carries
+the most common label of its own study in its cluster, and the hover
+text lists that label for each study.
 **Use existing cell_type** keeps labels that came with the dataset and
 skips annotation.
 
@@ -145,15 +149,27 @@ clears a 10% cut-off. They show up only after clustering, as a small
 cluster that matches no reference type well. A cluster is flagged, with
 the reasons in the cell and on hover, when any of these hold:
 
-- its best reference correlation is below 0.85, or the runner-up is
-  within 0.10 of it (**Confidence** says *Weak* or *Ambiguous* for the
-  same reasons);
-- three or more of its top ten marker genes are mitochondrial or
-  ribosomal;
-- a doublet-score column is present (the authors' Scrublet scores, or
-  KOSMIC's) and the cluster's median is at least twice the study's;
-- the authors of the deposit left most of its cells unlabelled, or their
-  labels are split (the dominant one covers under 60%).
+- *Weak reference match* or *Close second type*: its best reference
+  correlation is below 0.85, or the runner-up is within 0.10 of it
+  (**Confidence** says *Weak* or *Ambiguous* for the same reasons);
+- *Mixed*: with CellTypist, 80% or fewer of its cells were predicted, one cell at
+  a time, as the label they carry. **Confidence** shows that share
+  (*High* above 80%, *Ambiguous* above 50%, *Below threshold* otherwise)
+  and **Runner-up** the most common prediction among the cells that
+  disagree. Majority voting gives every cell in a cluster the same
+  label, so this share is the only sign that a cluster is a mix of
+  types, and such a cluster is a candidate for subclustering. It is
+  computed for the clusters and labels as they are now; cells with a
+  label you named by hand are left out of it, and a cluster of only
+  such cells shows none;
+- *Stressed or damaged*: three or more of its top ten marker genes are
+  mitochondrial or ribosomal;
+- *Possible doublets*: a doublet-score column is present (the authors'
+  Scrublet scores, or KOSMIC's) and the cluster's median is at least
+  twice the dataset's;
+- *Authors left most of its cells unlabelled*, or *Authors' labels
+  split*: the dominant author label covers under 60% of the labelled
+  cells, within each study in a combined atlas.
 
 A higher gene count than the other clusters of the same type is added as
 supporting evidence but never flags on its own; two clusters of one type

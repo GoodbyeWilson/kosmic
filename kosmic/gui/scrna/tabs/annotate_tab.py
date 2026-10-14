@@ -27,8 +27,10 @@ from kosmic.gui.shared.widgets import BaseWorker, Column, HintLabel, ResultsTabl
 from kosmic.reference.cell_type_focus import load_focus_presets
 from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
-from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
-from kosmic.scrna.annotate.cluster_qc import flag_clusters
+from kosmic.scrna.annotate.author_labels import (
+    author_breakdown, author_label_series, study_groups,
+)
+from kosmic.scrna.annotate.cluster_qc import flag_clusters, prediction_agreement
 from kosmic.scrna.annotate.labels import cluster_column, cluster_label_summary, set_cell_type
 from kosmic.scrna.cluster.subcluster import EARLIER_EDITS_KEY
 from kosmic.scrna.cluster.workset import apply_annotations, working_subset
@@ -385,39 +387,23 @@ class CellTypistWorker(BaseWorker):
                 break
 
         if cluster_col and 'cell_type' in self.adata.obs.columns:
+            # Agreement is read from each cell's own prediction: after
+            # majority voting every cell of a cluster carries the same
+            # 'cell_type', so the label column always looks unanimous.
+            agreement = prediction_agreement(self.adata.obs, cluster_col)
+            obs = self.adata.obs
             annotation_details = {}
-            for cluster in self.adata.obs[cluster_col].unique():
-                mask = self.adata.obs[cluster_col] == cluster
-                cluster_cells = self.adata.obs.loc[mask]
-                n_cells = int(mask.sum())
-
-                # Get dominant type and its confidence
-                type_counts = cluster_cells['cell_type'].value_counts()
-                best_pct = type_counts.iloc[0] / n_cells if n_cells > 0 else 0
-
-                # Runner-up type
-                runner_up = type_counts.index[1] if len(type_counts) > 1 else ''
-                runner_up_pct = type_counts.iloc[1] / n_cells if len(type_counts) > 1 else 0
-
-                # Mean confidence score
-                conf = cluster_cells['cell_type_score'].mean() if 'cell_type_score' in cluster_cells.columns else 0
-
-                # Determine confidence level
-                if best_pct > 0.8:
-                    confidence = 'High'
-                elif best_pct > 0.5:
-                    confidence = 'Ambiguous'
-                else:
-                    confidence = 'Below threshold'
-
-                annotation_details[str(cluster)] = {
-                    'best_score': conf,
-                    'confidence': confidence,
-                    'n_cells': n_cells,
-                    'runner_up': runner_up,
-                    'runner_up_score': runner_up_pct,
-                    'margin': best_pct - runner_up_pct,
+            for cluster, cells in obs.groupby(cluster_col, observed=True):
+                entry = {
+                    'best_score': (float(cells['cell_type_score'].mean())
+                                   if 'cell_type_score' in cells.columns else 0.0),
+                    'n_cells': int(len(cells)),
                 }
+                a = agreement.get(str(cluster))
+                if a:
+                    entry.update(a)
+                    entry['runner_up_score'] = a['runner_up_share']
+                annotation_details[str(cluster)] = entry
 
             self.adata.uns['cluster_annotation_details'] = annotation_details
 
@@ -1051,8 +1037,12 @@ class AnnotateTab(QWidget):
         summary_layout.addWidget(self.author_agreement_label)
         summary_layout.addWidget(self.cluster_table)
 
+        # The flags are short; this says what each kind means and what to do.
         hint_label = HintLabel(
-            "Right-click a row to rename, merge, or mark clusters as Unknown")
+            "Flags: Mixed → try Subcluster; Stressed or Possible doublets → "
+            "check markers, then mark Unknown. Hover for details; right-click "
+            "a row to rename, merge or mark Unknown.")
+        hint_label.setWordWrap(True)
         summary_layout.addWidget(hint_label)
 
         btn_layout = QHBoxLayout()
@@ -1253,7 +1243,15 @@ class AnnotateTab(QWidget):
                       else None)
         has_fine = 'cell_type_fine' in self.adata.obs.columns
 
-        details = self.adata.uns.get('cluster_annotation_details', {})
+        details = dict(self.adata.uns.get('cluster_annotation_details', {}))
+        # Agreement with each cell's own prediction, against the clusters
+        # and labels as they are now (after re-clustering, relabels and
+        # subclustering), so a mixed cluster shows up here.
+        if ct_col:
+            live = prediction_agreement(self.adata.obs, cluster_col, ct_col)
+            for c, a in live.items():
+                details[c] = {**details.get(c, {}), **a,
+                              'runner_up_score': a['runner_up_share']}
         cluster_counts = (
             self.adata.obs[cluster_col].value_counts().sort_index())
 
@@ -1269,9 +1267,11 @@ class AnnotateTab(QWidget):
             self._on_status(f"Cluster flags unavailable: {exc}")
             flags = {}
 
-        author_labels = None
+        author_labels = studies = None
         if author_col:
             author_labels = author_label_series(self.adata.obs[author_col])
+            # Each study's authors name types their own way: compare within study.
+            studies = study_groups(self.adata.obs)
         n_labelled = n_agree = n_unlabelled = 0
 
         rows = []
@@ -1281,14 +1281,15 @@ class AnnotateTab(QWidget):
             author_text = ""
             author_tip = ""
             if author_labels is not None and cluster_mask.sum() > 0:
-                breakdown = author_breakdown(author_labels[cluster_mask.values])
+                m = cluster_mask.values
+                breakdown = author_breakdown(
+                    author_labels[m], None if studies is None else studies[m])
                 if breakdown.n_labelled:
-                    top_label, top_n = breakdown.top
-                    author_text = (f"{top_label} "
-                                   f"({100 * top_n / breakdown.n_labelled:.0f}%)")
+                    top_label, _ = breakdown.top
+                    author_text = f"{top_label} ({100 * breakdown.agreement:.0f}%)"
                     author_tip = breakdown.describe()
                     n_labelled += breakdown.n_labelled
-                    n_agree += top_n
+                    n_agree += breakdown.n_agree
                 n_unlabelled += breakdown.n_unlabelled
 
             ct_text = ""
@@ -1319,13 +1320,20 @@ class AnnotateTab(QWidget):
             ora_pval = cluster_details.get('ora_pval')
             ora_text = f"{ora_pval:.2e}" if ora_pval is not None else "—"
 
-            conf_text = cluster_details.get('confidence', '')
-
+            conf_tier = cluster_details.get('confidence', '')
+            conf_text = conf_tier
             runner_up = cluster_details.get('runner_up', '')
             runner_score = cluster_details.get('runner_up_score', '')
-            runner_text = (f"{runner_up} ({float(runner_score):.3f})"
-                           if runner_up and np.isreal(runner_score)
-                           else "")
+            if 'agreement' in cluster_details:
+                # Shares of the cluster's cells, by their own prediction.
+                conf_text = (f"{conf_tier} "
+                             f"({100 * float(cluster_details['agreement']):.0f}%)")
+                runner_text = (f"{runner_up} ({100 * float(runner_score):.0f}%)"
+                               if runner_up else "")
+            else:
+                runner_text = (f"{runner_up} ({float(runner_score):.3f})"
+                               if runner_up and np.isreal(runner_score)
+                               else "")
 
             rows.append({
                 'cluster':     str(cluster),
@@ -1337,6 +1345,7 @@ class AnnotateTab(QWidget):
                 'detail_text': detail_text,
                 'ora_text':    ora_text,
                 'conf':        conf_text,
+                '_conf_tier':  conf_tier,
                 'runner_text': runner_text,
                 'flags_text':  (flags[str(cluster)].text()
                                 if str(cluster) in flags else ""),
@@ -1373,7 +1382,7 @@ class AnnotateTab(QWidget):
                 if p == p:  # not NaN
                     item.setForeground(green if p < DEFAULT_FDR else red)
             elif col_i == 7:
-                conf = row['conf']
+                conf = row['_conf_tier']
                 if conf in ("Ambiguous", "Weak"):
                     item.setForeground(yellow)
                 elif conf == "Below threshold":
@@ -1386,19 +1395,19 @@ class AnnotateTab(QWidget):
                     item.setToolTip(
                         row['flags_text'].replace('; ', chr(10))
                         + chr(10) * 2
-                        + "Look at this cluster before trusting its label: "
-                        "these are the signs of doublets or damaged cells, "
-                        "which the per-cell QC cannot see. Right-click to "
-                        "mark it Unknown if the markers confirm it.")
+                        + "Look at this cluster before trusting its label. "
+                        "A mixed cluster can be split with Subcluster; for "
+                        "doublets or damaged cells, check the markers and "
+                        "right-click to mark it Unknown if they confirm it.")
 
         self.cluster_table.set_data(df, decorate=_decorate)
 
         if author_labels is not None and n_labelled:
-            text = (f"Authors' labels ({author_col}): {100 * n_agree / n_labelled:.1f}% "
-                    f"of {n_labelled:,} labelled cells carry the label that is "
-                    f"dominant in their cluster")
+            text = (f"Authors' labels: {100 * n_agree / n_labelled:.1f}% of "
+                    f"labelled cells match their cluster's most common label"
+                    + (" (within study)" if studies is not None else ""))
             if n_unlabelled:
-                text += f"; {n_unlabelled:,} cells have no author label"
+                text += f"; {n_unlabelled:,} unlabelled"
             self.author_agreement_label.setText(text + ".")
             self.author_agreement_label.setVisible(True)
         else:

@@ -241,3 +241,34 @@ def test_a_subset_source_is_annotated_in_memory_and_never_written(app, tmp_path,
 
     t.set_source(None)
     assert t.adata is study and not t.save_annot_btn.isHidden()
+
+
+def test_the_table_shows_agreement_with_each_cells_prediction(app):
+    """After majority voting every cell of a cluster has the same label,
+    so the table reads agreement from the per-cell predictions."""
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+
+    class MW:
+        current_adata = None
+        _adata_version = 0
+
+    t = AnnotateTab(MW())
+    n = 200
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['0'] * 100 + ['1'] * 100),
+            'cell_type': pd.Categorical(['CD4+ T Cell'] * 100 + ['Fibroblast'] * 100),
+            'cell_type_auto': pd.Categorical(['CD4+ T Cell'] * 100 + ['Fibroblast'] * 100),
+            'predicted_labels': (['CD4+T_naive'] * 40 + ['CD8+T_em'] * 35
+                                 + ['NK_CD16hi'] * 25 + ['FB1'] * 100),
+        }, index=[f'c{i}' for i in range(n)]))
+    t.main_window.current_adata = a
+    t.adata = a
+    t._populate_cluster_table()
+    tbl = t.cluster_table
+    assert tbl.item(0, 7).text() == 'Below threshold (40%)'
+    assert tbl.item(0, 8).text() == 'CD8+ T Cell (35%)'
+    assert tbl.item(0, 9).text().startswith('Mixed: 40% of cells')
+    assert tbl.item(1, 7).text() == 'High (100%)'
+    assert tbl.item(1, 9).text() == ''
