@@ -1,10 +1,11 @@
 # Cluster
 
 Turns a normalised matrix into cell types, in three stages the sidebar
-shows as cards: **PCA**, **Clustering**, **Annotate**. The UMAP fills
-the screen; the *Elbow Plot* tab sits beside it, and a strip of
-resolution thumbnails runs underneath. Each card says what it did once
-it has run; *View full report* gives the numbers.
+shows as cards: **PCA**, **Clustering**, **Annotate**. A fourth card,
+**Subcluster**, refines the labels of one population at a time. The
+UMAP fills the screen; the *Elbow Plot* tab sits beside it, and a strip
+of resolution thumbnails runs underneath. Each card says what it did
+once it has run; *View full report* gives the numbers.
 
 ![Cluster: PCA, Clustering and Annotate cards; the UMAP coloured by cell type; Elbow Plot and Annotate tabs above it](img/cluster.png)
 
@@ -120,11 +121,26 @@ Four methods, picked from *Method*:
 | **CellMarker 2.0** | Marker-gene scoring against the CellMarker database, by species and tissue | a tissue without a good classifier |
 | **PanglaoDB** | Marker-gene scoring against PanglaoDB; *Canonical markers only* tightens it | the same; the two databases disagree usefully |
 
+With CellTypist's *Broad labels*, the model's subtypes are grouped into
+broad types: the ventricular cardiomyocyte states into Ventricular
+Cardiomyocyte, the T-cell subsets into T Cell, NK and innate lymphoid
+cells into NK Cell, the macrophage subsets into Macrophage and the
+monocytes into Monocyte. *Majority voting* then gives each cluster the
+broad type most of its cells were predicted as, so a type the model
+splits into several subtypes is not outvoted by one it does not. Each
+cell's own fine label is kept in `cell_type_fine`, for a cluster you
+want to name more finely by hand.
+
 *Run ORA* on the marker methods adds an over-representation test per
 cluster, which is more robust than a raw score when a cluster is small.
 
 The cluster table underneath shows each cluster's assigned type and
 lets you change it by hand — pick from the dropdown, **Save Changes**.
+Once a study has been subclustered, the table lists the subclusters
+(`7.0`, `7.1`, …) in place of the clusters they were split from, with
+every other cluster under its own number, so each subcluster can be
+checked and relabelled on its own; its top genes are ranked against the
+other rows the first time you click one.
 When the file came with the authors' own labels (kept in
 `obs['cell_type_author']`), the *Author Type* column shows the label
 that dominates each cluster and the share of the cluster's labelled
@@ -132,7 +148,11 @@ cells it covers; hover for the full breakdown. The line above the table
 gives the overall figure: the percentage of author-labelled cells that
 carry their cluster's dominant label. It measures how cleanly the
 clustering reproduces the authors' partition, not whether the names
-agree, and cells the authors left unlabelled are counted separately.
+agree, and cells the authors left unlabelled are counted separately. In
+a combined atlas each study's authors named the types their own way, so
+the comparison is made within each study: a cell agrees when it carries
+the most common label of its own study in its cluster, and the hover
+text lists that label for each study.
 **Use existing cell_type** keeps labels that came with the dataset and
 skips annotation.
 
@@ -144,15 +164,27 @@ clears a 10% cut-off. They show up only after clustering, as a small
 cluster that matches no reference type well. A cluster is flagged, with
 the reasons in the cell and on hover, when any of these hold:
 
-- its best reference correlation is below 0.85, or the runner-up is
-  within 0.10 of it (**Confidence** says *Weak* or *Ambiguous* for the
-  same reasons);
-- three or more of its top ten marker genes are mitochondrial or
-  ribosomal;
-- a doublet-score column is present (the authors' Scrublet scores, or
-  KOSMIC's) and the cluster's median is at least twice the study's;
-- the authors of the deposit left most of its cells unlabelled, or their
-  labels are split (the dominant one covers under 60%).
+- *Weak reference match* or *Close second type*: its best reference
+  correlation is below 0.85, or the runner-up is within 0.10 of it
+  (**Confidence** says *Weak* or *Ambiguous* for the same reasons);
+- *Mixed*: with CellTypist, 80% or fewer of its cells were predicted, one cell at
+  a time, as the label they carry. **Confidence** shows that share
+  (*High* above 80%, *Ambiguous* above 50%, *Below threshold* otherwise)
+  and **Runner-up** the most common prediction among the cells that
+  disagree. Majority voting gives every cell in a cluster the same
+  label, so this share is the only sign that a cluster is a mix of
+  types, and such a cluster is a candidate for subclustering. It is
+  computed for the clusters and labels as they are now; cells with a
+  label you named by hand are left out of it, and a cluster of only
+  such cells shows none;
+- *Stressed or damaged*: three or more of its top ten marker genes are
+  mitochondrial or ribosomal;
+- *Possible doublets*: a doublet-score column is present (the authors'
+  Scrublet scores, or KOSMIC's) and the cluster's median is at least
+  twice the dataset's;
+- *Authors left most of its cells unlabelled*, or *Authors' labels
+  split*: the dominant author label covers under 60% of the labelled
+  cells, within each study in a combined atlas.
 
 A higher gene count than the other clusters of the same type is added as
 supporting evidence but never flags on its own; two clusters of one type
@@ -165,6 +197,58 @@ and mark it *Unknown* so it stays out of the per-cell-type analyses.
 Whatever the method, go to **Marker Check** next and look. Automated
 annotation is right often enough to be trusted and wrong often enough
 that you must not.
+
+## Subcluster
+
+Refines the labels of one population — the cardiomyocyte or fibroblast
+states within a cell type, or a cluster whose markers look mixed. The
+population is given its own highly variable genes, PCA, Harmony,
+neighbour graph, UMAP and Leiden clusters, because the genes and
+components chosen over every cell are the ones that separate the major
+cell types, not the states within one of them.
+
+1. Colour the UMAP by the column that defines the population, usually
+   `leiden` or `cell_type`, and click a cell of it, or its row in the
+   legend. The other groups turn grey, the selected rows in the legend
+   turn bold, and a bar above the plot names the selection and its cell
+   count. Ctrl-click adds or removes groups of the same column, so two
+   clusters of one cell type can be subclustered together. Clicking
+   empty space clears the selection. The legend is the easier way to
+   pick a small cluster, or one that overlaps others on the plot; with
+   many clusters it scrolls.
+2. Check the settings in the **Subcluster** card. They start from how
+   the study itself was embedded and clustered: HVG count, Harmony and
+   its batch key, PCs, neighbours and resolution. Click **Subcluster** in
+   the bar.
+3. The plot and the Annotate controls now show only the population,
+   and the bar reads *All cells › …*. PCA and Clustering are greyed out,
+   because they act on the whole study. Name the subclusters as you would
+   name clusters: from the top differential genes, by hand, or with any
+   of the annotation methods. **Re-run** with only a new resolution keeps
+   the population's UMAP and the labels given so far; changing any other
+   setting subclusters it afresh.
+4. **Apply** writes the result onto the study and saves it. **Discard**
+   closes the population and leaves the study as it was. Switching study
+   or closing KOSMIC with a population open asks which.
+
+Applying writes two columns:
+
+- `obs['leiden_sub']` — every cell's cluster, with the population's
+  cells split as `<group>.<subcluster>`: `7.0` and `7.1`, `7+12.0` when
+  clusters 7 and 12 were taken together, or `Fibroblast.0` when the
+  population was a cell type. Every other cell keeps its `leiden` id.
+  Colour by `leiden_sub` and click a subcluster to refine it further,
+  which gives ids such as `7.1.0`.
+- `obs['cell_type']` — the labels the population's cells were given.
+  A cell whose label you did not change keeps it.
+
+`leiden` and the study's UMAP are not changed. Cells marked 'exclude'
+are left out of the population, as in PCA and Clustering, and keep their
+labels. A population needs at least 50 cells, and Harmony is skipped
+when its cells come from a single batch. Running clustering on the whole
+study again removes `leiden_sub`, because its ids name the old clusters;
+the cell types it gave are kept. An automated annotation of the whole
+study, or *Undo Changes*, replaces those cell types too, and asks first.
 
 ## What is saved
 
@@ -180,3 +264,11 @@ cluster table are recorded when you save, as a separate stage listing
 each change (cluster, old label, new label, number of cells), so the
 Methods page can say which labels were assigned automatically and which
 were changed by hand.
+
+Each applied subclustering is recorded as a *Subclustering* stage: the
+column and the groups taken, the number of cells from each group and of
+excluded cells left out, the settings the population was embedded and
+clustered with, the annotation method and any hand relabels (each with
+the resolution it was made at), and each subcluster's id, label and
+size, with the groups its cells came from when there were several. The
+report lists every subclustering, not only the last.

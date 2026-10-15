@@ -39,3 +39,15 @@ def test_cluster_purity_ignores_unclustered_and_unlabelled():
 def test_cluster_purity_nothing_labelled():
     r = cluster_purity(['0', '0'], [None, 'unknown'])
     assert r['n_labelled'] == 0 and np.isnan(r['purity'])
+
+
+def test_a_combined_atlas_is_compared_within_each_study():
+    # Two studies name the same cells differently; neither name covers the
+    # cluster, but each study agrees with itself.
+    labels = author_label_series(['CM'] * 60 + ['Cardiomyocyte'] * 35 + ['FB'] * 5)
+    studies = ['A'] * 60 + ['B'] * 40
+    b = author_breakdown(labels, studies)
+    assert b.n_agree == 95 and b.agreement == 0.95
+    assert b.by_study == {'A': ('CM', 60, 60), 'B': ('Cardiomyocyte', 35, 40)}
+    assert author_breakdown(labels).agreement == 0.6
+    assert cluster_purity(['0'] * 100, labels, studies)['purity'] == 0.95

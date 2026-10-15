@@ -122,3 +122,24 @@ def test_seurat_v3_combines_with_batch_key():
     find_hvg(a, n_hvg=10, batch_key="batch")
     assert a.uns["hvg"]["flavor"] == "seurat_v3"
     assert "highly_variable_nbatches" in a.var.columns
+
+
+def test_a_batch_too_small_for_seurat_v3_selects_across_all_cells():
+    """The loess fit is singular in a batch of a few cells -- a small
+    population subclustered across studies. It used to stop the run."""
+    rng = np.random.default_rng(0)
+    X = rng.poisson(rng.gamma(0.5, 2, size=300), (403, 300)).astype(np.float32)
+    a = ad.AnnData(X=X, obs=pd.DataFrame(
+        {"batch": ["A"] * 400 + ["B"] * 3},
+        index=[f"c{i}" for i in range(403)]))
+    a.raw = a
+    find_hvg(a, n_hvg=100, batch_key="batch")
+    assert int(a.var["highly_variable"].sum()) == 100
+    assert a.uns["hvg"]["batch_key"] == ""
+    assert a.raw is not None
+
+
+def test_the_batch_key_used_is_recorded():
+    a = _counts()
+    find_hvg(a, n_hvg=10, batch_key="batch")
+    assert a.uns["hvg"]["batch_key"] == "batch"

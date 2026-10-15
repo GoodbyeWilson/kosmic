@@ -451,9 +451,10 @@ class MethodsPage(SimplePage):
     @staticmethod
     def _provenance_preprocessing(prov, used_refs: set) -> list:
         """Preprocessing lines from the recorded scRNA stages (accurate)."""
+        from kosmic.provenance import current_subclusterings
         scrna = ('load', 'qc', 'doublets', 'normalize', 'cluster', 'annotate',
-                 'annotate_manual', 'propagate_labels', 'decontx', 'subset',
-                 'setup', 'roles')
+                 'annotate_manual', 'subcluster', 'propagate_labels', 'decontx',
+                 'subset', 'setup', 'roles')
         lines = []
         # Cells removed by re-applying QC after DecontX are part of the
         # preprocessing too (ADR-011).
@@ -461,15 +462,30 @@ class MethodsPage(SimplePage):
         for st in prov.get('stages', []):
             if st.get('stage') not in scrna:
                 continue
-            if st['stage'] in ('normalize', 'cluster'):
+            # A subclustering a later annotation replaced no longer
+            # describes the labels.
+            if (st['stage'] == 'subcluster' and st not in
+                    current_subclusterings(prov.get('stages', []))):
+                continue
+            params = st.get('params') or {}
+            if st['stage'] in ('normalize', 'cluster', 'subcluster'):
                 used_refs.add('scanpy')
-            if st['stage'] == 'cluster':
+            if st['stage'] in ('cluster', 'subcluster'):
                 used_refs.add('leiden')
+            if st['stage'] == 'subcluster' and params.get('harmony'):
+                used_refs.add('harmony')
             if st['stage'] == 'decontx':
                 used_refs.add('decontx')
-            if (st.get('params') or {}).get('method') == 'CellTypist':
+            # The method of this stage, of a subclustering's annotation, and
+            # of the atlas annotation and subclusterings labels came from.
+            methods = {params.get('method'),
+                       (params.get('annotation') or {}).get('method'),
+                       (params.get('atlas_annotation') or {}).get('method')}
+            methods.update((sub.get('annotation') or {}).get('method')
+                           for sub in params.get('atlas_subclustering') or [])
+            if 'CellTypist' in methods:
                 used_refs.add('celltypist')
-            if (st.get('params') or {}).get('method') == 'scrublet':
+            if params.get('method') == 'scrublet':
                 used_refs.add('scrublet')
             from kosmic.provenance import _STAGE_TITLES
             title = _STAGE_TITLES.get(st['stage'],

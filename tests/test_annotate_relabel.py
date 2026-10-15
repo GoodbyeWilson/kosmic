@@ -179,3 +179,156 @@ def test_annotation_and_manual_relabels_are_recorded(app, tmp_path, monkeypatch)
 
     t._record_annotation({'method': 'CellTypist'})
     assert 'manual_relabels' not in a.uns
+
+
+def test_a_subset_source_is_annotated_in_memory_and_never_written(app, tmp_path, monkeypatch):
+    """Focus mode (ADR-008) points the panel at a subset held in memory.
+    Edits, annotation passes and stages stay with the subset; the open
+    study, its file and its record are untouched."""
+    from kosmic.gui.shared import dialogs
+    from kosmic.gui.scrna.tabs.annotate_tab import (
+        AnnotateTab, ReferenceAnnotationWorker, SubsetSource)
+    import kosmic.scrna.annotate.reference as ref_mod
+    warnings = []
+    monkeypatch.setattr(dialogs, 'warning', lambda *a, **k: warnings.append(a[2]))
+
+    class MW:
+        current_adata = None
+        current_h5ad_path = None
+        _adata_version = 5
+        recorded = []
+
+        def record_provenance(self, stage, params, **kw):
+            self.recorded.append(stage)
+
+    def _cells(clusters):
+        n = len(clusters)
+        return ad.AnnData(
+            X=sp.csr_matrix(np.ones((n, 3), dtype=np.float32)),
+            obs=pd.DataFrame({'leiden': pd.Categorical(clusters),
+                              'cell_type': pd.Categorical(['Fib'] * n),
+                              'cell_type_auto': pd.Categorical(['Fib'] * n)},
+                             index=[f'c{i}' for i in range(n)]))
+
+    ws = MW()
+    study, sub = _cells(['0'] * 30), _cells(['0'] * 20 + ['1'] * 10)
+    ws.current_adata, ws.current_h5ad_path = study, str(tmp_path / 's.h5ad')
+    t = AnnotateTab(ws)
+    src = SubsetSource(sub)
+    t.set_source(src)
+    assert t.adata is sub and t.save_annot_btn.isHidden()
+    assert t.cluster_table.rowCount() == 2
+
+    t._apply_cluster_reannotation(1, 'Fib_activated')
+    assert (sub.obs['cell_type'] == 'Fib_activated').sum() == 10 and src.version == 1
+    assert (study.obs['cell_type'] == 'Fib').all() and ws._adata_version == 5
+
+    t._record_manual_relabels()
+    t._record_manual_relabels()                       # replaced, not appended
+    t._record_annotation({'method': 'CellTypist'})
+    assert [stage for stage, _ in src.records] == ['annotate_manual', 'annotate']
+    assert not ws.recorded
+
+    def fake_run(adata, ref, **kw):
+        adata.obs['cell_type'] = pd.Categorical(['FB1'] * 20 + ['FB2'] * 10)
+        return adata, {'0': 'FB1', '1': 'FB2'}, {}
+
+    monkeypatch.setattr(ref_mod, 'run_reference_annotation', fake_run)
+    out, _ = ReferenceAnnotationWorker(sub, 'any', t._resolve_h5ad_path())._run()
+    assert out is sub and (sub.obs['cell_type'] == 'FB2').sum() == 10
+    t._save_annotations()
+    assert not list(tmp_path.iterdir()) and not warnings
+
+    t.set_source(None)
+    assert t.adata is study and not t.save_annot_btn.isHidden()
+
+
+def test_the_table_shows_agreement_with_each_cells_prediction(app):
+    """After majority voting every cell of a cluster has the same label,
+    so the table reads agreement from the per-cell predictions."""
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+
+    class MW:
+        current_adata = None
+        _adata_version = 0
+
+    t = AnnotateTab(MW())
+    n = 200
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['0'] * 100 + ['1'] * 100),
+            'cell_type': pd.Categorical(['Monocyte'] * 100 + ['Fibroblast'] * 100),
+            'cell_type_auto': pd.Categorical(['Monocyte'] * 100 + ['Fibroblast'] * 100),
+            'predicted_labels': (['CD16+Mo'] * 40 + ['LYVE1+IGF1+MP'] * 35
+                                 + ['DC'] * 25 + ['FB1'] * 100),
+        }, index=[f'c{i}' for i in range(n)]))
+    t.main_window.current_adata = a
+    t.adata = a
+    t._populate_cluster_table()
+    tbl = t.cluster_table
+    assert tbl.item(0, 7).text() == 'Below threshold (40%)'
+    assert tbl.item(0, 8).text() == 'Macrophage (35%)'
+    assert tbl.item(0, 9).text().startswith('Mixed: 40% of cells')
+    assert tbl.item(1, 7).text() == 'High (100%)'
+    assert tbl.item(1, 9).text() == ''
+
+
+def test_a_subclustered_study_lists_and_relabels_its_subclusters(app):
+    """After subclustering the table works on 'leiden_sub', so a subcluster
+    can be relabelled on its own (ADR-008)."""
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+
+    class MW:
+        current_adata = None
+        _adata_version = 0
+
+    t = AnnotateTab(MW())
+    n = 120
+    sub = ['0'] * 60 + ['1.0'] * 40 + ['1.1'] * 20
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['0'] * 60 + ['1'] * 60),
+            'leiden_sub': pd.Categorical(sub, categories=['0', '1.0', '1.1']),
+            'cell_type': pd.Categorical(['CM'] * 60 + ['T Cell'] * 60),
+            'cell_type_auto': pd.Categorical(['CM'] * 60 + ['T Cell'] * 60),
+        }, index=[f'c{i}' for i in range(n)]))
+    t.main_window.current_adata = a
+    t.adata = a
+    t._populate_cluster_table()
+    tbl = t.cluster_table
+    assert [tbl.item(r, 0).text() for r in range(tbl.rowCount())] == ['0', '1.0', '1.1']
+
+    t._apply_cluster_reannotation(2, 'NK Cell')
+    assert (a.obs.loc[a.obs['leiden_sub'] == '1.1', 'cell_type'] == 'NK Cell').all()
+    assert (a.obs.loc[a.obs['leiden_sub'] == '1.0', 'cell_type'] == 'T Cell').all()
+    t._record_manual_relabels()     # no workspace recorder: must not fail
+    assert a.uns['manual_relabels']['cluster'] == ['1.1']
+
+
+def test_fine_type_shows_each_rows_own_predictions(app):
+    """'cell_type_fine' keeps the whole cluster's vote after subclustering;
+    the column shows the row's most common per-cell prediction instead."""
+    from kosmic.gui.scrna.tabs.annotate_tab import AnnotateTab
+
+    class MW:
+        current_adata = None
+        _adata_version = 0
+
+    t = AnnotateTab(MW())
+    n = 100
+    a = ad.AnnData(
+        X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
+        obs=pd.DataFrame({
+            'leiden': pd.Categorical(['23'] * n),
+            'leiden_sub': pd.Categorical(['23.0'] * 50 + ['23.1'] * 50),
+            'cell_type': pd.Categorical(['T Cell'] * 50 + ['NK Cell'] * 50),
+            'cell_type_auto': pd.Categorical(['CD4+ T Cell'] * n),
+            'cell_type_fine': pd.Categorical(['CD4+T_naive'] * n),   # stale
+            'predicted_labels': ['CD8+T_em'] * 50 + ['NK_CD16hi'] * 50,
+        }, index=[f'c{i}' for i in range(n)]))
+    t.main_window.current_adata = a
+    t.adata = a
+    t._populate_cluster_table()
+    assert [t.cluster_table.item(r, 5).text() for r in range(2)] == ['CD8+T_em', 'NK_CD16hi']

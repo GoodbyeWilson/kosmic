@@ -43,11 +43,13 @@ def cluster_column(obs: pd.DataFrame):
 def cluster_label_summary(obs: pd.DataFrame, cluster_col: str,
                           details: dict | None = None,
                           col: str = 'cell_type') -> dict:
-    """``{cluster: {label, n_cells[, score, confidence]}}`` for a provenance record.
+    """``{cluster: {label, n_cells[, score, confidence, agreement]}}`` for a
+    provenance record.
 
-    'label' is the cluster's most common ``obs[col]``; 'score' and
-    'confidence' come from the annotation step's per-cluster ``details``
-    when it has them.
+    'label' is the cluster's most common ``obs[col]``; 'score',
+    'confidence' and 'agreement' (the share of its cells whose own
+    prediction is that label) come from the annotation step's per-cluster
+    ``details`` when it has them.
     """
     summary = {}
     for cluster, labels in obs.groupby(cluster_col, observed=True)[col]:
@@ -59,5 +61,7 @@ def cluster_label_summary(obs: pd.DataFrame, cluster_col: str,
             row['score'] = round(float(d['best_score']), 3)
         if 'confidence' in d:
             row['confidence'] = str(d['confidence'])
+        if 'agreement' in d:
+            row['agreement'] = round(float(d['agreement']), 3)
         summary[str(cluster)] = row
     return summary

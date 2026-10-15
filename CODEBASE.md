@@ -245,12 +245,27 @@ field points at the parent's processed file. Embeddings and clusterings
 are not carried into the subset, because they were computed over the
 full dataset.
 
+**Subclusters are labels, not studies.** The Cluster step's focus mode
+(ADR-008) gives one population of a study its own embedding and
+clustering without making it a study. The population is a working
+subset held in memory (`kosmic/scrna/cluster/subcluster.py`), and the
+Annotate panel works on it through a `SubsetSource`, which never writes
+the file. Applying the result writes `obs['leiden_sub']` and the changed
+`obs['cell_type']` labels onto the study, matched by cell name, saves the
+study and records a `subcluster` stage. It never changes `leiden` or the
+study's embedding; re-running clustering removes `leiden_sub`, whose ids
+name the previous clusters. Label propagation carries `leiden_sub` only
+as `leiden_sub_atlas`, because its ids belong to the atlas's clusters.
+
 **Provenance.** Study stages append to the study's record, so the
 record is a lineage. Meta-analysis stages replace the previous entry
 for the same stage, because a re-run overwrites its output file; so
 does the manual-relabel stage, which lists the hand edits present in
-the saved file. Propagating atlas labels adds a stage to each receiving
-study's record, naming the atlas and the annotation the labels came
+the saved file. Each applied subclustering appends a `subcluster`
+stage, and the methods document lists every one, because each refines a
+different population; for other stages it reports the last run.
+Propagating atlas labels adds a stage to each receiving study's record,
+naming the atlas and the annotation and subclusterings the labels came
 from.
 
 ## GUI state and navigation

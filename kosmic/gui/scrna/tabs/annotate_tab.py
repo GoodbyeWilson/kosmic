@@ -1,6 +1,13 @@
 # Annotate Tab
 # Cell type annotation: PanglaoDB, CellMarker 2.0, CellTypist.
 # Cluster summary table with manual re-annotation.
+#
+# The panel works on the dataset its source gives it. 'WorkspaceSource',
+# the default, is the study open in the scRNA workspace: results replace
+# the workspace's dataset, are saved to the study's file and are recorded
+# in its provenance. 'SubsetSource' is a population subset held in memory
+# (ADR-008): results stay on the subset, nothing is written to disk, and
+# stages are kept for the caller to record when it applies the result.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -20,13 +27,21 @@ from kosmic.gui.shared.widgets import BaseWorker, Column, HintLabel, ResultsTabl
 from kosmic.reference.cell_type_focus import load_focus_presets
 from kosmic import DEFAULT_FDR
 from kosmic.gui.shared import dialogs, run_worker
-from kosmic.scrna.annotate.author_labels import author_breakdown, author_label_series
-from kosmic.scrna.annotate.cluster_qc import flag_clusters
+from kosmic.scrna.annotate.author_labels import (
+    author_breakdown, author_label_series, study_groups,
+)
+from kosmic.scrna.annotate.cluster_qc import flag_clusters, prediction_agreement
 from kosmic.scrna.annotate.labels import cluster_column, cluster_label_summary, set_cell_type
+from kosmic.scrna.cluster.subcluster import EARLIER_EDITS_KEY, SUBCLUSTER_COLUMN
 from kosmic.scrna.cluster.workset import apply_annotations, working_subset
 
 
 _FOCUS_PRESET_QSETTING_KEY = 'annotate/last_focus_preset'
+
+# Records of hand relabels in 'uns': those since the last automated pass,
+# and, on a subclustered population, those made before it was last
+# re-clustered. An automated pass or Undo replaces the labels they gave.
+_MANUAL_EDIT_KEYS = ('manual_relabels', EARLIER_EDITS_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -37,11 +52,12 @@ class ReferenceAnnotationWorker(BaseWorker):
     """
     Worker for reference-based cell type annotation.
 
-    Emits 'finished_ok' with a tuple '(adata, message)'.
+    Saves the annotated dataset to 'output_path', or nothing when it is
+    None. Emits 'finished_ok' with a tuple '(adata, message)'.
     """
 
-    def __init__(self, adata, reference_name_or_path: str, output_path: str,
-                 min_correlation: float = 0.3):
+    def __init__(self, adata, reference_name_or_path: str,
+                 output_path: Optional[str], min_correlation: float = 0.3):
         super().__init__()
         self.adata = adata
         self.reference_name_or_path = reference_name_or_path
@@ -84,12 +100,13 @@ class ReferenceAnnotationWorker(BaseWorker):
         apply_annotations(self._full, self.adata)
         self.adata = self._full
 
-        self.progress.emit("Saving...")
-        self.progress_pct.emit(95)
-        Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
-        self.adata.write_h5ad(str(tmp))
-        os.replace(tmp, self.output_path)
+        if self.output_path:
+            self.progress.emit("Saving...")
+            self.progress_pct.emit(95)
+            Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
+            tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
+            self.adata.write_h5ad(str(tmp))
+            os.replace(tmp, self.output_path)
 
         n_assigned = sum(1 for v in cluster_types.values() if v != 'Unknown')
         n_types = len(set(cluster_types.values()) - {'Unknown'})
@@ -104,10 +121,12 @@ class MarkerScoringWorker(BaseWorker):
     """
     Worker for marker-based cell type annotation.
 
-    Emits 'finished_ok' with a tuple '(adata, message)'.
+    Saves the annotated dataset to 'output_path', or nothing when it is
+    None. Emits 'finished_ok' with a tuple '(adata, message)'.
     """
 
-    def __init__(self, adata, marker_dict: dict, output_path: str, params: dict = None):
+    def __init__(self, adata, marker_dict: dict, output_path: Optional[str],
+                 params: dict = None):
         super().__init__()
         self.adata = adata
         self.marker_dict = marker_dict
@@ -284,12 +303,13 @@ class MarkerScoringWorker(BaseWorker):
         apply_annotations(self._full, self.adata)
         self.adata = self._full
 
-        self.progress.emit("Saving...")
-        self.progress_pct.emit(95)
-        Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
-        self.adata.write_h5ad(str(tmp))
-        os.replace(tmp, self.output_path)
+        if self.output_path:
+            self.progress.emit("Saving...")
+            self.progress_pct.emit(95)
+            Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
+            tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
+            self.adata.write_h5ad(str(tmp))
+            os.replace(tmp, self.output_path)
 
         self.progress_pct.emit(100)
         cell_types = list(self.marker_dict.keys())
@@ -301,11 +321,12 @@ class CellTypistWorker(BaseWorker):
     """
     Worker for CellTypist ML-based cell type annotation.
 
-    Emits 'finished_ok' with a tuple '(adata, message)'.
+    Saves the annotated dataset to 'output_path', or nothing when it is
+    None. Emits 'finished_ok' with a tuple '(adata, message)'.
     """
 
-    def __init__(self, adata, model_name: str, majority_voting: bool, output_path: str,
-                 broad_labels: bool = False):
+    def __init__(self, adata, model_name: str, majority_voting: bool,
+                 output_path: Optional[str], broad_labels: bool = False):
         super().__init__()
         self.adata = adata
         self.model_name = model_name
@@ -338,11 +359,15 @@ class CellTypistWorker(BaseWorker):
         def _progress(msg):
             self.progress.emit(msg)
 
+        from kosmic.scrna.annotate.score import collapse_celltypist_label
+        # With broad labels the vote is over broad types, so a type split
+        # into several fine labels is not outvoted by a type with one.
         self.adata = run_celltypist(
             self.adata,
             self.model_name,
             majority_voting=self.majority_voting,
             progress_callback=_progress,
+            vote_by=collapse_celltypist_label if self.broad_labels else None,
         )
 
         # Always store fine labels; optionally collapse cell_type to broad
@@ -366,51 +391,36 @@ class CellTypistWorker(BaseWorker):
                 break
 
         if cluster_col and 'cell_type' in self.adata.obs.columns:
+            # Agreement is read from each cell's own prediction: after
+            # majority voting every cell of a cluster carries the same
+            # 'cell_type', so the label column always looks unanimous.
+            agreement = prediction_agreement(self.adata.obs, cluster_col)
+            obs = self.adata.obs
             annotation_details = {}
-            for cluster in self.adata.obs[cluster_col].unique():
-                mask = self.adata.obs[cluster_col] == cluster
-                cluster_cells = self.adata.obs.loc[mask]
-                n_cells = int(mask.sum())
-
-                # Get dominant type and its confidence
-                type_counts = cluster_cells['cell_type'].value_counts()
-                best_pct = type_counts.iloc[0] / n_cells if n_cells > 0 else 0
-
-                # Runner-up type
-                runner_up = type_counts.index[1] if len(type_counts) > 1 else ''
-                runner_up_pct = type_counts.iloc[1] / n_cells if len(type_counts) > 1 else 0
-
-                # Mean confidence score
-                conf = cluster_cells['cell_type_score'].mean() if 'cell_type_score' in cluster_cells.columns else 0
-
-                # Determine confidence level
-                if best_pct > 0.8:
-                    confidence = 'High'
-                elif best_pct > 0.5:
-                    confidence = 'Ambiguous'
-                else:
-                    confidence = 'Below threshold'
-
-                annotation_details[str(cluster)] = {
-                    'best_score': conf,
-                    'confidence': confidence,
-                    'n_cells': n_cells,
-                    'runner_up': runner_up,
-                    'runner_up_score': runner_up_pct,
-                    'margin': best_pct - runner_up_pct,
+            for cluster, cells in obs.groupby(cluster_col, observed=True):
+                entry = {
+                    'best_score': (float(cells['cell_type_score'].mean())
+                                   if 'cell_type_score' in cells.columns else 0.0),
+                    'n_cells': int(len(cells)),
                 }
+                a = agreement.get(str(cluster))
+                if a:
+                    entry.update(a)
+                    entry['runner_up_score'] = a['runner_up_share']
+                annotation_details[str(cluster)] = entry
 
             self.adata.uns['cluster_annotation_details'] = annotation_details
 
         apply_annotations(self._full, self.adata)
         self.adata = self._full
 
-        self.progress.emit("Saving...")
-        self.progress_pct.emit(95)
-        Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
-        self.adata.write_h5ad(str(tmp))
-        os.replace(tmp, self.output_path)
+        if self.output_path:
+            self.progress.emit("Saving...")
+            self.progress_pct.emit(95)
+            Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
+            tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
+            self.adata.write_h5ad(str(tmp))
+            os.replace(tmp, self.output_path)
 
         n_types = self.adata.obs['cell_type'].nunique()
         self.progress_pct.emit(100)
@@ -566,6 +576,68 @@ DEFAULT_MARKERS = {
 }
 
 # ---------------------------------------------------------------------------
+# Dataset sources
+# ---------------------------------------------------------------------------
+
+class WorkspaceSource:
+    """The study open in the scRNA workspace; the panel's default source."""
+
+    writes_file = True
+
+    def __init__(self, workspace):
+        self.workspace = workspace
+
+    @property
+    def adata(self):
+        return getattr(self.workspace, 'current_adata', None)
+
+    @property
+    def version(self) -> int:
+        return getattr(self.workspace, '_adata_version', 0)
+
+    @property
+    def path(self) -> Optional[str]:
+        return getattr(self.workspace, 'current_h5ad_path', None)
+
+    def publish(self, adata) -> int:
+        """Make 'adata' the workspace's current dataset; return its new version."""
+        self.workspace.current_adata = adata
+        self.workspace._adata_version += 1
+        return self.workspace._adata_version
+
+    def record(self, stage: str, params: dict, *, replace: bool = False) -> None:
+        if hasattr(self.workspace, 'record_provenance'):
+            self.workspace.record_provenance(stage, params, replace=replace)
+
+
+class SubsetSource:
+    """A dataset held in memory only, such as a population subset (ADR-008).
+
+    Nothing is written to disk. Stages are kept in 'records' as
+    '(stage, params)' in the order they were made, and 'replace' keeps
+    only the latest of a stage, as in the study's record.
+    """
+
+    writes_file = False
+    path = None
+
+    def __init__(self, adata):
+        self.adata = adata
+        self.version = 0
+        self.records = []
+
+    def publish(self, adata) -> int:
+        self.adata = adata
+        self.version += 1
+        return self.version
+
+    def record(self, stage: str, params: dict, *, replace: bool = False) -> None:
+        if replace:
+            self.records = [r for r in self.records if r[0] != stage]
+        self.records.append((stage, params))
+
+
+# ---------------------------------------------------------------------------
 # AnnotateTab
 # ---------------------------------------------------------------------------
 
@@ -583,6 +655,7 @@ class AnnotateTab(QWidget):
         # mount mode.
         super().__init__()
         self.main_window = main_window
+        self._source = WorkspaceSource(main_window)
         self.project_dir = None
         self.adata = None
         self.h5ad_path = None
@@ -609,6 +682,8 @@ class AnnotateTab(QWidget):
         self.marker_worker = None
         self.celltypist_worker = None
         self.ref_worker = None
+        self._source = WorkspaceSource(self.main_window)
+        self.save_annot_btn.setVisible(True)
         self.adata = None
         self.h5ad_path = None
         self._last_adata_version = -1
@@ -668,7 +743,10 @@ class AnnotateTab(QWidget):
 
         self.broad_labels_check = QCheckBox("Broad labels")
         self.broad_labels_check.setChecked(True)
-        self.broad_labels_check.setToolTip("Collapse fine-grained labels to broad categories.")
+        self.broad_labels_check.setToolTip(
+            "Group the model's subtypes into broad types (T Cell, Macrophage,\n"
+            "Ventricular Cardiomyocyte, ...); majority voting is then over\n"
+            "the broad types. Fine labels are kept in 'cell_type_fine'.")
         ct_layout.addWidget(self.broad_labels_check)
 
         self.run_celltypist_btn = QPushButton("Run CellTypist")
@@ -966,8 +1044,12 @@ class AnnotateTab(QWidget):
         summary_layout.addWidget(self.author_agreement_label)
         summary_layout.addWidget(self.cluster_table)
 
+        # The flags are short; this says what each kind means and what to do.
         hint_label = HintLabel(
-            "Right-click a row to rename, merge, or mark clusters as Unknown")
+            "Flags: Mixed → try Subcluster; Stressed or Possible doublets → "
+            "check markers, then mark Unknown. Hover for details; right-click "
+            "a row to rename, merge or mark Unknown.")
+        hint_label.setWordWrap(True)
         summary_layout.addWidget(hint_label)
 
         btn_layout = QHBoxLayout()
@@ -1015,33 +1097,72 @@ class AnnotateTab(QWidget):
         self.adata = adata
         self._update_status()
 
+    def set_source(self, source=None):
+        """Work on 'source''s dataset; None returns to the open study.
+
+        The source decides what the panel reads, where an edit or an
+        annotation pass is published, whether anything is written to disk
+        and where provenance goes. With a source that is never written,
+        Save is hidden and the annotation workers save nothing.
+        """
+        self._source = source or WorkspaceSource(self.main_window)
+        self.save_annot_btn.setVisible(self._source.writes_file)
+        self._current_top_genes_cluster = None
+        self._top_genes_table.setRowCount(0)
+        self.cluster_table.setRowCount(0)
+        self.adata = self._source.adata
+        self._last_adata_version = self._source.version
+        self._update_status()
+
+    def is_busy(self) -> bool:
+        """True while an annotation or top-genes worker is running."""
+        return any(w is not None and w.isRunning()
+                   for w in (self.marker_worker, self.celltypist_worker,
+                             self.ref_worker, self._rank_genes_worker))
+
+    def _confirm_replacing_subclusters(self, action: str) -> bool:
+        """Before 'action' replaces every cell's label in the open study:
+        ask, when some labels were refined by subclustering (ADR-008)."""
+        if not self._source.writes_file or not self._source.path:
+            return True
+        from kosmic import provenance
+        record = provenance.load(Path(self._source.path).parent) or {}
+        n = len(provenance.current_subclusterings(record.get('stages', [])))
+        if not n:
+            return True
+        return dialogs.confirm(
+            self, "Replace subcluster labels?",
+            f"Cell types in this study were refined by {n} subclustering"
+            f"{'s' if n > 1 else ''}. {action} replaces 'cell_type' for every "
+            "cell, including those labels ('leiden_sub' is kept).\n\nContinue?")
+
     def _sync_adata(self) -> bool:
-        """Point the tab at the dataset the workspace has open right now.
+        """Point the tab at the dataset its source holds right now.
 
         The tab refreshes its reference lazily (on activation, by
         version), so between a study switch and the next activation it
         can still hold the previous study. Every action that writes a
         file goes through here first, so what is analysed and saved is
-        always the workspace's current dataset. False when none is open.
+        always the source's current dataset. False when there is none.
         """
-        current = getattr(self.main_window, 'current_adata', None)
+        current = self._source.adata
         if current is None:
             return False
         if self.adata is not current:
             self.adata = current
-            self._last_adata_version = getattr(self.main_window, '_adata_version', 0)
+            self._last_adata_version = self._source.version
             self._populate_cluster_table()
         return True
 
     def on_tab_activated(self):
-        """Called when tab becomes visible — pull latest adata from workspace."""
-        ws = self.main_window
-        if ws.current_adata is None:
+        """Called when tab becomes visible — pull the source's latest adata."""
+        current = self._source.adata
+        if current is None:
             return
-        version = getattr(ws, '_adata_version', 0)
+        version = self._source.version
         if version != getattr(self, '_last_adata_version', -1):
             self._last_adata_version = version
-            self.set_adata(ws.current_adata)
+            self.set_adata(current)
 
     # ------------------------------------------------------------------
     # Status
@@ -1104,13 +1225,8 @@ class AnnotateTab(QWidget):
             self._table_updating = False
             return
 
-        if 'leiden' in self.adata.obs.columns:
-            cluster_col = 'leiden'
-        elif 'clusters' in self.adata.obs.columns:
-            cluster_col = 'clusters'
-        elif 'seurat_clusters' in self.adata.obs.columns:
-            cluster_col = 'seurat_clusters'
-        else:
+        cluster_col = self._cluster_col()
+        if cluster_col is None:
             self.cluster_table.set_data(pd.DataFrame())
             self._table_updating = False
             return
@@ -1129,7 +1245,15 @@ class AnnotateTab(QWidget):
                       else None)
         has_fine = 'cell_type_fine' in self.adata.obs.columns
 
-        details = self.adata.uns.get('cluster_annotation_details', {})
+        details = dict(self.adata.uns.get('cluster_annotation_details', {}))
+        # Agreement with each cell's own prediction, against the clusters
+        # and labels as they are now (after re-clustering, relabels and
+        # subclustering), so a mixed cluster shows up here.
+        if ct_col:
+            live = prediction_agreement(self.adata.obs, cluster_col, ct_col)
+            for c, a in live.items():
+                details[c] = {**details.get(c, {}), **a,
+                              'runner_up_score': a['runner_up_share']}
         cluster_counts = (
             self.adata.obs[cluster_col].value_counts().sort_index())
 
@@ -1145,9 +1269,11 @@ class AnnotateTab(QWidget):
             self._on_status(f"Cluster flags unavailable: {exc}")
             flags = {}
 
-        author_labels = None
+        author_labels = studies = None
         if author_col:
             author_labels = author_label_series(self.adata.obs[author_col])
+            # Each study's authors name types their own way: compare within study.
+            studies = study_groups(self.adata.obs)
         n_labelled = n_agree = n_unlabelled = 0
 
         rows = []
@@ -1157,14 +1283,15 @@ class AnnotateTab(QWidget):
             author_text = ""
             author_tip = ""
             if author_labels is not None and cluster_mask.sum() > 0:
-                breakdown = author_breakdown(author_labels[cluster_mask.values])
+                m = cluster_mask.values
+                breakdown = author_breakdown(
+                    author_labels[m], None if studies is None else studies[m])
                 if breakdown.n_labelled:
-                    top_label, top_n = breakdown.top
-                    author_text = (f"{top_label} "
-                                   f"({100 * top_n / breakdown.n_labelled:.0f}%)")
+                    top_label, _ = breakdown.top
+                    author_text = f"{top_label} ({100 * breakdown.agreement:.0f}%)"
                     author_tip = breakdown.describe()
                     n_labelled += breakdown.n_labelled
-                    n_agree += top_n
+                    n_agree += breakdown.n_agree
                 n_unlabelled += breakdown.n_unlabelled
 
             ct_text = ""
@@ -1183,8 +1310,15 @@ class AnnotateTab(QWidget):
             m_found = cluster_details.get('markers_found')
             m_total = cluster_details.get('markers_total')
             if has_fine:
+                # The most common per-cell prediction, which is the label a
+                # majority vote over this row picks; 'cell_type_fine' holds
+                # the vote of the cluster as first annotated, and keeps it
+                # in a file subclustered before it was updated there.
+                fine_col = ('predicted_labels'
+                            if 'predicted_labels' in self.adata.obs.columns
+                            else 'cell_type_fine')
                 fine_types = self.adata.obs.loc[
-                    cluster_mask, 'cell_type_fine'].value_counts()
+                    cluster_mask, fine_col].value_counts()
                 detail_text = (fine_types.index[0]
                                if len(fine_types) > 0 else "")
             elif m_found is not None and m_total is not None:
@@ -1195,13 +1329,20 @@ class AnnotateTab(QWidget):
             ora_pval = cluster_details.get('ora_pval')
             ora_text = f"{ora_pval:.2e}" if ora_pval is not None else "—"
 
-            conf_text = cluster_details.get('confidence', '')
-
+            conf_tier = cluster_details.get('confidence', '')
+            conf_text = conf_tier
             runner_up = cluster_details.get('runner_up', '')
             runner_score = cluster_details.get('runner_up_score', '')
-            runner_text = (f"{runner_up} ({float(runner_score):.3f})"
-                           if runner_up and np.isreal(runner_score)
-                           else "")
+            if 'agreement' in cluster_details:
+                # Shares of the cluster's cells, by their own prediction.
+                conf_text = (f"{conf_tier} "
+                             f"({100 * float(cluster_details['agreement']):.0f}%)")
+                runner_text = (f"{runner_up} ({100 * float(runner_score):.0f}%)"
+                               if runner_up else "")
+            else:
+                runner_text = (f"{runner_up} ({float(runner_score):.3f})"
+                               if runner_up and np.isreal(runner_score)
+                               else "")
 
             rows.append({
                 'cluster':     str(cluster),
@@ -1213,6 +1354,7 @@ class AnnotateTab(QWidget):
                 'detail_text': detail_text,
                 'ora_text':    ora_text,
                 'conf':        conf_text,
+                '_conf_tier':  conf_tier,
                 'runner_text': runner_text,
                 'flags_text':  (flags[str(cluster)].text()
                                 if str(cluster) in flags else ""),
@@ -1249,7 +1391,7 @@ class AnnotateTab(QWidget):
                 if p == p:  # not NaN
                     item.setForeground(green if p < DEFAULT_FDR else red)
             elif col_i == 7:
-                conf = row['conf']
+                conf = row['_conf_tier']
                 if conf in ("Ambiguous", "Weak"):
                     item.setForeground(yellow)
                 elif conf == "Below threshold":
@@ -1262,19 +1404,19 @@ class AnnotateTab(QWidget):
                     item.setToolTip(
                         row['flags_text'].replace('; ', chr(10))
                         + chr(10) * 2
-                        + "Look at this cluster before trusting its label: "
-                        "these are the signs of doublets or damaged cells, "
-                        "which the per-cell QC cannot see. Right-click to "
-                        "mark it Unknown if the markers confirm it.")
+                        + "Look at this cluster before trusting its label. "
+                        "A mixed cluster can be split with Subcluster; for "
+                        "doublets or damaged cells, check the markers and "
+                        "right-click to mark it Unknown if they confirm it.")
 
         self.cluster_table.set_data(df, decorate=_decorate)
 
         if author_labels is not None and n_labelled:
-            text = (f"Authors' labels ({author_col}): {100 * n_agree / n_labelled:.1f}% "
-                    f"of {n_labelled:,} labelled cells carry the label that is "
-                    f"dominant in their cluster")
+            text = (f"Authors' labels: {100 * n_agree / n_labelled:.1f}% of "
+                    f"labelled cells match their cluster's most common label"
+                    + (" (within study)" if studies is not None else ""))
             if n_unlabelled:
-                text += f"; {n_unlabelled:,} cells have no author label"
+                text += f"; {n_unlabelled:,} unlabelled"
             self.author_agreement_label.setText(text + ".")
             self.author_agreement_label.setVisible(True)
         else:
@@ -1386,13 +1528,8 @@ class AnnotateTab(QWidget):
             return
         cluster_id = cluster_item.text()
 
-        if 'leiden' in self.adata.obs.columns:
-            cluster_col = 'leiden'
-        elif 'clusters' in self.adata.obs.columns:
-            cluster_col = 'clusters'
-        elif 'seurat_clusters' in self.adata.obs.columns:
-            cluster_col = 'seurat_clusters'
-        else:
+        cluster_col = self._cluster_col()
+        if cluster_col is None:
             return
 
         mask = (self.adata.obs[cluster_col].astype(str) == str(cluster_id)).to_numpy()
@@ -1414,9 +1551,7 @@ class AnnotateTab(QWidget):
         provenance[str(cluster_id)] = 'manual'
         self.adata.uns['cluster_type_source'] = provenance
 
-        self.main_window.current_adata = self.adata
-        self.main_window._adata_version += 1
-        self._last_adata_version = self.main_window._adata_version
+        self._last_adata_version = self._source.publish(self.adata)
         self._on_status(f"Cluster {cluster_id} re-annotated as '{new_type}' ({int(mask.sum()):,} cells)")
         # The table shows what is in obs; redraw it so the change is visible
         # at once, and enable Save so it can be written.
@@ -1481,8 +1616,11 @@ class AnnotateTab(QWidget):
         cluster_id = cluster_item.text()
         self._current_top_genes_cluster = cluster_id
 
-        # If rank_genes_groups already cached, render straight away.
-        if 'rank_genes_groups' in self.adata.uns:
+        # A cached ranking is reused only when it ranked the clusters the
+        # table lists; one made per 'leiden' cluster has no subclusters.
+        cached = self.adata.uns.get('rank_genes_groups')
+        if cached is not None and (cached.get('params') or {}).get(
+                'groupby') == self._cluster_col():
             self._populate_top_genes_for_cluster(cluster_id)
             return
 
@@ -1556,13 +1694,19 @@ class AnnotateTab(QWidget):
         self._top_genes_table.set_data(df)
 
     def _cluster_col(self) -> Optional[str]:
-        """Return the cluster column to use, preferring 'leiden'."""
+        """The cluster column the table lists, relabels and ranks genes by.
+
+        'leiden_sub' when the study has subclusters (ADR-008): it holds
+        every cell, with a cluster that was never subclustered under its
+        own id, so the table shows the subclusters and can relabel each
+        one. Otherwise the study's cluster column. Automated annotation
+        still votes on 'leiden'.
+        """
         if self.adata is None:
             return None
-        for cand in ('leiden', 'clusters', 'seurat_clusters', 'louvain'):
-            if cand in self.adata.obs.columns:
-                return cand
-        return None
+        if SUBCLUSTER_COLUMN in self.adata.obs.columns:
+            return SUBCLUSTER_COLUMN
+        return cluster_column(self.adata.obs)
 
     def _save_annotations(self):
         """Write the workspace's current dataset to the workspace's current file.
@@ -1574,11 +1718,12 @@ class AnnotateTab(QWidget):
         another's. The save is refused unless the tab's dataset is the
         object the workspace holds, and the file is written to a temporary
         name and renamed into place so a failure mid-write leaves the
-        original intact.
+        original intact. A source that is never written has no Save.
         """
-        ws = self.main_window
-        current = getattr(ws, 'current_adata', None)
-        path = getattr(ws, 'current_h5ad_path', None)
+        if not self._source.writes_file:
+            return
+        current = self._source.adata
+        path = self._source.path
         if current is None or not path:
             dialogs.warning(self, "No Path", "No dataset is open in the workspace.")
             return
@@ -1614,9 +1759,8 @@ class AnnotateTab(QWidget):
         A new automated pass starts a new set of manual edits, so any
         edits held for the previous one are dropped.
         """
-        self.adata.uns.pop('manual_relabels', None)
-        if not hasattr(self.main_window, 'record_provenance'):
-            return
+        for key in _MANUAL_EDIT_KEYS:
+            self.adata.uns.pop(key, None)
         cluster_col = cluster_column(self.adata.obs)
         params = {**settings, 'cluster_col': cluster_col,
                   'n_cell_types': int(self.adata.obs['cell_type'].nunique())}
@@ -1624,7 +1768,7 @@ class AnnotateTab(QWidget):
             params['clusters'] = cluster_label_summary(
                 self.adata.obs, cluster_col,
                 self.adata.uns.get('cluster_annotation_details'))
-        self.main_window.record_provenance('annotate', params)
+        self._source.record('annotate', params)
 
     def _record_manual_relabels(self):
         """Record the hand relabels made since the last automated pass.
@@ -1633,14 +1777,14 @@ class AnnotateTab(QWidget):
         lists every edit that is in the saved file and nothing that is not.
         """
         edits = self.adata.uns.get('manual_relabels')
-        if not edits or not hasattr(self.main_window, 'record_provenance'):
+        if not edits:
             return
         # Values read back from a saved file are numpy scalars; store plain ones.
         rows = [{k: (v.item() if hasattr(v, 'item') else v) for k, v in zip(edits, values)}
                 for values in zip(*edits.values())]
-        self.main_window.record_provenance(
+        self._source.record(
             'annotate_manual',
-            {'cluster_col': cluster_column(self.adata.obs), 'edits': rows},
+            {'cluster_col': self._cluster_col(), 'edits': rows},
             replace=True)
 
     def _undo_annotation_changes(self):
@@ -1650,12 +1794,13 @@ class AnnotateTab(QWidget):
         if 'cell_type_auto' not in self.adata.obs.columns:
             dialogs.warning(self, "Cannot Undo", "No automated annotation to revert to.")
             return
+        if not self._confirm_replacing_subclusters("Reverting to the last automated annotation"):
+            return
 
         self.adata.obs['cell_type'] = self.adata.obs['cell_type_auto'].copy()
-        self.adata.uns.pop('manual_relabels', None)
-        self.main_window.current_adata = self.adata
-        self.main_window._adata_version += 1
-        self._last_adata_version = self.main_window._adata_version
+        for key in _MANUAL_EDIT_KEYS:
+            self.adata.uns.pop(key, None)
+        self._last_adata_version = self._source.publish(self.adata)
         self._populate_cluster_table()
         self._on_status("Reverted to automated annotation")
 
@@ -1679,9 +1824,15 @@ class AnnotateTab(QWidget):
         self.annotation_stack.adjustSize()
 
     def _resolve_h5ad_path(self):
-        """Get save path — uses central path from main_window, overwriting same file."""
-        if hasattr(self.main_window, 'current_h5ad_path') and self.main_window.current_h5ad_path:
-            self.h5ad_path = self.main_window.current_h5ad_path
+        """The file an annotation worker saves to: the open study's own file.
+
+        None when the source is never written, and the worker then saves
+        nothing; also None, with a warning, when no file is known.
+        """
+        if not self._source.writes_file:
+            return None
+        if self._source.path:
+            self.h5ad_path = self._source.path
             return str(self.h5ad_path)
         if self.h5ad_path is not None:
             return str(self.h5ad_path)
@@ -1727,8 +1878,10 @@ class AnnotateTab(QWidget):
             dialogs.warning(self, "No Markers", "No markers found for selected cell types.")
             return
 
+        if not self._confirm_replacing_subclusters("This annotation"):
+            return
         output_path = self._resolve_h5ad_path()
-        if output_path is None:
+        if output_path is None and self._source.writes_file:
             return
 
         self.run_annot_btn.setEnabled(False)
@@ -1764,10 +1917,8 @@ class AnnotateTab(QWidget):
         self.run_ref_btn.setEnabled(True)
 
         self.adata = adata
-        # Update central reference without full broadcast to all tabs
-        self.main_window.current_adata = adata
-        self.main_window._adata_version += 1
-        self._last_adata_version = self.main_window._adata_version
+        # Publish to the source without a broadcast to all tabs
+        self._last_adata_version = self._source.publish(adata)
         self._record_annotation(self._pending_annotation)
         self._update_status()
         self.annotation_complete.emit(message)
@@ -1791,8 +1942,10 @@ class AnnotateTab(QWidget):
             dialogs.warning(self, "No Model", "Select a CellTypist model (not a category header).")
             return
 
+        if not self._confirm_replacing_subclusters("This annotation"):
+            return
         output_path = self._resolve_h5ad_path()
-        if output_path is None:
+        if output_path is None and self._source.writes_file:
             return
 
         majority_voting = self.majority_voting_check.isChecked()
@@ -1822,9 +1975,7 @@ class AnnotateTab(QWidget):
         self.run_celltypist_btn.setEnabled(True)
 
         self.adata = adata
-        self.main_window.current_adata = adata
-        self.main_window._adata_version += 1
-        self._last_adata_version = self.main_window._adata_version
+        self._last_adata_version = self._source.publish(adata)
         self._record_annotation({**self._pending_annotation,
                                  **adata.uns.get('celltypist_model', {})})
         self._update_status()
@@ -1868,8 +2019,10 @@ class AnnotateTab(QWidget):
             dialogs.warning(self, "No Markers", "No markers found for selected cell types.")
             return
 
+        if not self._confirm_replacing_subclusters("This annotation"):
+            return
         output_path = self._resolve_h5ad_path()
-        if output_path is None:
+        if output_path is None and self._source.writes_file:
             return
 
         self.run_cm2_btn.setEnabled(False)
@@ -1993,8 +2146,10 @@ class AnnotateTab(QWidget):
                 )
                 return
 
+        if not self._confirm_replacing_subclusters("This annotation"):
+            return
         output_path = self._resolve_h5ad_path()
-        if output_path is None:
+        if output_path is None and self._source.writes_file:
             return
 
         self.run_ref_btn.setEnabled(False)
@@ -2027,9 +2182,7 @@ class AnnotateTab(QWidget):
         self.run_ref_btn.setEnabled(True)
 
         self.adata = adata
-        self.main_window.current_adata = adata
-        self.main_window._adata_version += 1
-        self._last_adata_version = self.main_window._adata_version
+        self._last_adata_version = self._source.publish(adata)
         self._record_annotation(self._pending_annotation)
         self._update_status()
         self.annotation_complete.emit(message)

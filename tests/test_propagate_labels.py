@@ -284,3 +284,30 @@ def test_propagation_is_recorded_in_the_study_provenance(tmp_path):
     assert (p['n_cells'], p['n_matched_by_barcode'], p['n_unlabelled_excluded']) == (3, 2, 1)
     assert p['n_projected_by_knn'] == 0 and p['n_unlabelled_not_in_atlas'] == 0
     assert p['atlas_annotation'] == {'method': 'CellTypist', 'name': 'Heart.pkl'}
+
+
+def test_subclusters_travel_only_as_their_atlas_column(tmp_path):
+    """'leiden_sub' ids belong to the atlas's 'leiden': a study gets them
+    only as 'leiden_sub_atlas', the column is asked for only when the
+    atlas has it, and the atlas subclusterings are recorded (ADR-008)."""
+    from kosmic import provenance
+    from kosmic.combine import propagation_columns
+    s1 = _study(tmp_path / "S1" / "processed_data" / "S1.h5ad", ["disease", "control"])
+    s2 = _study(tmp_path / "S2" / "processed_data" / "S2.h5ad", ["control"])
+    master = _master_from(tmp_path, [s1, s2])
+    assert propagation_columns(master) == ('leiden', 'cell_type')
+
+    m = ad.read_h5ad(master)
+    m.obs["leiden_sub"] = pd.Categorical(["0.1"] * m.n_obs)
+    m.write_h5ad(master)
+    sub = {'column': 'leiden', 'groups': ['0'], 'n_cells': 3, 'resolution': 0.5,
+           'n_subclusters': 2, 'annotation': {'method': 'manual'}}
+    provenance.record_stage(master.parent, master.stem, 'subcluster',
+                            {**sub, 'subclusters': {'0.0': {}, '0.1': {}}})
+    cols = propagation_columns(master)
+    assert cols == ('leiden', 'cell_type', 'leiden_sub')
+    propagate_labels(master, s1, label_cols=cols)
+    obs = ad.read_h5ad(s1).obs
+    assert (obs["leiden_sub_atlas"] == "0.1").all() and "leiden_sub" not in obs.columns
+    p = provenance.last_stage(s1.parent, 'propagate_labels')['params']
+    assert p['atlas_subclustering'] == [sub]

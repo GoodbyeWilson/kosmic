@@ -960,22 +960,24 @@ class AppWindow(QMainWindow):
                 if members else "No per-study h5ads found.")
             return
 
+        from kosmic.combine import propagation_columns
+        label_cols = propagation_columns(master)
+        new_cols = ", ".join(f"'{c}_atlas'" for c in label_cols)
         if not dialogs.confirm(
                 self, "Propagate labels",
                 "Write the master's cell types onto "
                 + ", ".join(sorted(p.parent.parent.name for p in study_paths))
                 + "?" + chr(10) + chr(10)
-                + "They land in new columns -- 'cell_type_atlas' and "
-                "'leiden_atlas'. Each study keeps its own 'cell_type' and "
-                "'leiden' from when it was processed on its own, so you can "
-                "compare the two." + chr(10) + chr(10)
+                + f"They land in new columns -- {new_cols}. Each study keeps "
+                "its own 'cell_type' and 'leiden' from when it was processed "
+                "on its own, so you can compare the two." + chr(10) + chr(10)
                 + "The study files are rewritten to add the columns."):
             return
 
         self._output_panel.log("Propagating master labels to studies...")
         worker = _PropagateWorker(
             master, study_paths,
-            label_cols=('leiden', 'cell_type'),
+            label_cols=label_cols,
             parent=self,
         )
         from kosmic.gui.shared import run_worker as run_worker_helper
@@ -1608,6 +1610,11 @@ class AppWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
+        # An unapplied subclustering is applied, discarded or kept open.
+        scrna = self._scrna_workspace
+        if scrna is not None and not scrna.cluster_tab.settle_focus(allow_cancel=True):
+            event.ignore()
+            return
         self._resource_timer.stop()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("explorer_splitter", self._splitter.sizes())

@@ -4,6 +4,7 @@
 import re
 from kosmic.scrna.inspect.roles import cluster_labels
 import numpy as np
+import pandas as pd
 
 from kosmic.scrna.inspect.detection import detect_species, format_gene_for_species
 
@@ -12,6 +13,13 @@ from kosmic.scrna.inspect.detection import detect_species, format_gene_for_speci
 
 # Known prefix → broad name mappings for CellTypist models.
 # Longest-prefix-first matching ensures e.g. "CD4+T" matches before "CD4".
+#
+# Lymphoid and myeloid subtypes are grouped one level above the model's
+# own prefixes (T Cell, NK Cell; Macrophage, Monocyte), as the cardiac and
+# stromal types are: CD4 against CD8, and the macrophage subsets, are not
+# separated reliably in single-nucleus data, and a cluster split between
+# subtypes of one type was otherwise named after another type. The fine
+# label of every cell is kept in 'cell_type_fine'.
 _CELLTYPIST_BROAD_MAP = {
     'aCM': 'Atrial Cardiomyocyte',
     'vCM': 'Ventricular Cardiomyocyte',
@@ -23,26 +31,26 @@ _CELLTYPIST_BROAD_MAP = {
     'NC': 'Neural Crest',
     'SMC': 'Smooth Muscle Cell',
     'Adip': 'Adipocyte',
-    'CD4+T': 'CD4+ T Cell',
-    'CD8+T': 'CD8+ T Cell',
-    'CD14+Mo': 'CD14+ Monocyte',
-    'CD16+Mo': 'CD16+ Monocyte',
+    'CD4+T': 'T Cell',
+    'CD8+T': 'T Cell',
+    'CD14+Mo': 'Monocyte',
+    'CD16+Mo': 'Monocyte',
     'NK': 'NK Cell',
     'AVN': 'AV Node Cell',
     'SAN': 'SA Node Cell',
-    'LYVE1': 'LYVE1+ Macrophage',
+    'LYVE1': 'Macrophage',
     'B_': 'B Cell',
     'B': 'B Cell',
     'Purkinje': 'Purkinje Cell',
     'Neut': 'Neutrophil',
     'Mast': 'Mast Cell',
     'Meso': 'Mesothelial Cell',
-    'MoMP': 'Monocyte-Macrophage',
+    'MoMP': 'Macrophage',
     'DC': 'Dendritic Cell',
-    'ILC': 'Innate Lymphoid Cell',
-    'gdT': 'Gamma-delta T Cell',
-    'MAIT': 'MAIT Cell',
-    'T/NK': 'T/NK Cell',
+    'ILC': 'NK Cell',
+    'gdT': 'T Cell',
+    'MAIT': 'T Cell',
+    'T/NK': 'T Cell',
 }
 
 _SORTED_PREFIXES = sorted(_CELLTYPIST_BROAD_MAP.keys(), key=len, reverse=True)
@@ -489,7 +497,35 @@ def annotate_clusters(adata, markers=None, cluster_col='leiden',
     return adata, cluster_types, annotation_details
 
 
-def run_celltypist(adata, model_name, majority_voting=True, progress_callback=None):
+def majority_vote(clusters, labels, group_of=None) -> pd.Series:
+    """Each cell's cluster label by majority vote over its cluster's cells.
+
+    The winner is the most common label in the cluster. With 'group_of',
+    a function from a label to its group (a fine label to its broad
+    type), the vote is over groups: the winning group is the most common
+    group, and the cluster's label is the most common label within it. A
+    type split into several fine labels otherwise loses to a type with
+    one, even where its cells are the majority. Cells without a cluster
+    get no label.
+    """
+    clusters = pd.Series(clusters).reset_index(drop=True)
+    labels = pd.Series(labels, dtype=object).reset_index(drop=True)
+    has = clusters.notna() & labels.notna()
+    cl = clusters[has].astype(str)
+    lab = labels[has].astype(str)
+    group = lab.map(group_of) if group_of else lab
+    winner = {}
+    for c, idx in cl.groupby(cl).groups.items():
+        top_group = group[idx].value_counts().index[0]
+        within = lab[idx][group[idx] == top_group]
+        winner[c] = within.value_counts().index[0]
+    out = clusters.astype(object).where(clusters.isna(),
+                                        clusters.astype(str).map(winner))
+    return out
+
+
+def run_celltypist(adata, model_name, majority_voting=True, progress_callback=None,
+                   vote_by=None):
     """
     Run CellTypist ML-based cell type annotation.
 
@@ -506,6 +542,10 @@ def run_celltypist(adata, model_name, majority_voting=True, progress_callback=No
         Whether to apply majority voting within leiden clusters.
     progress_callback : callable, optional
         Called with status strings.
+    vote_by : callable, optional
+        Maps a predicted label to the group the vote is over, such as
+        'collapse_celltypist_label' when broad labels are wanted (see
+        'majority_vote'). The cluster's label is still a fine label.
 
     Returns
     -------
@@ -601,25 +641,8 @@ def run_celltypist(adata, model_name, majority_voting=True, progress_callback=No
         if all_scores:
             adata_ct.obs['conf_score'] = all_scores
 
-        # Now do majority voting on the full set (just label assignment, no matrix ops)
-        use_leiden = majority_voting and 'leiden' in adata_ct.obs.columns
-        if use_leiden:
-            if progress_callback:
-                progress_callback("Running majority voting across clusters...")
-            cluster_col = adata_ct.obs['leiden']
-            labels = adata_ct.obs['predicted_labels']
-            majority = {}
-            # Only clusters with cells: a cell left out of the embedding has
-            # no cluster, and an empty group has no majority to take.
-            for cluster in cluster_labels(adata_ct, 'leiden'):
-                votes = labels[cluster_col == cluster].value_counts()
-                if len(votes):
-                    majority[cluster] = votes.index[0]
-            adata_ct.obs['majority_voting'] = cluster_col.map(majority)
-
         # Transfer to adata
-        ct_cols = ['predicted_labels', 'majority_voting', 'conf_score']
-        for col in ct_cols:
+        for col in ('predicted_labels', 'conf_score'):
             if col in adata_ct.obs.columns:
                 adata.obs[col] = adata_ct.obs[col].values
         del adata_ct
@@ -627,24 +650,27 @@ def run_celltypist(adata, model_name, majority_voting=True, progress_callback=No
         if progress_callback:
             progress_callback(f"Annotating {adata_ct.n_obs:,} cells with {model_name}...")
 
-        use_leiden = majority_voting and 'leiden' in adata_ct.obs.columns
-        predictions = celltypist.annotate(
-            adata_ct,
-            model=model,
-            majority_voting=majority_voting,
-            over_clustering='leiden' if use_leiden else None,
-        )
+        # Per-cell predictions only: the vote below is KOSMIC's for both
+        # paths, so it can be taken over broad labels.
+        predictions = celltypist.annotate(adata_ct, model=model, majority_voting=False)
         del adata_ct
 
         adata_result = predictions.to_adata()
         del predictions
 
-        # Transfer annotation columns back to original adata
-        ct_cols = ['predicted_labels', 'over_clustering', 'majority_voting', 'conf_score']
-        for col in ct_cols:
+        for col in ('predicted_labels', 'conf_score'):
             if col in adata_result.obs.columns:
                 adata.obs[col] = adata_result.obs[col].values
         del adata_result
+
+    # Majority voting within the leiden clusters (just label assignment).
+    # Cells left out of the embedding have no cluster and get no vote.
+    use_leiden = majority_voting and 'leiden' in adata.obs.columns
+    if use_leiden:
+        if progress_callback:
+            progress_callback("Running majority voting across clusters...")
+        adata.obs['majority_voting'] = majority_vote(
+            adata.obs['leiden'], adata.obs['predicted_labels'], vote_by).values
 
     # Map to standard column names
     if majority_voting and 'majority_voting' in adata.obs.columns:
@@ -667,5 +693,6 @@ def run_celltypist(adata, model_name, majority_voting=True, progress_callback=No
         'source': str(desc.get('source', '')),
         'n_cell_types': int(len(model.cell_types)),
         'majority_voting_on_leiden': bool(use_leiden),
+        'majority_voting_level': 'broad' if (use_leiden and vote_by) else 'fine',
     }
     return adata
