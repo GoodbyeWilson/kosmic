@@ -381,7 +381,8 @@ class MetaAnalysisWorkspace(QWidget):
         self._rescan_btn = SecondaryButton("Rescan")
         self._rescan_btn.setToolTip(
             "Look for DE results again, e.g. after running DE on a study.")
-        self._rescan_btn.clicked.connect(self._rescan_project)
+        self._rescan_btn.clicked.connect(
+            lambda: self._rescan_project(verbose=True))
         head_row.addWidget(self._rescan_btn)
         self.add_btn = SecondaryButton("Import external result...")
         self.add_btn.setToolTip("Add a DE results CSV from outside this project.")
@@ -480,8 +481,13 @@ class MetaAnalysisWorkspace(QWidget):
     # Project directory
     # ------------------------------------------------------------------
 
-    def _rescan_project(self):
-        """Rescan the project directory for DE results and auto-load them."""
+    def _rescan_project(self, verbose: bool = False):
+        """Rescan the project directory for DE results and auto-load them.
+
+        Changing project in any workspace triggers this scan in the
+        background, so by default it logs one summary line. With
+        *verbose* (the Rescan button) each loaded result is listed too.
+        """
         if not self._project_folder:
             return
 
@@ -558,7 +564,8 @@ class MetaAnalysisWorkspace(QWidget):
                 self._all_gene_datasets.append({
                     'path': filepath, 'name': name, 'df': df,
                     'study': entry['analysis_folder']})
-                self._log(f"Loaded: {name} ({len(df)} genes)")
+                if verbose:
+                    self._log(f"Loaded: {name} ({len(df)} genes)")
             except Exception as e:
                 self._log(f"Failed to load {filepath}: {e}")
         by_folder: dict[str, list] = {}
@@ -581,7 +588,9 @@ class MetaAnalysisWorkspace(QWidget):
                 require_se(pw_df, filepath)
                 name = entry["accession"]
                 self._all_pathway_datasets.append({'path': filepath, 'name': name, 'df': pw_df})
-                self._log(f"Loaded pathway DE: {name} ({len(pw_df)} pathways)")
+                if verbose:
+                    self._log(f"Loaded pathway DE: {name} "
+                              f"({len(pw_df)} pathways)")
             except Exception as e:
                 self._log(f"Failed to load pathway DE {filepath}: {e}")
 
@@ -599,9 +608,8 @@ class MetaAnalysisWorkspace(QWidget):
 
         self._render_study_checklist()
         self._apply_study_selection()
-        self._log(f"Scanned {self._project_folder}: "
-                  f"{len(self._all_gene_datasets)} dataset(s) from "
-                  f"{len(by_accession)} studies")
+        self._log(f"Meta-analysis: found {len(by_accession)} DE result(s) "
+                  f"from {len(by_folder)} studies")
 
     @staticmethod
     def _results_signature(discovered) -> frozenset:

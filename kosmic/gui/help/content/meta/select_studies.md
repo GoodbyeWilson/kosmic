@@ -12,6 +12,10 @@ KOSMIC looks in every study folder of the project for DE results in
 type, `{study}_{cell type}_DE_{method}.csv`, and each of those appears
 here as its own row (for example `Koenig_Endothelial_Cell`).
 
+DE results of the combined atlas (`_master`) are not listed. The atlas
+contains the cells of every study, so pooling its result with the
+per-study results would count each study twice.
+
 The list is refreshed when you open the Meta-Analysis workspace, if DE
 results were added or rewritten since the last scan, so results from a
 DE run in the same session appear without restarting. **Rescan** looks
