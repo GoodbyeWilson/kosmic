@@ -121,6 +121,16 @@ Four methods, picked from *Method*:
 | **CellMarker 2.0** | Marker-gene scoring against the CellMarker database, by species and tissue | a tissue without a good classifier |
 | **PanglaoDB** | Marker-gene scoring against PanglaoDB; *Canonical markers only* tightens it | the same; the two databases disagree usefully |
 
+With CellTypist's *Broad labels*, the model's subtypes are grouped into
+broad types: the ventricular cardiomyocyte states into Ventricular
+Cardiomyocyte, the T-cell subsets into T Cell, NK and innate lymphoid
+cells into NK Cell, the macrophage subsets into Macrophage and the
+monocytes into Monocyte. *Majority voting* then gives each cluster the
+broad type most of its cells were predicted as, so a type the model
+splits into several subtypes is not outvoted by one it does not. Each
+cell's own fine label is kept in `cell_type_fine`, for a cluster you
+want to name more finely by hand.
+
 *Run ORA* on the marker methods adds an over-representation test per
 cluster, which is more robust than a raw score when a cluster is small.
 

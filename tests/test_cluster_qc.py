@@ -110,13 +110,13 @@ def _voted(preds, label):
 
 
 def test_agreement_is_read_from_the_predictions_not_the_voted_label():
-    # The T/NK case: one CD4 subtype wins the vote at 30%, but CD8 cells
-    # outnumber CD4 cells once their subtypes are counted together.
-    preds = (['CD4+T_naive'] * 30 + ['CD8+T_trans'] * 25 + ['CD8+T_em'] * 20
+    # A fine-label vote names the cluster after the one-label type at 30%,
+    # but macrophages outnumber it once their subtypes are counted together.
+    preds = (['CD16+Mo'] * 30 + ['LYVE1+IGF1+MP'] * 25 + ['LYVE1+TIMD4+MP'] * 20
              + ['NK_CD16hi'] * 25)
-    a = prediction_agreement(_voted(preds, 'CD4+ T Cell'), 'leiden')['0']
+    a = prediction_agreement(_voted(preds, 'Monocyte'), 'leiden')['0']
     assert a['agreement'] == 0.30
-    assert (a['runner_up'], a['runner_up_share']) == ('CD8+ T Cell', 0.45)
+    assert (a['runner_up'], a['runner_up_share']) == ('Macrophage', 0.45)
     assert a['confidence'] == 'Below threshold'
 
 

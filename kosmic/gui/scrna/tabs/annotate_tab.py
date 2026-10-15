@@ -359,11 +359,15 @@ class CellTypistWorker(BaseWorker):
         def _progress(msg):
             self.progress.emit(msg)
 
+        from kosmic.scrna.annotate.score import collapse_celltypist_label
+        # With broad labels the vote is over broad types, so a type split
+        # into several fine labels is not outvoted by a type with one.
         self.adata = run_celltypist(
             self.adata,
             self.model_name,
             majority_voting=self.majority_voting,
             progress_callback=_progress,
+            vote_by=collapse_celltypist_label if self.broad_labels else None,
         )
 
         # Always store fine labels; optionally collapse cell_type to broad
@@ -739,7 +743,10 @@ class AnnotateTab(QWidget):
 
         self.broad_labels_check = QCheckBox("Broad labels")
         self.broad_labels_check.setChecked(True)
-        self.broad_labels_check.setToolTip("Collapse fine-grained labels to broad categories.")
+        self.broad_labels_check.setToolTip(
+            "Group the model's subtypes into broad types (T Cell, Macrophage,\n"
+            "Ventricular Cardiomyocyte, ...); majority voting is then over\n"
+            "the broad types. Fine labels are kept in 'cell_type_fine'.")
         ct_layout.addWidget(self.broad_labels_check)
 
         self.run_celltypist_btn = QPushButton("Run CellTypist")

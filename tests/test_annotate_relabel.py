@@ -258,17 +258,17 @@ def test_the_table_shows_agreement_with_each_cells_prediction(app):
         X=sp.csr_matrix(np.ones((n, 5), dtype=np.float32)),
         obs=pd.DataFrame({
             'leiden': pd.Categorical(['0'] * 100 + ['1'] * 100),
-            'cell_type': pd.Categorical(['CD4+ T Cell'] * 100 + ['Fibroblast'] * 100),
-            'cell_type_auto': pd.Categorical(['CD4+ T Cell'] * 100 + ['Fibroblast'] * 100),
-            'predicted_labels': (['CD4+T_naive'] * 40 + ['CD8+T_em'] * 35
-                                 + ['NK_CD16hi'] * 25 + ['FB1'] * 100),
+            'cell_type': pd.Categorical(['Monocyte'] * 100 + ['Fibroblast'] * 100),
+            'cell_type_auto': pd.Categorical(['Monocyte'] * 100 + ['Fibroblast'] * 100),
+            'predicted_labels': (['CD16+Mo'] * 40 + ['LYVE1+IGF1+MP'] * 35
+                                 + ['DC'] * 25 + ['FB1'] * 100),
         }, index=[f'c{i}' for i in range(n)]))
     t.main_window.current_adata = a
     t.adata = a
     t._populate_cluster_table()
     tbl = t.cluster_table
     assert tbl.item(0, 7).text() == 'Below threshold (40%)'
-    assert tbl.item(0, 8).text() == 'CD8+ T Cell (35%)'
+    assert tbl.item(0, 8).text() == 'Macrophage (35%)'
     assert tbl.item(0, 9).text().startswith('Mixed: 40% of cells')
     assert tbl.item(1, 7).text() == 'High (100%)'
     assert tbl.item(1, 9).text() == ''
