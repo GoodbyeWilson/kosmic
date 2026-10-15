@@ -25,7 +25,7 @@ from typing import Callable, List, Optional, Sequence
 
 import pandas as pd
 
-from kosmic.paths import de_stats_dir, de_pathway_scoring_dir
+from kosmic.paths import MASTER_ACCESSION, de_stats_dir, de_pathway_scoring_dir
 
 
 # Filesystem discovery: find DE CSVs written by the scRNA pipeline
@@ -48,6 +48,10 @@ def discover_de_results(project_folder: Path) -> list[dict]:
         {project_folder}/{analysis_name}/results/de_analysis/pathway_scoring/
             pathway_de_results.csv
 
+    The '_master' folder is skipped. Its DE results come from the
+    combined atlas, which contains the cells of every study, so pooling
+    them with the per-study results would count each study twice.
+
     Returns
     -------
     list[dict]
@@ -65,7 +69,7 @@ def discover_de_results(project_folder: Path) -> list[dict]:
     results: list[dict] = []
 
     for child in sorted(project_folder.iterdir()):
-        if not child.is_dir():
+        if not child.is_dir() or child.name == MASTER_ACCESSION:
             continue
 
         # Gene-stats + per-method DE tables in statistics/

@@ -954,7 +954,7 @@ class GeneMAPage(SidebarTabbedPage):
         # externals (which are selected by virtue of being imported).
         selected = {str(name) for name in self._labels}
 
-        chosen, fallback, skipped = select_de_entries(
+        chosen, fallback, _ = select_de_entries(
             de_entries, preferred_methods, allowed=selected or None)
 
         new_datasets = list(externals)
@@ -974,10 +974,6 @@ class GeneMAPage(SidebarTabbedPage):
             except Exception as exc:
                 self.log_message.emit(
                     f"  failed to load {acc}: {exc}")
-
-        if skipped:
-            self.log_message.emit(
-                f"  not selected, skipped: {', '.join(skipped)}")
 
         self._datasets = new_datasets
         self._labels = new_labels
@@ -1036,8 +1032,9 @@ class GeneMAPage(SidebarTabbedPage):
         n_loaded, n_total, fallback = self._reload_datasets_for_de_method(
             de_method_key)
         self.log_message.emit(
-            f"Exploratory: DE method = {de_method_key}; reloaded "
-            f"{n_loaded} studies from {n_total} discovered entries.")
+            f"Exploratory: DE method = {de_method_key}; pooling "
+            f"{n_loaded} of {n_total} discovered results: "
+            f"{', '.join(self._labels)}")
 
         if not self._datasets:
             self.log_message.emit("Aborting -- no datasets")

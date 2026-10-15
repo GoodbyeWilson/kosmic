@@ -396,6 +396,19 @@ def test_choosing_a_cell_type_selects_it_in_every_study(app, per_cell_type_proje
     assert sorted(shown) == sorted(ws.dataset_labels)
 
 
+def test_combined_atlas_results_are_not_offered_as_a_study(
+        app, per_cell_type_project):
+    # The atlas holds every study's cells; pooling it with them would
+    # count each study twice.
+    from kosmic.paths import MASTER_ACCESSION
+    _write_de(per_cell_type_project, MASTER_ACCESSION,
+              f"{MASTER_ACCESSION}_Endothelial_Cell")
+    ws = _scanned(per_cell_type_project)
+    names = {d['name'] for d in ws._all_gene_datasets}
+    assert not any(n.startswith(MASTER_ACCESSION) for n in names)
+    assert _choices(ws)["Endothelial_Cell"][0] == "Endothelial_Cell  (3 studies)"
+
+
 def test_activation_rescans_only_when_results_changed(app, per_cell_type_project,
                                                       monkeypatch):
     ws = _scanned(per_cell_type_project)
