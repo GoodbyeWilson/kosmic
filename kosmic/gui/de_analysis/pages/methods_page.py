@@ -455,6 +455,9 @@ class MethodsPage(SimplePage):
                  'annotate_manual', 'propagate_labels', 'decontx', 'subset',
                  'setup', 'roles')
         lines = []
+        # Cells removed by re-applying QC after DecontX are part of the
+        # preprocessing too (ADR-011).
+        scrna += ('qc_recheck',)
         for st in prov.get('stages', []):
             if st.get('stage') not in scrna:
                 continue
