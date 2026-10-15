@@ -304,7 +304,9 @@ def apply_focus(adata, focus: Focus, *, annotation: Optional[dict] = None,
     # The fine labels a CellTypist pass in focus mode gave, so the study's
     # 'cell_type_fine' does not keep the parent cluster's winning label.
     if 'cell_type_fine' in sub.obs.columns:
-        fine = (adata.obs['cell_type_fine'].astype(object).to_numpy()
+        # An explicit copy: with pandas copy-on-write, to_numpy() can
+        # return a read-only view of the column.
+        fine = (adata.obs['cell_type_fine'].to_numpy(dtype=object, copy=True)
                 if 'cell_type_fine' in adata.obs.columns
                 else np.full(adata.n_obs, np.nan, dtype=object))
         fine[hit] = sub.obs['cell_type_fine'].astype(object).to_numpy()[found]
