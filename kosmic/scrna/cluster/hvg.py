@@ -73,7 +73,7 @@ def find_hvg(adata, n_hvg: int = 2000, flavor: str = 'auto',
         absent from 'obs' or when it has only one level. When the
         'seurat_v3' fit fails within a batch (too few cells), genes are
         selected across all cells instead. The key used, or '' for
-        none, is stored in 'uns['hvg']['batch_key']'.
+        none, is stored as the 'batch_key' entry of uns['hvg'].
 
     Returns
     -------
