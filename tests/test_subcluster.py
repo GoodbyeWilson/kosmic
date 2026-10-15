@@ -156,6 +156,22 @@ def test_methods_list_every_subclustering(tmp_path):
     assert text.count('Subclustering') == 2 and text.count('Clustering') == 1
 
 
+def test_a_later_annotation_supersedes_earlier_subclusterings(tmp_path):
+    """An automated annotation relabels every cell, so subclusterings made
+    before it are kept in the record but left out of the methods."""
+    from kosmic import provenance
+    provenance.record_stage(tmp_path, 's', 'annotate', {'method': 'CellTypist'})
+    provenance.record_stage(tmp_path, 's', 'subcluster', {'groups': ['old']})
+    provenance.record_stage(tmp_path, 's', 'annotate', {'method': 'CellTypist'})
+    provenance.record_stage(tmp_path, 's', 'subcluster', {'groups': ['new']})
+    record = provenance.load(tmp_path)
+    assert [st['params']['groups'] for st in
+            provenance.current_subclusterings(record['stages'])] == [['new']]
+    text = provenance.render_methods(record)
+    assert text.count('Subclustering') == 1 and 'old' not in text
+    assert len(record['stages']) == 4                 # nothing dropped from the record
+
+
 def test_apply_writes_the_fine_labels_focus_mode_gave(focused):
     """A CellTypist pass in focus mode writes 'cell_type_fine' on the subset;
     without copying it the study kept the parent cluster's winning label."""

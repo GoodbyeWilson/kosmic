@@ -271,13 +271,27 @@ def _abbrev_value(key: str, value, limit: int = _VALUE_LIMIT) -> str:
 _EVERY_ENTRY_STAGES = frozenset({'subcluster'})
 
 
+def current_subclusterings(stages: list) -> list:
+    """The 'subcluster' entries made after the last 'annotate' entry.
+
+    An automated annotation gives every cell a new label, so the
+    subclusterings before it no longer describe the study's labels. They
+    stay in the record; the methods and the Annotate step count only
+    these.
+    """
+    last = max((i for i, st in enumerate(stages) if st.get('stage') == 'annotate'),
+               default=-1)
+    return [st for st in stages[last + 1:] if st.get('stage') == 'subcluster']
+
+
 def _final_stages(stages: list) -> list:
     """Keep the last run of each stage, noting how many there were.
 
     Re-running clustering or DE overwrites what came before, so listing
     every attempt as an equal makes the document describe settings that
     produced nothing. The count is kept so nothing is hidden silently.
-    Every entry of a stage in _EVERY_ENTRY_STAGES is kept.
+    Every entry of a stage in _EVERY_ENTRY_STAGES is kept, except
+    subclusterings an automated annotation has since replaced.
     """
     counts = {}
     for st in stages:
@@ -285,10 +299,12 @@ def _final_stages(stages: list) -> list:
     latest = {}
     for st in stages:
         latest[st.get('stage')] = st
+    current = {id(st) for st in current_subclusterings(stages)}
     out = []
     for st in stages:
         if st.get('stage') in _EVERY_ENTRY_STAGES:
-            out.append(dict(st))
+            if st.get('stage') != 'subcluster' or id(st) in current:
+                out.append(dict(st))
         elif latest.get(st.get('stage')) is st:
             entry = dict(st)
             entry['_n_runs'] = counts.get(st.get('stage'), 1)

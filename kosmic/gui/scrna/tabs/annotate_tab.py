@@ -1127,7 +1127,7 @@ class AnnotateTab(QWidget):
             return True
         from kosmic import provenance
         record = provenance.load(Path(self._source.path).parent) or {}
-        n = sum(1 for st in record.get('stages', []) if st.get('stage') == 'subcluster')
+        n = len(provenance.current_subclusterings(record.get('stages', [])))
         if not n:
             return True
         return dialogs.confirm(

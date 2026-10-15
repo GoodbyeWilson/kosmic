@@ -433,12 +433,18 @@ class MethodsPage(SimplePage):
     @staticmethod
     def _provenance_preprocessing(prov, used_refs: set) -> list:
         """Preprocessing lines from the recorded scRNA stages (accurate)."""
+        from kosmic.provenance import current_subclusterings
         scrna = ('load', 'qc', 'doublets', 'normalize', 'cluster', 'annotate',
                  'annotate_manual', 'subcluster', 'propagate_labels', 'decontx',
                  'subset', 'setup', 'roles')
         lines = []
         for st in prov.get('stages', []):
             if st.get('stage') not in scrna:
+                continue
+            # A subclustering a later annotation replaced no longer
+            # describes the labels.
+            if (st['stage'] == 'subcluster' and st not in
+                    current_subclusterings(prov.get('stages', []))):
                 continue
             params = st.get('params') or {}
             if st['stage'] in ('normalize', 'cluster', 'subcluster'):
