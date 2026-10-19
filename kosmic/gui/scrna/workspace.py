@@ -167,6 +167,15 @@ class ScRNAWorkspace(QWidget):
         if self.current_adata is None:
             self.switch_tab(0)
 
+    def _has_load_stage(self) -> bool:
+        from pathlib import Path
+        from kosmic import provenance
+        try:
+            return provenance.last_stage(
+                Path(self.current_h5ad_path).parent, 'load') is not None
+        except Exception:  # noqa: BLE001 -- no record yet
+            return False
+
     def set_adata(self, adata, file_path=None, **_kw):
         """
         Set the current adata object and optionally its file path.
@@ -189,11 +198,15 @@ class ScRNAWorkspace(QWidget):
 
         # Record the initial load once, so the upstream dataset size is on
         # record (best-effort; the fingerprint captures the raw dimensions).
-        if first_load and adata is not None:
+        # An import from Load Data records it itself, with the source file.
+        if first_load and adata is not None and not self._has_load_stage():
             self.record_provenance('load', {
                 'file': Path(self.current_h5ad_path).name,
                 'n_cells': int(adata.n_obs),
                 'n_genes': int(adata.n_vars),
+                # The deposit and the matrix the counts were taken from.
+                **{k: str(v) for k, v in
+                   (adata.uns.get('kosmic_import') or {}).items()},
             })
 
         self.notify_adata_changed()

@@ -120,6 +120,29 @@ def _check_recorded_totals(adata, log, user_chose: bool = False) -> None:
         "check the source file for an uncorrected matrix.")
 
 
+def _record_import(out: Path, adata, candidates=None) -> None:
+    """Record the import as the study's 'load' stage.
+
+    Written here, when the import finishes, so the stage holds the
+    dataset as imported (before any filtering) together with the deposit
+    file and the matrix the counts came from, and with 'candidates' (from
+    counts_choice.candidates_summary) the matrices that were considered. The
+    scRNA workspace records 'load' only when no stage exists yet, so this is
+    not duplicated.
+    """
+    from kosmic import provenance
+    try:
+        provenance.record_stage(out.parent, out.stem, 'load', {
+            'file': out.name,
+            'n_cells': int(adata.n_obs),
+            'n_genes': int(adata.n_vars),
+            **{k: str(v) for k, v in (adata.uns.get('kosmic_import') or {}).items()},
+            **({'candidates': list(candidates)} if candidates else {}),
+        })
+    except Exception:  # noqa: BLE001 -- provenance is best-effort
+        pass
+
+
 class H5adImportWorker(BaseWorker):
     """
     Worker to import an h5ad from raw_data/ into processed_data/.
@@ -136,11 +159,13 @@ class H5adImportWorker(BaseWorker):
     Emits 'finished_ok' with '(output_path, message)'.
     """
 
-    def __init__(self, h5ad_path: str, output_dir: str, slot: str = None):
+    def __init__(self, h5ad_path: str, output_dir: str, slot: str = None,
+                 candidates=None):
         super().__init__()
         self.h5ad_path = h5ad_path
         self.output_dir = output_dir
         self.slot = slot
+        self.candidates = candidates
 
     def _run(self):
         from kosmic.scrna.load.matrices import (
@@ -191,10 +216,15 @@ class H5adImportWorker(BaseWorker):
         _check_recorded_totals(adata, self.progress.emit,
                                user_chose=self.slot is not None)
 
+        # Where the counts came from, for the 'load' stage of the record.
+        label = by_slot.get(slot, {}).get('label', slot)
+        adata.uns['kosmic_import'] = {'source_file': src.name, 'counts_from': label}
+
         self.progress.emit(f"Writing {out.name}...")
         self.progress_pct.emit(75)
         out.parent.mkdir(parents=True, exist_ok=True)
         adata.write_h5ad(out, compression="gzip")
+        _record_import(out, adata, self.candidates)
 
         self.progress_pct.emit(100)
         message = (
@@ -256,6 +286,13 @@ class RDSConvertWorker(BaseWorker):
 
         adata = assemble_h5ad_from_r_export(intermediate_dir, rds_name, h5ad_path)
         _check_recorded_totals(adata, self.progress.emit)
+        # The R export names the assay it took the counts from.
+        assay_file = Path(intermediate_dir) / f"{rds_name}_assay.txt"
+        assay = (assay_file.read_text().strip() if assay_file.exists() else "")
+        adata.uns['kosmic_import'] = {
+            'source_file': Path(self.rds_path).name,
+            'counts_from': f"{assay} assay counts" if assay else "Seurat counts"}
+        _record_import(Path(h5ad_path), adata)   # the file is already written
 
         self.progress_pct.emit(100)
         message = (

@@ -243,7 +243,8 @@ def best_counts_slot(adata, n_sample: int = 2000) -> Optional[str]:
     return None
 
 
-def describe_count_matrices_path(path, n_sample: int = 2000) -> list[dict]:
+def describe_count_matrices_path(path, n_sample: int = 2000,
+                                 n_cells: int = 2000) -> list[dict]:
     """Describe an h5ad's candidate matrices without loading any of them.
 
     Same output as :func:`describe_count_matrices`, read straight from the
@@ -254,6 +255,11 @@ def describe_count_matrices_path(path, n_sample: int = 2000) -> list[dict]:
 
     ``max`` is taken from the sampled values rather than the whole matrix,
     which is enough to separate counts from log-transformed data.
+
+    Each entry also has ``median_total``: the median of the per-cell totals
+    of the first ``n_cells`` cells, or None when the matrix is not stored by
+    row. Two count matrices of the same cells differ in it when one has had
+    background removed (CellBender's are lower than Cell Ranger's).
     """
     import h5py
 
@@ -266,6 +272,22 @@ def describe_count_matrices_path(path, n_sample: int = 2000) -> list[dict]:
         if nz.size == 0:
             return np.empty(0), 0.0
         return nz, float(nz.max())
+
+    def _median_total(node):
+        """Median total of the first cells, read without loading the matrix."""
+        if isinstance(node, h5py.Dataset):            # dense, one row per cell
+            rows = np.asarray(node[:n_cells])
+            return float(np.median(rows.sum(axis=1))) if rows.size else None
+        if node.attrs.get("encoding-type") != "csr_matrix":
+            return None
+        indptr = np.asarray(node["indptr"][:n_cells + 1])
+        if indptr.size < 2:
+            return None
+        data = np.asarray(node["data"][:indptr[-1]], dtype=float)
+        starts = indptr[:-1] - indptr[0]
+        totals = np.add.reduceat(data, starts) if data.size else np.zeros(starts.size)
+        totals[np.diff(indptr) == 0] = 0.0            # reduceat repeats on empty rows
+        return float(np.median(totals))
 
     def _shape(group, fallback) -> tuple:
         shape = group.attrs.get("shape") if hasattr(group, "attrs") else None
@@ -289,6 +311,7 @@ def describe_count_matrices_path(path, n_sample: int = 2000) -> list[dict]:
                 "n_stored": int(node["data"].size) if (
                     isinstance(node, h5py.Group) and "data" in node) else 0,
                 "verdict": _verdict(values, max_val, log1p_recorded),
+                "median_total": _median_total(node),
             })
 
         add("X", "X", f.get("X"))

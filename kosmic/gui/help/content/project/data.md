@@ -51,10 +51,14 @@ Three outcomes:
 
 - **One matrix of raw counts** — it is used, and the log says which.
 - **More than one** — you are asked which to analyse. The dialog says
-  how they differ (one usually has fewer stored values, meaning
-  something has been removed: ambient correction or extra filtering).
-  Which is which is the depositor's business — check their README. Your
-  choice, and the options rejected, go into the study's provenance.
+  how they differ (one usually has fewer stored values and fewer counts
+  per cell, meaning something has been removed: ambient correction such
+  as CellBender, or extra filtering). Which is which is the depositor's
+  business — check their README. If ambient RNA will be removed in
+  KOSMIC (Decontaminate), import the uncorrected counts so it is removed
+  once. Your choice, and the options not chosen, are recorded as the
+  study's first methods step (*Load*). The same question is asked when
+  an h5ad is imported from scRNA → Load Data.
 - **None** — the import stops. A file with no raw counts cannot support
   DE, and it is better to find that out now than after clustering.
 

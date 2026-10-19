@@ -1203,60 +1203,10 @@ class AppWindow(QMainWindow):
         self._start_study_import(copied, kind)
 
     def _choose_counts_matrix(self, raw_path):
-        """Return '(slot, described)' for an h5ad, asking when it is a real choice.
-
-        Returns 'slot=None' to let the worker pick (one obvious candidate),
-        a slot token when the user chose one, or 'False' if they cancelled.
-        Inspection loads no matrices, so this is instant even on a 13 GB file.
-        """
-        from PyQt6.QtWidgets import QInputDialog
-
-        from kosmic.scrna.load.matrices import (
-            RAW_COUNTS, describe_count_matrices_path,
-        )
-
-        try:
-            described = describe_count_matrices_path(raw_path)
-        except Exception as e:
-            self._output_panel.log(f"(could not inspect matrices: {e})")
-            return None, []
-
-        counts = [d for d in described if d['verdict'] == RAW_COUNTS]
-        if len(counts) < 2:
-            return None, described        # nothing to decide; worker picks
-
-        # Say what actually differs rather than guessing at intent: the
-        # matrix with fewer stored values has had something removed, which
-        # is usually ambient correction or extra filtering. Which is which
-        # is the depositor's business, so point at their documentation.
-        fullest = max(counts, key=lambda d: d['n_stored'])
-        lines = [f"  {d['label']:26s} {d['n_stored']:>15,} stored values, "
-                 f"max {d['max']:,.0f}" for d in counts]
-        deltas = [
-            f"{d['label']} holds {100 * (fullest['n_stored'] - d['n_stored']) / fullest['n_stored']:.1f}%"
-            f" fewer values than {fullest['label']}"
-            for d in counts
-            if d is not fullest and d['n_stored'] < fullest['n_stored']
-        ]
-        detail = ("\n\n" + "; ".join(deltas)
-                  + " — so it has had something removed, typically "
-                    "ambient-RNA correction or extra filtering. Which is "
-                    "which is the depositor's choice: check the dataset's "
-                    "README or the paper's methods.") if deltas else ""
-
-        items = [f"{d['label']}  —  max {d['max']:,.0f}" for d in counts]
-        default = next((i for i, d in enumerate(counts) if d['slot'] == 'X'), 0)
-        choice, ok = QInputDialog.getItem(
-            self, "Which counts matrix?",
-            f"{Path(raw_path).name} holds more than one matrix of raw "
-            f"integer counts.\n\n" + "\n".join(lines) + detail
-            + "\n\nPick the matrix to analyse from. The choice, and the "
-              "options rejected, are recorded in the study's provenance.",
-            items, default, False)
-        if not ok:
-            self._output_panel.log("Import cancelled at matrix selection.")
-            return False, described
-        return counts[items.index(choice)]['slot'], described
+        """Return '(slot, described)' for an h5ad, asking when it is a real
+        choice; see kosmic.gui.intake.counts_choice."""
+        from kosmic.gui.intake.counts_choice import choose_counts_matrix
+        return choose_counts_matrix(self, raw_path, self._output_panel.log)
 
     def _start_study_import(self, raw_path, kind: str) -> None:
         """Convert a just-imported raw file into the study's processed_data/.
@@ -1281,7 +1231,6 @@ class AppWindow(QMainWindow):
         processed = processed_data_dir(self.current_study_path)
         processed.mkdir(parents=True, exist_ok=True)
         study_name = self.current_study_path.name
-        study_dir = self.current_study_path
 
         # An h5ad can hold more than one valid counts matrix (a CellBender
         # -corrected X alongside the uncorrected CellRanger counts, say).
@@ -1294,25 +1243,12 @@ class AppWindow(QMainWindow):
             if slot is False:            # user cancelled the choice
                 return
 
+        # The import records itself as the study's 'load' stage, with the
+        # matrix chosen and the ones considered, beside the rest of the
+        # study's record so the methods report it.
         def _done(payload):
             _out, message = payload
             self._output_panel.log(message)
-            try:
-                from kosmic.provenance import record_stage
-                record_stage(
-                    study_dir, study_name, 'import',
-                    params={
-                        'source_file': Path(raw_path).name,
-                        'matrix_slot': slot or 'X',
-                        'candidates': [
-                            {'slot': d['slot'], 'verdict': d['verdict'],
-                             'max': round(d['max'], 3)} for d in described
-                        ],
-                    },
-                    source=str(raw_path),
-                )
-            except Exception as e:  # provenance must never block an import
-                self._output_panel.log(f"(provenance not recorded: {e})")
             self._refresh_project_workspace()
             scrna = self._scrna_workspace
             if scrna is not None:
@@ -1327,8 +1263,10 @@ class AppWindow(QMainWindow):
             dialogs.warning(self, "Import Failed", message)
 
         if kind == 'h5ad':
+            from kosmic.gui.intake.counts_choice import candidates_summary
             self._study_import_worker = worker_cls(
-                str(raw_path), str(processed), slot=slot)
+                str(raw_path), str(processed), slot=slot,
+                candidates=candidates_summary(described))
         else:
             self._study_import_worker = worker_cls(str(raw_path), str(processed))
         run_worker(
@@ -1645,6 +1583,14 @@ def main():
     def status_cb(msg: str) -> None:
         splash.set_status(msg)
         app.processEvents()
+
+    # Import anndata here, on the main thread, before any workspace is
+    # built. Reopening the last project starts background workers that
+    # import it too; if one does while a workspace imports it on this
+    # thread, the second import finds a half-initialised module and
+    # startup fails ("cannot import name ... partially initialized module").
+    status_cb("Loading libraries...")
+    import anndata  # noqa: F401
 
     window = AppWindow(splash_status_cb=status_cb)
 

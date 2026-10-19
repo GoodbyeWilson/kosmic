@@ -437,12 +437,38 @@ class DownloadTab(TabbedPage):
             self._skip_confirm = False
 
     def _start_h5ad_import(self, h5ad_files):
-        """Import an h5ad from raw_data/, selecting its raw-counts matrix."""
-        h5ad_file = max(h5ad_files, key=lambda f: f.stat().st_mtime)
+        """Import an h5ad from raw_data/, selecting its raw-counts matrix.
+
+        With more than one h5ad in raw_data/, asks which to import: the
+        folder can hold the deposit and an earlier import side by side.
+        With more than one matrix of raw counts in the file, asks which to
+        use with the same question as the Project page's import
+        (kosmic.gui.intake.counts_choice).
+        """
+        files = sorted(h5ad_files, key=lambda f: f.stat().st_mtime, reverse=True)
+        h5ad_file = files[0]
+        if len(files) > 1:
+            names = [f.name for f in files]
+            choice = dialogs.choose(
+                self, "Choose the file to import",
+                "raw_data/ holds more than one h5ad. Import which one?\n\n"
+                + "\n".join(f"{f.name}  ({f.stat().st_size / 1024 ** 3:.1f} GB)"
+                            for f in files),
+                names + ["Cancel"], escape="Cancel")
+            if choice in (None, "Cancel"):
+                return
+            h5ad_file = files[names.index(choice)]
+        from kosmic.gui.intake.counts_choice import (
+            candidates_summary, choose_counts_matrix,
+        )
+        slot, described = choose_counts_matrix(self, h5ad_file, self._log)
+        if slot is False:
+            return
         processed_dir = processed_data_dir(self.project_dir)
 
         self.convert_worker = H5adImportWorker(
-            str(h5ad_file), str(processed_dir))
+            str(h5ad_file), str(processed_dir), slot=slot,
+            candidates=candidates_summary(described))
         run_worker(
             self.convert_worker,
             on_finished=self._on_convert_done,
