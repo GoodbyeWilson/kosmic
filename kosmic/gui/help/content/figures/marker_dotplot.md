@@ -10,15 +10,17 @@ annotation reads as a diagonal.
 | Control | Effect |
 |---|---|
 | **Cell types** | The obs column holding the cell-type labels. |
-| **Markers** | The marker panel. *Cardiac (human, curated)* is 71 genes for 14 cardiac cell types. *General (built-in)* is a short list for common cell types across tissues. *From file...* reads a GMT file (set name, description, then genes, tab-separated) with one set per cell type. |
+| **Markers** | The marker panel. *Cardiac (human, curated)* is 69 genes for 17 cardiac cell types. *General (built-in)* is a short list for common cell types across tissues. *From file...* reads a GMT file (set name, description, then genes, tab-separated) with one set per cell type. |
 
 ## Reading the plot
 
 Dot area is proportional to the percentage of the type's cells with
 non-zero expression of the gene, so a dot half the area of another marks
 half the share of cells. Colour is the mean expression over all cells of
-the type. When the dataset's expression is log1p of counts per 10,000
-(the scRNA workflow's normalisation), the colour bar says so. The colour
+the type, on log-normalised expression: a dataset whose `X` holds raw
+counts, such as a combined atlas, is normalised to log1p of counts per
+10,000 for these genes, without changing the dataset. When the expression
+is log1p of counts per 10,000, the colour bar says so. The colour
 scale is capped at the 99.5th percentile of the values shown, so one very
 high gene does not wash out the rest; an arrow on the colour bar marks
 the cap.

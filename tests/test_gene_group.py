@@ -76,3 +76,15 @@ def test_all_genes_missing_returns_empty():
     assert s.present == []
     assert s.missing == ['NOPE1', 'NOPE2']
     assert s.per_gene.empty
+
+
+def test_raw_counts_are_summarised_log_normalised():
+    """A counts-only dataset (a combined atlas) is summarised as log1p of
+    counts per 10,000, so deeper cells do not look higher-expressing."""
+    X = np.array([[100, 900], [10, 90]], dtype=np.float32)   # same profile, 10x depth
+    a = AnnData(X=csr_matrix(X), obs=pd.DataFrame({'grp': ['x', 'y']}),
+                var=pd.DataFrame(index=['A', 'B']))
+    s = summarise_gene_group(a, ['A'], group_col='grp')
+    expected = np.log1p(1000)        # 10% of counts -> 1,000 per 10,000
+    assert s.mean_matrix.loc['A', 'x'] == pytest.approx(expected, rel=1e-5)
+    assert s.mean_matrix.loc['A', 'y'] == pytest.approx(expected, rel=1e-5)

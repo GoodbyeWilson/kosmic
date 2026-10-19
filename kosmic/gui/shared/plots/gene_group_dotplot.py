@@ -1,205 +1,243 @@
-# Gene-group dot plot (PyQtGraph ScatterPlotItem).
+# Marker dot plot widget, styled after the Figures workspace's marker dot
+# plot (kosmic.visualisation.scrna.markers.create_marker_dotplot).
 #
-# Rows are genes, columns are groups (clusters / cell types). Dot size
-# encodes the fraction of cells expressing the gene; dot colour encodes
-# mean expression. Mirrors InteractiveHeatmap's theming, colorbar and
-# hover conventions.
+# Columns are marker genes, consecutive for each cell type they mark
+# (the table beneath names which); rows are the data's cell types, placed by 'order_rows' under
+# the marker set they express most, so a correct annotation reads as a
+# diagonal. Dot area is proportional to the fraction of cells expressing
+# the gene; colour is mean expression on the figure's grey-to-red scale,
+# capped at the 99.5th percentile.
+#
+# Drawn with QPainter rather than pyqtgraph: the layout needs rotated
+# gene and panel labels and a legend at a fixed pixel size, none of which
+# a pyqtgraph view box provides. Text follows the application theme.
 from __future__ import annotations
 
 import numpy as np
-import pyqtgraph as pg
-from PyQt6.QtGui import QFont
-
-from kosmic.gui.shared.plots.interactive_plot import (
-    InteractivePlot, make_tooltip_label,
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import (
+    QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen,
 )
-from kosmic.gui.shared.theme import get_color, get_font_sizes, style_pg_plot
+from PyQt6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
-pg.setConfigOptions(antialias=True)
+from kosmic.gui.shared.theme import get_color, get_font_sizes
 
-_MIN_DOT = 4.0   # px radius at 0% expressing
-_MAX_DOT = 22.0  # px radius at 100% expressing
+_MAX_CELL = 44      # px: the largest row height / column width
+_DOT_FILL = 0.9     # diameter of a 100% dot as a fraction of the cell
+_MIN_DOT = 2.0      # px: a gene detected in no cells is still drawn
+_LEGEND_W = 150     # px
+_PAD = 12           # px: outer margin and gaps
+_SIZE_KEY = (20, 40, 60, 80, 100)
 
 
-class GeneGroupDotPlot(InteractivePlot):
-    """Genes x groups dot plot: size = percent expressing, colour = mean."""
+def _cmap():
+    """The figure's grey-red-dark red scale, its grey taken from the theme:
+    the figure's light grey is for a white page and glares on a dark one."""
+    from matplotlib.colors import LinearSegmentedColormap
 
-    TITLE = "Gene Group Expression"
-    UNAVAILABLE_MESSAGE = "Choose a gene group to see its expression across groups."
+    from kosmic.visualisation.style import UP_COLOR
+    return LinearSegmentedColormap.from_list(
+        'marker_check', [get_color('fg_tertiary'), UP_COLOR, '#7A1F1F'])
 
-    def __init__(self):
-        super().__init__()
-        self.setMouseEnabled(x=True, y=True)
-        self.tooltip_label = make_tooltip_label()
-        self.addItem(self.tooltip_label)
+
+class GeneGroupDotPlot(QWidget):
+    """Marker genes (columns) against cell types (rows)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.setMinimumSize(300, 200)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Expanding)
+        self._message = "No markers to show."
         self._genes: list[str] = []
-        self._groups: list[str] = []
-        self._mean = None   # genes x groups
-        self._pct = None    # genes x groups
-        self._scatter = None
-        self.scene().sigMouseMoved.connect(self._on_mouse_move)
+        self._rows: list[str] = []
+        self._owner: dict = {}
+        self._mean = None   # rows x genes
+        self._pct = None    # rows x genes
+        self._vmax = 1.0
+        self._clipped = False
+        self._lut = []
+        self._geom = None   # (x0, y0, cell) of the dot grid, set by paint
 
-    def set_data(self, mean_matrix, pct_matrix, cmap='viridis'):
-        """Render from genes x groups mean / percent DataFrames.
+    # -- data ------------------------------------------------------------
+
+    def set_data(self, mean_matrix, pct_matrix, owner):
+        """Draw genes x groups mean and fraction-expressing tables.
 
         Parameters
         ----------
         mean_matrix, pct_matrix : pandas.DataFrame
-            Same index (genes) and columns (groups). 'pct_matrix' is a
-            fraction in 0-1.
-        cmap : str
-            Matplotlib colormap name for mean expression.
+            genes x groups, as from ``summarise_gene_group``; the fraction
+            is in 0-1. Genes are drawn in ``mean_matrix``'s order.
+        owner : dict
+            ``{gene: marker set}``, used to order the rows.
         """
-        self.clear_plot_items()
-        self.tooltip_label = make_tooltip_label()
-        self.addItem(self.tooltip_label)
+        from kosmic.visualisation.scrna.markers import order_rows
 
         genes = list(mean_matrix.index)
-        groups = list(mean_matrix.columns)
-        if len(genes) == 0 or len(groups) == 0:
-            self.show_unavailable_message(
-                "No detected genes in this group to plot.")
+        if not genes or mean_matrix.shape[1] == 0:
+            self.show_unavailable_message("No detected markers to plot.")
             return
-        self.hide_unavailable_message()
-
         self._genes = genes
-        self._groups = groups
-        self._mean = mean_matrix.values.astype(float)
-        self._pct = pct_matrix.reindex(index=genes, columns=groups).values.astype(float)
+        self._owner = owner
+        cols = list(order_rows(mean_matrix, owner))
+        self._rows = [str(c) for c in cols]
+        self._mean = mean_matrix.loc[genes, cols].to_numpy(float).T
+        self._pct = pct_matrix.loc[genes, cols].to_numpy(float).T
+        self._vmax = float(np.nanpercentile(self._mean, 99.5)) or 1.0
+        self._clipped = float(np.nanmax(self._mean)) > self._vmax
+        self._lut = [QColor(*(int(c * 255) for c in _cmap()(t)[:3]))
+                     for t in np.linspace(0, 1, 256)]
+        self.update()
 
-        n_genes = len(genes)
-        n_groups = len(groups)
+    def show_unavailable_message(self, message=None):
+        if message is not None:
+            self._message = message
+        self._mean = None
+        self._genes, self._rows = [], []
+        self.update()
 
-        vmin = float(np.nanmin(self._mean))
-        vmax = float(np.nanmax(self._mean))
-        if vmin == vmax:
-            vmax = vmin + 1.0
+    def _colour(self, value):
+        t = 0.0 if not np.isfinite(value) else min(max(value / self._vmax, 0.0), 1.0)
+        return self._lut[int(round(t * 255))]
 
-        import matplotlib.pyplot as plt
-        mpl_cmap = plt.get_cmap(cmap)
+    # -- painting ----------------------------------------------------------
 
-        def colour_for(val):
-            t = 0.0 if vmax == vmin else (val - vmin) / (vmax - vmin)
-            t = float(np.clip(t, 0, 1))
-            r, g, b, _ = mpl_cmap(t)
-            return pg.mkBrush(int(r * 255), int(g * 255), int(b * 255))
-
-        spots = []
-        for gi, _gene in enumerate(genes):
-            y = n_genes - 1 - gi  # first gene at top
-            for gj in range(n_groups):
-                m = self._mean[gi, gj]
-                p = self._pct[gi, gj]
-                if not np.isfinite(m):
-                    continue
-                size = _MIN_DOT + (0.0 if not np.isfinite(p) else p) * (_MAX_DOT - _MIN_DOT)
-                spots.append({
-                    'pos': (gj + 0.5, y + 0.5),
-                    'size': size,
-                    'brush': colour_for(m),
-                    'pen': pg.mkPen(get_color('fg_secondary'), width=0.5),
-                })
-
-        self._scatter = pg.ScatterPlotItem(spots=spots, pxMode=True)
-        self.addItem(self._scatter)
-
-        self._draw_colorbar(vmin, vmax, mpl_cmap, n_groups, n_genes)
-        self._draw_size_legend(n_groups, n_genes)
-        self._set_axes(genes, groups, n_groups, n_genes)
-
-    def _draw_colorbar(self, vmin, vmax, mpl_cmap, n_groups, n_genes):
-        lut = (mpl_cmap(np.linspace(0, 1, 256)) * 255).astype(np.uint8)
-        cbar = pg.ImageItem()
-        cbar.setImage(np.linspace(vmin, vmax, 256).reshape(1, 256), levels=(vmin, vmax))
-        cbar.setLookupTable(lut)
-        cbar_x = n_groups + 0.6
-        cbar_w = max(0.4, n_groups * 0.04)
-        cbar.setRect(cbar_x, 0, cbar_w, n_genes)
-        self.addItem(cbar)
-
+    def _fonts(self):
         fs = get_font_sizes()
-        font = QFont('Arial', int(fs['colorbar_tick']))
-        lx = cbar_x + cbar_w + 0.1
-        for val, y in ((vmin, 0), (vmax, n_genes)):
-            lbl = pg.TextItem(text=f'{val:.1f}', color=get_color('fg_secondary'),
-                              anchor=(0, 0.5))
-            lbl.setFont(font)
-            lbl.setPos(lx, y)
-            self.addItem(lbl)
-        title = pg.TextItem(text='Mean expr', color=get_color('fg_secondary'),
-                            anchor=(0.5, 0.5), angle=-90)
-        title.setFont(QFont('Arial', int(fs['axis_label'])))
-        title.setPos(lx + 2.4, n_genes / 2)
-        self.addItem(title)
-        self._cbar_w = cbar_w
+        tick = QFont()
+        tick.setPointSizeF(fs['tick'])
+        note = QFont()
+        note.setPointSizeF(fs['annotation'])
+        return tick, note
 
-    def _draw_size_legend(self, n_groups, n_genes):
-        fs = get_font_sizes()
-        font = QFont('Arial', int(fs['annotation']))
-        x = n_groups + 0.9
-        spots, labels = [], []
-        for frac in (0.25, 0.5, 1.0):
-            y = -1.0 - (1.0 - frac) * 1.2
-            spots.append({
-                'pos': (x, y),
-                'size': _MIN_DOT + frac * (_MAX_DOT - _MIN_DOT),
-                'brush': pg.mkBrush(get_color('fg_secondary')),
-                'pen': pg.mkPen(None),
-            })
-            labels.append((x + 0.7, y, f'{int(frac * 100)}%'))
-        self.addItem(pg.ScatterPlotItem(spots=spots, pxMode=True))
-        for lx, ly, text in labels:
-            lbl = pg.TextItem(text=text, color=get_color('fg_secondary'),
-                              anchor=(0, 0.5))
-            lbl.setFont(font)
-            lbl.setPos(lx, ly)
-            self.addItem(lbl)
-        cap = pg.TextItem(text='% expressing', color=get_color('fg_secondary'),
-                          anchor=(0, 0.5))
-        cap.setFont(font)
-        cap.setPos(x - 0.5, -0.2)
-        self.addItem(cap)
-
-    def _set_axes(self, genes, groups, n_groups, n_genes):
-        y_axis = self.getAxis('left')
-        y_axis.setTicks([[(n_genes - 1 - i + 0.5, g) for i, g in enumerate(genes)]])
-        y_axis.setPen(pg.mkPen(None))
-        y_axis.setStyle(tickLength=-1, tickTextOffset=4)
-        y_axis.label.hide()
-
-        x_axis = self.getAxis('bottom')
-        x_axis.setTicks([[(j + 0.5, str(g)) for j, g in enumerate(groups)]])
-        x_axis.setPen(pg.mkPen(None))
-        x_axis.setStyle(tickLength=-1, tickTextOffset=4)
-        x_axis.label.hide()
-
-        self.showAxis('top', False)
-        self.showAxis('right', False)
-        vb = self.plotItem.getViewBox()
-        vb.setDefaultPadding(0.02)
-        self.setYRange(-2.6, n_genes + 0.3, padding=0)
-        self.setXRange(0, n_groups + getattr(self, '_cbar_w', 1) + 4, padding=0)
-
-    def _on_mouse_move(self, pos):
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        fg = QColor(get_color('fg_primary'))
         if self._mean is None:
+            p.setPen(QColor(get_color('fg_tertiary')))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._message)
+            self._geom = None
             return
-        pt = self.plotItem.vb.mapSceneToView(pos)
-        col = int(pt.x())
-        row_from_top = len(self._genes) - 1 - int(pt.y())
-        if 0 <= row_from_top < len(self._genes) and 0 <= col < len(self._groups):
-            gene = self._genes[row_from_top]
-            grp = self._groups[col]
-            m = self._mean[row_from_top, col]
-            p = self._pct[row_from_top, col]
-            self.tooltip_label.setText(
-                f'{gene} @ {grp}\nmean: {m:.2f}\n% expr: {p * 100:.0f}%')
-            self.tooltip_label.setPos(pt.x(), pt.y())
-            self.tooltip_label.show()
+
+        tick, note = self._fonts()
+        fm_t, fm_n = QFontMetrics(tick), QFontMetrics(note)
+        n_r, n_g = len(self._rows), len(self._genes)
+
+        left = max(fm_t.horizontalAdvance(r) for r in self._rows) + _PAD + 8
+        bottom = max(fm_t.horizontalAdvance(g) for g in self._genes) + _PAD + 8
+        top = _PAD + fm_n.height()
+        avail_h = self.height() - top - bottom
+        # The legend's size key is a row of dots drawn at the plot's dot
+        # sizes, so the legend widens with the cells; one pass settles it.
+        legend_w = _LEGEND_W
+        for _ in range(2):
+            avail_w = self.width() - left - legend_w - 2 * _PAD
+            cell = max(4.0, min(_MAX_CELL, avail_w / n_g, avail_h / n_r))
+            legend_w = max(_LEGEND_W, len(_SIZE_KEY) * (cell * _DOT_FILL + 6) + _PAD)
+        grid_w, grid_h = cell * n_g, cell * n_r
+        # Centre the plot and legend together.
+        x0 = left + max(0.0, (avail_w - grid_w) / 2)
+        y0 = top + max(0.0, (avail_h - grid_h) / 2)
+        self._geom = (x0, y0, cell)
+
+        # Axes lines on the left and bottom, as in the figure.
+        p.setPen(QPen(QColor(get_color('fg_secondary')), 1))
+        p.drawLine(QPointF(x0, y0), QPointF(x0, y0 + grid_h))
+        p.drawLine(QPointF(x0, y0 + grid_h), QPointF(x0 + grid_w, y0 + grid_h))
+
+        # Row labels.
+        p.setFont(tick)
+        p.setPen(fg)
+        for i, name in enumerate(self._rows):
+            r = QRectF(0, y0 + i * cell, x0 - 8, cell)
+            p.drawText(r, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, name)
+
+        # Gene labels, rotated, below the grid.
+        for j, gene in enumerate(self._genes):
+            p.save()
+            p.translate(x0 + (j + 0.5) * cell, y0 + grid_h + 6)
+            p.rotate(-90)
+            p.drawText(QRectF(-fm_t.horizontalAdvance(gene), -cell / 2,
+                              fm_t.horizontalAdvance(gene), cell),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       gene)
+            p.restore()
+
+        # Dots.
+        p.setPen(Qt.PenStyle.NoPen)
+        max_d = cell * _DOT_FILL
+        for i in range(n_r):
+            for j in range(n_g):
+                frac = self._pct[i, j]
+                d = max(_MIN_DOT, max_d * np.sqrt(frac if np.isfinite(frac) else 0.0))
+                p.setBrush(QBrush(self._colour(self._mean[i, j])))
+                p.drawEllipse(QPointF(x0 + (j + 0.5) * cell, y0 + (i + 0.5) * cell),
+                              d / 2, d / 2)
+
+        self._paint_legend(p, x0 + grid_w + 2 * _PAD, y0, legend_w - _PAD,
+                           max_d, tick, note, fg)
+
+    def _paint_legend(self, p, lx, ly, w, max_d, tick, note, fg):
+        fm_t, fm_n = QFontMetrics(tick), QFontMetrics(note)
+
+        # Size key: a row of dots, labelled below.
+        p.setFont(note)
+        p.setPen(fg)
+        p.drawText(QRectF(lx, ly, w, fm_n.height()), Qt.AlignmentFlag.AlignHCenter,
+                   'Cells expressing (%)')
+        y = ly + fm_n.height() + 6 + max_d / 2
+        step = w / len(_SIZE_KEY)
+        p.setFont(tick)
+        for k, pct in enumerate(_SIZE_KEY):
+            cx = lx + (k + 0.5) * step
+            d = max(_MIN_DOT, max_d * np.sqrt(pct / 100))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(QColor('#7A7A7A')))
+            p.drawEllipse(QPointF(cx, y), d / 2, d / 2)
+            p.setPen(fg)
+            p.drawText(QRectF(cx - step / 2, y + max_d / 2 + 2, step, fm_t.height()),
+                       Qt.AlignmentFlag.AlignHCenter, str(pct))
+
+        # Colour bar: horizontal, titled above, labelled below.
+        y += max_d / 2 + fm_t.height() + 18
+        p.setFont(note)
+        p.drawText(QRectF(lx, y, w, fm_n.height()), Qt.AlignmentFlag.AlignHCenter,
+                   'Mean expression')
+        y += fm_n.height() + 4
+        bar = QRectF(lx + 4, y, w - 8, 10)
+        grad = QLinearGradient(bar.left(), 0, bar.right(), 0)
+        for t in np.linspace(0, 1, 9):
+            grad.setColorAt(float(t), self._lut[int(round(t * 255))])
+        p.fillRect(bar, QBrush(grad))
+        p.setPen(QPen(fg, 0.8))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(bar)
+        p.setFont(tick)
+        top_label = f'{self._vmax:.1f}' + ('+' if self._clipped else '')
+        p.drawText(QRectF(bar.left() - 20, bar.bottom() + 2, 40, fm_t.height()),
+                   Qt.AlignmentFlag.AlignHCenter, '0')
+        p.drawText(QRectF(bar.right() - 30, bar.bottom() + 2, 60, fm_t.height()),
+                   Qt.AlignmentFlag.AlignHCenter, top_label)
+
+    # -- hover -------------------------------------------------------------
+
+    def mouseMoveEvent(self, event):
+        if self._geom is None:
+            return
+        x0, y0, cell = self._geom
+        pos = event.position()
+        j = int((pos.x() - x0) // cell)
+        i = int((pos.y() - y0) // cell)
+        if 0 <= i < len(self._rows) and 0 <= j < len(self._genes) \
+                and pos.x() >= x0 and pos.y() >= y0:
+            QToolTip.showText(
+                event.globalPosition().toPoint(),
+                f"{self._genes[j]} in {self._rows[i]}\n"
+                f"mean: {self._mean[i, j]:.2f}\n"
+                f"expressing: {self._pct[i, j] * 100:.0f}%",
+                self)
         else:
-            self.tooltip_label.hide()
-
-    def reset_view(self):
-        self.autoRange()
-
-    def refresh_theme(self):
-        style_pg_plot(self)
+            QToolTip.hideText()

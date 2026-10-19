@@ -23,9 +23,15 @@ controls stops a panel of highly expressed genes from scoring high in
 every cell. Panels with fewer than two of their genes in the dataset are
 left out; the genes used are written under each UMAP.
 
-For display, each panel's score is shifted so the median cell is at zero
-(scores below it are drawn as zero) and divided by its 99.9th
-percentile, so every panel runs from low to high on the same colour
+The score is computed on log-normalised expression. A dataset whose `X`
+holds raw counts, such as a combined atlas, is normalised to log1p of
+counts per 10,000 for scoring; the dataset itself is not changed. On raw
+counts, cells with more counts would score higher whatever their type.
+
+For display, most cells are taken not to be of the panel's type, so the
+lower half of the scores is treated as background. Scores up to two
+standard deviations of that background above the median cell are drawn
+as zero, and the rest are divided by their 99.9th percentile, so every panel runs from low to high on the same colour
 scale. Anchoring the scale on the top of the signal lets a type that is
 only 0.5% of the cells reach the top colour.
 

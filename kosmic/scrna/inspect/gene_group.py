@@ -59,7 +59,11 @@ def summarise_gene_group(adata, genes, group_col=None, layer=None,
     Parameters
     ----------
     adata : AnnData
-        Cells x genes. Uses 'adata.X' unless 'layer' is given.
+        Cells x genes. Reads log-normalised expression: 'adata.X' when it
+        already is, otherwise log1p(counts per 10,000) of these genes,
+        built from the count source (see 'log_normalised_genes'), so a
+        counts-only dataset such as a combined atlas is not summarised
+        as raw counts. 'layer', when given, is read as it is.
     genes : sequence of str
         The gene group. Order is preserved; duplicates and genes absent
         from the dataset are dropped from 'present' (the latter recorded
@@ -78,21 +82,18 @@ def summarise_gene_group(adata, genes, group_col=None, layer=None,
     -------
     GeneGroupSummary
     """
-    var_set = set(map(str, adata.var_names))
-    seen = set()
-    present, missing = [], []
-    for g in genes:
-        g = str(g)
-        if g in seen:
-            continue
-        seen.add(g)
-        (present if g in var_set else missing).append(g)
+    wanted = list(dict.fromkeys(map(str, genes)))
+    if layer is not None:
+        var_set = set(map(str, adata.var_names))
+        present = [g for g in wanted if g in var_set]
+        X = adata[:, present].layers[layer] if present else None
+    else:
+        from kosmic.scrna.counts import log_normalised_genes
+        X, present = log_normalised_genes(adata, wanted)
+    missing = [g for g in wanted if g not in set(present)]
 
     if not present:
         return GeneGroupSummary(present=[], missing=missing, group_col=group_col)
-
-    sub = adata[:, present]
-    X = sub.layers[layer] if layer is not None else sub.X
 
     mean_all = _col_mean(X)
     pct_all = _col_pct(X, expr_threshold)
@@ -239,6 +240,17 @@ def compare_annotations(adata, left: str = 'cell_type',
     }
 
 
+#: Abbreviations in cell-type names, expanded to the words they stand
+#: for before names are compared.
+_ABBREVIATIONS = {
+    'smc': {'smooth', 'muscle'},
+    'vsmc': {'smooth', 'muscle'},
+    'nk': {'natural', 'killer'},
+    'ec': {'endothelial'},
+    'dc': {'dendritic'},
+}
+
+
 def match_marker_types(data_types, marker_types):
     """Map each observed cell type to the marker set that describes it.
 
@@ -255,6 +267,11 @@ def match_marker_types(data_types, marker_types):
     the reverse); the most specific match wins, so "Cardiomyocyte" beats
     a hypothetical "Myocyte".
 
+    Plurals are reduced to the singular ("Fibroblasts" is "Fibroblast",
+    as PanglaoDB writes it) and a few common abbreviations are expanded
+    ("SMC" is "smooth muscle", "NK" is "natural killer"), so "SMC" and
+    "Smooth Muscle Cell" match.
+
     Returns
     -------
     dict
@@ -264,8 +281,15 @@ def match_marker_types(data_types, marker_types):
     """
     import re
 
+    def singular(w):
+        return w[:-1] if len(w) > 3 and w.endswith('s') and not w.endswith('ss') else w
+
     def words(s):
-        return {w for w in re.split(r'[^a-z0-9]+', str(s).lower()) if w}
+        out = set()
+        for w in re.split(r'[^a-z0-9]+', str(s).lower()):
+            if w:
+                out |= _ABBREVIATIONS.get(w, {singular(w)})
+        return out
 
     marker_words = {m: words(m) for m in marker_types}
     out = {}
