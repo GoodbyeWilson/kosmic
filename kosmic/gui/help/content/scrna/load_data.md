@@ -44,6 +44,15 @@ have the wrong matrix or the wrong file.
   runs in the background and the result becomes the working dataset.
   Imports made from the Project page do this automatically; this
   button is for files that were dropped into `raw_data/` by hand.
+- **An h5ad in `raw_data/`.** Its matrix of raw counts is imported: `X`
+  when it holds counts, otherwise `.raw` or a layer. When `raw_data/`
+  holds more than one h5ad, you choose which to import. When the file
+  holds more than one matrix of raw counts — a Broad Single Cell Portal
+  file keeps CellBender-corrected counts in `X` and Cell Ranger counts in
+  `layers['cellranger_raw']` — you choose which, with the median counts
+  per cell of each; the corrected one has fewer. Import the uncorrected
+  counts if ambient RNA is to be removed in Decontaminate, so it is
+  removed once. The file and the matrix used are recorded in the methods.
 - **No data registered.** Nothing in `raw_data/` or `processed_data/`.
   Go to Project → Data.
 

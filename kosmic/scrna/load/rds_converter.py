@@ -190,6 +190,7 @@ if (any(counts@x != floor(counts@x))) {
 }
 
 message("PROGRESS:50:Writing expression matrix...")
+writeLines(assay, paste0(output_prefix, "_assay.txt"))
 writeMM(counts, paste0(output_prefix, "_expression.mtx"))
 message("PROGRESS:70:Expression matrix saved")
 
