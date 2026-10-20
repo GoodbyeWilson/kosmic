@@ -150,3 +150,36 @@ def log_normalised(adata, target_sum: float = 1e4):
     else:
         X = np.log1p(X)
     return X, names
+
+
+def log_normalised_genes(adata, genes, target_sum: float = 1e4):
+    """Log-normalised expression of a few genes, without normalising the rest.
+
+    Returns ``(matrix, genes_found)`` for the genes of *genes* present in
+    the expression source, in that order. Like :func:`log_normalised`,
+    ``X`` is used as it is when already log-normalised; otherwise each
+    cell's total is taken over all genes of the count source and only
+    the requested columns are scaled, so a marker summary on a large
+    counts-only atlas does not build a normalised copy of all of it.
+    """
+    import numpy as np
+    import scipy.sparse as sp
+
+    if 'log1p' in getattr(adata, 'uns', {}) or looks_log_normalised(adata.X):
+        X, names = adata.X, list(map(str, adata.var_names))
+        normalise = False
+    else:
+        X, names, _ = count_source(adata)
+        normalise = True
+    pos = {n: i for i, n in enumerate(names)}
+    found = [g for g in genes if g in pos]
+    sub = X[:, [pos[g] for g in found]]
+    if not normalise:
+        return sub, found
+    totals = np.asarray(X.sum(axis=1), dtype=float).ravel()
+    scale = np.where(totals > 0, target_sum / np.where(totals > 0, totals, 1), 0.0)
+    if sp.issparse(sub):
+        sub = sp.csr_matrix(sp.diags(scale) @ sub.astype(np.float32))
+        sub.data = np.log1p(sub.data)
+        return sub, found
+    return np.log1p(np.asarray(sub, dtype=np.float32) * scale[:, None]), found

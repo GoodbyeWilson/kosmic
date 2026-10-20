@@ -115,3 +115,54 @@ def test_a_shared_base_type_may_serve_two_labels():
     out = match_marker_types(
         ["Endothelial Cell", "Lymphatic Endothelial Cell"], DB)
     assert set(out.values()) == {"Endothelial"}
+
+
+def test_plurals_match_the_singular():
+    """PanglaoDB writes 'Fibroblasts'; an annotation says 'Fibroblast'."""
+    assert match_marker_types(["Fibroblast"], ["Fibroblasts"]) == {
+        "Fibroblast": "Fibroblasts"}
+
+
+def test_abbreviations_are_expanded():
+    out = match_marker_types(["Smooth Muscle Cell", "NK Cell"],
+                             ["SMC", "Natural killer cell"])
+    assert out == {"Smooth Muscle Cell": "SMC",
+                   "NK Cell": "Natural killer cell"}
+
+
+def test_the_cardiac_panel_covers_a_heart_atlas():
+    """Every broad label the CellTypist heart model gives has markers."""
+    from kosmic.reference.marker_panels import builtin_panels
+    labels = ["Adipocyte", "Endocardial Cell", "Endothelial Cell",
+              "Fibroblast", "Lymphatic Endothelial Cell", "Macrophage",
+              "Mast Cell", "Mesothelial Cell", "Neural Crest", "Pericyte",
+              "Smooth Muscle Cell", "T Cell", "Ventricular Cardiomyocyte"]
+    out = match_marker_types(labels, builtin_panels()["Cardiac (human, curated)"])
+    assert set(out) == set(labels)
+    assert out["Lymphatic Endothelial Cell"] == "Lymphatic endothelial"
+
+
+# --- the Marker Check dot plot ------------------------------------------------
+
+@pytest.fixture(scope="module")
+def qapp():
+    import os
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    yield QApplication.instance() or QApplication([])
+
+
+def test_dot_plot_orders_rows_as_a_diagonal_and_paints(qapp):
+    """Rows follow the panel order by expression, as in the exported
+    figure, and the widget paints without error."""
+    import pandas as pd
+
+    from kosmic.gui.shared.plots import GeneGroupDotPlot
+    mean = pd.DataFrame({'Fibroblast': [0.1, 2.0], 'Ventricular CM': [3.0, 0.2]},
+                        index=['TNNT2', 'DCN'])
+    pct = mean.gt(1).astype(float)
+    w = GeneGroupDotPlot()
+    w.resize(600, 400)
+    w.set_data(mean, pct, {'TNNT2': 'Cardiomyocyte', 'DCN': 'Fibroblast'})
+    assert w._rows == ['Ventricular CM', 'Fibroblast']
+    assert not w.grab().isNull()

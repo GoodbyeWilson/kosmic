@@ -132,15 +132,22 @@ def create_marker_dotplot(mean, pct, owner, *, title='Marker genes',
 def scale_scores(scores):
     """Put a module score on a 0-1 display scale.
 
-    The median cell is set to 0, scores below it are clipped to 0, and the
-    result is divided by its 99.9th percentile and capped at 1. Anchoring on
-    the top of the signal rather than on the spread of the background lets
-    a type making up 0.5% of cells reach the top of the scale. It cannot
-    tell a rare type from an absent one: with no cells of a type, ambient
-    counts of its genes are what reach the top, and show as scattered
-    speckle.
+    Most cells are not of the type a panel marks, so the lower half of the
+    scores is taken as background: its spread, estimated from the median
+    and lower quartile, sets a floor two standard deviations above the
+    median, and scores below the floor are drawn as 0. Anchoring at the
+    median alone left the half of all cells above it faintly coloured.
+    The result is divided by its 99.9th percentile and capped at 1.
+    Anchoring on the top of the signal rather than on the spread of the
+    background lets a type making up 0.5% of cells reach the top of the
+    scale. It cannot tell a rare type from an absent one: with no cells of
+    a type, ambient counts of its genes are what reach the top, and show
+    as scattered speckle.
     """
-    v = np.clip(np.asarray(scores, float) - np.nanmedian(scores), 0, None)
+    s = np.asarray(scores, float)
+    med = np.nanmedian(s)
+    background_sd = (med - np.nanpercentile(s, 25)) / 0.6745
+    v = np.clip(s - (med + 2 * background_sd), 0, None)
     hi = np.nanpercentile(v, 99.9)
     return np.clip(v / hi, 0, 1) if hi > 0 else np.zeros_like(v)
 
@@ -151,15 +158,21 @@ def panel_scores(adata, panels, seed=0):
     Uses ``sc.tl.score_genes`` (mean expression of the panel's genes minus
     that of control genes drawn from the same expression bins), so a panel
     of highly expressed genes does not score high everywhere. Panels with
-    fewer than two genes in the data are skipped. Expects log-normalised
-    expression in ``adata.X``.
+    fewer than two genes in the data are skipped. Scores log-normalised
+    expression: ``adata.X`` when it already is, otherwise log1p(counts per
+    10,000) built from the count source, so a counts-only atlas is not
+    scored on raw counts (where deeper cells score higher whatever their
+    type).
 
     Returns ``{panel: (scaled scores, genes used)}``, see ``scale_scores``.
     """
     import anndata as ad
     import scanpy as sc
 
-    work = ad.AnnData(X=adata.X, var=pd.DataFrame(index=adata.var_names.astype(str)))
+    from kosmic.scrna.counts import log_normalised
+
+    X, names = log_normalised(adata)
+    work = ad.AnnData(X=X, var=pd.DataFrame(index=pd.Index(names)))
     out = {}
     for name, genes in panels.items():
         present = [g for g in dict.fromkeys(genes) if g in work.var_names]
@@ -210,9 +223,12 @@ def create_marker_score_grid(coords, scores, *, ncols=4,
             s.set_visible(False)
     for ax in axs.ravel()[n:]:
         ax.axis('off')
+    top = 1.0
     if title:
         fig.suptitle(title, fontsize=font_sizes['title'], fontweight='bold')
-    fig.tight_layout(rect=(0, 0, 0.93, 1))
+        # tight_layout ignores the suptitle; keep the panels below it.
+        top = 1 - font_sizes['title'] * 2.2 / 72 / fig.get_figheight()
+    fig.tight_layout(rect=(0, 0, 0.93, top))
     if pts is not None:
         cax = fig.add_axes([0.945, 0.4, 0.012, 0.2])
         cb = fig.colorbar(pts, cax=cax, ticks=[0, 1])

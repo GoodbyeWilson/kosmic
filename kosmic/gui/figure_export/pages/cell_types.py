@@ -43,9 +43,15 @@ def _labelled(values) -> np.ndarray:
 
 
 def _expression_label(adata) -> str:
-    """Colour bar label naming the unit of 'adata.X' when it is recognisably
-    log1p of counts per 10,000 (each cell's expm1 sums to 10,000)."""
+    """Colour bar label naming the unit of the expression summarised: log1p
+    of counts per 10,000 when 'adata.X' recognisably is (each cell's expm1
+    sums to 10,000), or when 'X' holds counts, which the summary normalises
+    that way."""
     import scipy.sparse as sp
+
+    from kosmic.scrna.counts import looks_log_normalised
+    if not looks_log_normalised(adata.X):
+        return 'Mean expression\nlog1p(CP10K)'
     x = adata.X[:50]
     x = x.toarray() if sp.issparse(x) else np.asarray(x)
     sums = np.expm1(x.astype(float)).sum(axis=1)

@@ -51,7 +51,7 @@ def _adata(seed=0):
 def test_bundled_cardiac_panel_loads():
     from kosmic.reference.marker_panels import builtin_panels
     panel = builtin_panels()['Cardiac (human, curated)']
-    assert len(panel) == 14 and panel['Cardiomyocyte'][0] == 'TNNT2'
+    assert len(panel) == 17 and panel['Cardiomyocyte'][0] == 'TNNT2'
 
 
 def test_rows_follow_the_panel_by_expression_not_name():
@@ -184,3 +184,29 @@ def test_quitting_waits_for_a_running_preview(qapp):
     _base.wait_for_renders()
     assert not _base._LIVE_RENDERS
     del page   # destroying the page now leaves no thread running
+
+
+def test_scores_on_raw_counts_match_scores_on_log_normalised():
+    """panel_scores normalises a counts-only dataset itself."""
+    rng = np.random.default_rng(1)
+    # Enough genes over a range of levels for score_genes' control bins.
+    rates = np.geomspace(0.05, 20, 1000)
+    counts = rng.poisson(rates, (300, 1000)).astype(np.float32)
+    counts[:100, :3] += 40
+    counts[::2] *= 25               # half the cells sequenced far deeper
+    genes = [f'g{i}' for i in range(1000)]
+    raw = ad.AnnData(X=sp.csr_matrix(counts), var=pd.DataFrame(index=genes))
+    norm = ad.AnnData(
+        X=sp.csr_matrix(np.log1p(counts / counts.sum(1, keepdims=True) * 1e4).astype(np.float32)),
+        var=pd.DataFrame(index=genes))
+    panel = {'T': ['g0', 'g1', 'g2']}
+    np.testing.assert_allclose(panel_scores(raw, panel)['T'][0],
+                               panel_scores(norm, panel)['T'][0], atol=1e-4)
+
+
+def test_background_cells_score_zero():
+    """Cells within the background spread are drawn at zero, not faintly."""
+    rng = np.random.default_rng(0)
+    v = scale_scores(np.r_[rng.normal(0, 1, 9900), rng.normal(10, 1, 100)])
+    assert np.mean(v[:9900] > 0) < 0.05
+    assert np.median(v[9900:]) > 0.5

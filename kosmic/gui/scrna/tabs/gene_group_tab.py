@@ -15,6 +15,16 @@
 # Those families are still reachable: a bundled .gmt loads through
 # "From file...", because a GMT is already {name: [genes]}, the same
 # shape a marker panel has.
+#
+# The plot follows the layout of the Figures workspace's marker dot plot
+# (genes across, cell types down, ordered so the result is a diagonal),
+# drawn interactively for the ticked types.
+#
+# The sources offered first are the bundled tissue panels
+# (kosmic/reference/marker_panels) and the short general list. On the
+# first dataset the tab selects whichever of these covers the most of
+# its cell types, so a heart atlas opens on the cardiac panel without
+# the tab assuming a tissue.
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -29,6 +39,7 @@ from kosmic.gui.shared.widgets import (
     BaseWorker, CaptionLabel, Column, ResultsTable, SecondaryButton,
     SecondaryLabel, SectionHeader, SidebarPage,
 )
+from kosmic.reference.marker_panels import builtin_panels
 from kosmic.scrna.annotate.score import DEFAULT_MARKERS
 from kosmic.scrna.inspect.gene_group import (
     compare_annotations, marker_panel, match_marker_types,
@@ -37,7 +48,7 @@ from kosmic.scrna.inspect.gene_group import (
 _MIN_GROUPS = 2
 _MAX_GROUPS = 60
 
-_SOURCE_BUILTIN = "Built-in curated"
+_SOURCE_GENERAL = "General (built-in)"
 _SOURCE_PANGLAO = "PanglaoDB"
 _SOURCE_CELLMARKER = "CellMarker2"
 _SOURCE_FILE = "From file..."
@@ -76,7 +87,11 @@ class GeneGroupTab(SidebarPage):
         self._gen = 0
         self._loading = False
         self._last_adata_version = -1
+        self._panels = {**builtin_panels(), _SOURCE_GENERAL: dict(DEFAULT_MARKERS)}
         self._markers = dict(DEFAULT_MARKERS)
+        # Until the user picks a source, the best-matching panel is
+        # chosen for each new dataset.
+        self._source_chosen = False
         self._owner = {}
         self._matched = {}
         self._concordance = {}
@@ -92,12 +107,15 @@ class GeneGroupTab(SidebarPage):
         side.addWidget(SectionHeader("MARKERS"))
         self._source_combo = QComboBox()
         self._source_combo.addItems(
-            [_SOURCE_BUILTIN, _SOURCE_PANGLAO, _SOURCE_CELLMARKER,
+            [*self._panels, _SOURCE_PANGLAO, _SOURCE_CELLMARKER,
              _SOURCE_FILE])
+        self._source_combo.setCurrentText(_SOURCE_GENERAL)
         self._source_combo.setToolTip(
-            "Where the marker genes come from. 'From file...' reads any "
+            "Where the marker genes come from. The bundled panels list a "
+            "few curated markers per cell type; 'From file...' reads any "
             "GMT, so your own panel works here too.")
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
+        self._source_combo.activated.connect(self._on_source_picked)
         side.addWidget(self._source_combo)
 
         self._tissue_combo = QComboBox()
@@ -122,6 +140,8 @@ class GeneGroupTab(SidebarPage):
             "them -- the whole annotation at once is unreadable."))
 
         self._type_list = QListWidget()
+        self._type_list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self._type_list.setWordWrap(True)
         self._type_list.itemChanged.connect(self._on_type_toggled)
         side.addWidget(self._type_list, 1)
 
@@ -165,10 +185,10 @@ class GeneGroupTab(SidebarPage):
         layout.addWidget(self._coverage_label)
 
         self._dotplot = GeneGroupDotPlot()
-        layout.addWidget(self._dotplot, 3)
+        layout.addWidget(self._dotplot, 4)
 
         layout.addWidget(CaptionLabel(
-            "One row per marker, in the same order as the plot above. "
+            "One row per marker, in the plot's left-to-right order. "
             "'Peak group' should match 'Marks' -- where it does not, that "
             "type is not expressing what it should."))
 
@@ -188,7 +208,7 @@ class GeneGroupTab(SidebarPage):
         # with the plot's, and sorting silently breaks that.
         self._table.setSortingEnabled(False)
         self._table.verticalHeader().setVisible(False)
-        layout.addWidget(self._table, 2)
+        layout.addWidget(self._table, 1)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -203,6 +223,8 @@ class GeneGroupTab(SidebarPage):
         if version != self._last_adata_version:
             self._last_adata_version = version
             self._populate_group_columns(adata)
+            if not self._source_chosen:
+                self._select_best_panel(adata)
             self._populate_types(adata)
             self._recompute()
         self._refresh_concordance(adata)
@@ -243,10 +265,10 @@ class GeneGroupTab(SidebarPage):
         picked = 0
         for name in values:
             marker_set = self._matched.get(name)
-            label = (f"{name}  ({marker_set})" if marker_set
-                     else f"{name}  -- no markers")
-            item = QListWidgetItem(label)
+            item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setToolTip(f"Markers: {marker_set}" if marker_set
+                            else "No markers for this type in this source.")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             # Only types with markers are worth ticking, and only a few
             # of those: this plot is readable at about four.
@@ -335,12 +357,33 @@ class GeneGroupTab(SidebarPage):
     # ------------------------------------------------------------------
     # Marker sources
     # ------------------------------------------------------------------
+    def _select_best_panel(self, adata):
+        """Select the bundled panel that covers the most cell types."""
+        values = self._group_values(adata)
+        if not values:
+            return
+        # A tie goes to the general list: a tissue panel is chosen only
+        # when it covers more of the data.
+        best = max(self._panels,
+                   key=lambda k: (len(match_marker_types(values, self._panels[k])),
+                                  k == _SOURCE_GENERAL))
+        if best != self._source_combo.currentText():
+            self._loading = True
+            self._source_combo.setCurrentText(best)
+            self._loading = False
+        self._markers = dict(self._panels[best])
+
+    def _on_source_picked(self, _index):
+        self._source_chosen = True
+
     def _on_source_changed(self):
+        if self._loading:
+            return
         source = self._source_combo.currentText()
         self._tissue_combo.setVisible(
             source in (_SOURCE_PANGLAO, _SOURCE_CELLMARKER))
-        if source == _SOURCE_BUILTIN:
-            self._set_markers(dict(DEFAULT_MARKERS))
+        if source in self._panels:
+            self._set_markers(dict(self._panels[source]))
         elif source == _SOURCE_FILE:
             self._load_from_file()
         else:
@@ -398,19 +441,19 @@ class GeneGroupTab(SidebarPage):
             self, "Open marker set", "",
             "Gene sets (*.gmt *.tsv *.csv *.txt);;All files (*)")
         if not path:
-            self._source_combo.setCurrentText(_SOURCE_BUILTIN)
+            self._source_combo.setCurrentText(_SOURCE_GENERAL)
             return
         try:
             from kosmic.reference.pathways.formats import load_gmt
             markers = load_gmt(path)
         except Exception as exc:
             dialogs.warning(self, "Could not read file", str(exc))
-            self._source_combo.setCurrentText(_SOURCE_BUILTIN)
+            self._source_combo.setCurrentText(_SOURCE_GENERAL)
             return
         if not markers:
             dialogs.warning(self, "Nothing loaded",
                             "No gene sets were found in that file.")
-            self._source_combo.setCurrentText(_SOURCE_BUILTIN)
+            self._source_combo.setCurrentText(_SOURCE_GENERAL)
             return
         self._set_markers(markers)
 
@@ -495,14 +538,12 @@ class GeneGroupTab(SidebarPage):
             f"{n_present + n_missing} markers detected." + missing_note)
 
         mean = summary.mean_matrix
-        pct = summary.pct_matrix
-        if summary.groups and not mean.empty:
-            # Only the picked groups as columns: the whole annotation at
-            # once is what made this unreadable.
-            cols = [c for c in mean.columns if str(c) in picked]
-            if cols:
-                mean, pct = mean[cols], pct[cols]
-            self._dotplot.set_data(mean, pct)
+        # Only the picked groups as rows: the whole annotation at once is
+        # what made this unreadable.
+        cols = [c for c in mean.columns if str(c) in picked]
+        if summary.groups and not mean.empty and cols:
+            self._dotplot.set_data(mean[cols], summary.pct_matrix[cols],
+                                   self._owner)
         else:
             self._dotplot.show_unavailable_message(
                 "Annotate cell types to see the dot plot.")
@@ -524,6 +565,3 @@ class GeneGroupTab(SidebarPage):
         self.main_window.mark_step_complete(5)
         self.log_message.emit(
             f"Marker check: {n_present} markers across {len(picked)} types")
-
-    def refresh_theme(self):
-        self._dotplot.refresh_theme()
