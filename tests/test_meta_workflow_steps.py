@@ -162,6 +162,84 @@ def test_direction_filter_leaves_background_alone(app, meta_df):
     assert len(set(backgrounds)) == 1
 
 
+# -- enrichment provenance ---------------------------------------------
+#
+# ORA results are normalised to an 'FDR' column; the fgsea summary
+# keeps 'pvals_adj'. Counting 'FDR' for both recorded every GSEA run
+# as n_terms_sig 0.
+
+def _recorded_enrichment(folder, selection):
+    from kosmic import provenance
+    from kosmic.meta_analysis.io import meta_provenance_dir
+    return provenance.last_stage(meta_provenance_dir(folder, selection),
+                                 "meta_enrichment")["params"]
+
+
+def test_ora_record_counts_significant_terms(app, meta_df, tmp_path):
+    p = MetaEnrichmentPage()
+    p.set_project_folder(tmp_path, selection="Cardiomyocyte")
+    p.set_meta_results(meta_df)
+    p._p_thresh.setValue(0.05)
+    ora = pd.DataFrame({
+        "Term": ["a", "b", "c"],
+        "P_value": [1e-5, 1e-3, 0.5],
+        "FDR": [3e-5, 0.01, 0.6],
+        "Fold_Enrichment": [3.0, 2.0, 1.0],
+        "Gene_Count": [3, 2, 1],
+        "Genes": [["G1", "G2", "G3"], ["G4", "G5"], ["G6"]],
+    })
+    p._on_enrichr_finished((ora, "done"))
+    rec = _recorded_enrichment(tmp_path, "Cardiomyocyte")
+    assert rec["method"] == "ora"
+    assert rec["n_terms"] == 3
+    assert rec["n_terms_sig"] == 2
+    assert rec["results_file"] is None
+
+
+def test_gsea_record_counts_significant_terms(app, meta_df, tmp_path):
+    p = MetaEnrichmentPage()
+    p.set_project_folder(tmp_path, selection="Cardiomyocyte")
+    p.set_meta_results(meta_df)
+    p._p_thresh.setValue(0.05)
+    # What _run_gsea sets before starting the worker.
+    p._gsea_library_id = "KEGG_2026"
+    p.ws.gsea_library_name = "Enrichr: KEGG 2026"
+    res = pd.DataFrame({
+        "names": ["a", "b", "c", "d"],
+        "nes": [2.1, -1.8, 0.4, np.nan],
+        "es": [0.6, -0.5, 0.1, np.nan],
+        "pvals": [1e-5, 1e-3, 0.4, np.nan],
+        "pvals_adj": [0.002, 0.2, 0.8, np.nan],
+        "leading_edge": ["G1;G2", "G3", "G4", ""],
+    })
+    p._on_gsea_finished((res, {}, "done"))
+    rec = _recorded_enrichment(tmp_path, "Cardiomyocyte")
+    assert rec["method"] == "gsea"
+    assert rec["library"] == "Enrichr: KEGG 2026"
+    assert rec["n_terms"] == 4
+    assert rec["n_terms_sig"] == 1
+    assert rec["results_file"] == (
+        "meta_analysis/Cardiomyocyte/gsea_library_results_KEGG_2026.csv")
+
+
+def test_meta_gsea_saves_one_file_per_library(app, meta_df, tmp_path):
+    """A later library's run must not replace an earlier one's file, and
+    nothing is written into a study-shaped folder at the project root."""
+    p = MetaEnrichmentPage()
+    p.set_project_folder(tmp_path, selection="Cardiomyocyte")
+    p.set_meta_results(meta_df)
+    res = pd.DataFrame({"names": ["a"], "nes": [1.5], "es": [0.4],
+                        "pvals": [0.01], "pvals_adj": [0.03],
+                        "leading_edge": ["G1"]})
+    for lib in ("KEGG_2026", "Reactome_Pathways_2024"):
+        p._gsea_library_id = lib
+        p._on_gsea_finished((res, {}, "done"))
+    out = tmp_path / "meta_analysis" / "Cardiomyocyte"
+    assert (out / "gsea_library_results_KEGG_2026.csv").is_file()
+    assert (out / "gsea_library_results_Reactome_Pathways_2024.csv").is_file()
+    assert not (tmp_path / "results").exists()
+
+
 # -- validation step ---------------------------------------------------
 
 def test_validation_has_all_four_routes(app):
@@ -291,10 +369,14 @@ def test_algorithm_shows_without_the_page_being_visible(enrich):
     assert "elim" in " ".join(_summary(enrich._terms_card))
 
 
-def test_meta_context_carries_the_project_dir(enrich, tmp_path):
-    """GSEA persists results via ws.project_dir; it was never set."""
-    enrich.set_project_folder(tmp_path)
-    assert enrich.ws.project_dir == tmp_path
+def test_meta_gsea_saves_into_the_selection_folder(enrich, tmp_path):
+    """GSEA results are persisted once a project folder is set."""
+    assert enrich._gsea_results_path() is None
+    enrich.set_project_folder(tmp_path, selection="all_cells")
+    enrich._gsea_library_id = "MSigDB_Hallmark_2020"
+    assert enrich._gsea_results_path() == (
+        tmp_path / "meta_analysis" / "all_cells"
+        / "gsea_library_results_MSigDB_Hallmark_2020.csv")
 
 
 # -- nothing may exceed the card's width ------------------------------

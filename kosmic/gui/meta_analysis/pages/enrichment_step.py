@@ -12,6 +12,7 @@
 # '_MetaEnrichmentContext' supplies those from the pooled table.
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -36,11 +37,6 @@ class _MetaEnrichmentContext(QObject):
         self.de_results = None
         self.gene_de_genome_wide = None
         self.progress_bar = None
-        # EnrichmentPage writes a GSEA run into the project so Figure
-        # Export can reload it. Without this the meta arm's GSEA results
-        # were silently not persisted -- the guard there is a plain
-        # getattr(ws, 'project_dir', None).
-        self.project_dir = None
         self.gsea_library_name = None
         self.enrichment_results = None
 
@@ -88,7 +84,6 @@ class MetaEnrichmentPage(EnrichmentPage):
         """
         self._project_folder = folder
         self._selection = selection
-        self._ctx.project_dir = folder
 
     @property
     def context(self):
@@ -127,17 +122,43 @@ class MetaEnrichmentPage(EnrichmentPage):
         super()._on_gsea_finished(payload)
         self._record_enrichment('gsea')
 
+    # The adjusted p-value column of each method's results table: ORA is
+    # normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
+    _ADJ_P_COLUMN = {'ora': 'FDR', 'gsea': 'pvals_adj'}
+
+    def _gsea_results_path(self):
+        """The selection's meta-analysis folder, one file per library.
+
+        The DE page's location is a study folder; the project root is not
+        one, and a single file name let each library's run replace the
+        last while the record named the newest.
+        """
+        if not self._project_folder:
+            return None
+        from kosmic.paths import meta_output_dir
+        from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+        stem = Path(GSEA_LIBRARY_RESULTS_FILE).stem
+        return (meta_output_dir(self._project_folder, self._selection)
+                / f"{stem}_{self._gsea_library_id}.csv")
+
     def _record_enrichment(self, method):
         from kosmic.meta_analysis.io import record_meta_stage
         df = self._results_df
         n_terms = 0 if df is None else len(df)
         n_sig = 0
-        if df is not None and 'FDR' in getattr(df, 'columns', []):
-            n_sig = int((df['FDR'] < self._p_thresh.value()).sum())
+        col = self._ADJ_P_COLUMN[method]
+        if df is not None and col in getattr(df, 'columns', []):
+            n_sig = int((df[col] < self._p_thresh.value()).sum())
         study, background, _ = self._get_sig_genes()
+        results_file = None
+        if method == 'gsea' and n_terms:
+            path = self._gsea_results_path()
+            if path is not None:
+                results_file = path.relative_to(self._project_folder).as_posix()
         record_meta_stage(self._project_folder, 'meta_enrichment', {
             'method':      method,
-            'library':     self._library_combo.currentText(),
+            'library':     (self.ws.gsea_library_name if method == 'gsea'
+                            else self._library_combo.currentText()),
             'direction':   self._direction_combo.currentData(),
             'rank_by':     self.rank_column if method == 'gsea' else None,
             'fdr':         self._p_thresh.value(),
@@ -148,4 +169,5 @@ class MetaEnrichmentPage(EnrichmentPage):
             'n_background': len(background or []),
             'n_terms':     n_terms,
             'n_terms_sig': n_sig,
+            'results_file': results_file,
         }, selection=self._selection)
