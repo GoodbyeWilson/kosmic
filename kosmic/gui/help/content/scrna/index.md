@@ -13,7 +13,7 @@ Eight steps, in the order you meet them:
 | Step | What it does | Leaves behind |
 |---|---|---|
 | [Load Data](load_data.md) | Shows the study's dataset and its basic properties; converts a raw import if one is waiting | the working h5ad |
-| [Gene Names](gene_names.md) | Renames genes to current HGNC symbols so studies can be joined | `var_names` harmonised |
+| [Gene Names](gene_names.md) | Renames genes to current HGNC (human) or MGI (mouse) symbols so studies can be joined | `var_names` harmonised |
 | [Inspect](inspect.md) | Tells KOSMIC which column is the sample, which is the condition, and what each condition value means | `sample`, `condition`, roles |
 | [Quality Control](qc.md) | Removes low-quality cells and doublets, optionally ambient RNA, then normalises | filtered cells, `.raw` snapshot |
 | [Cluster](cluster.md) | HVGs → PCA → (Harmony) → neighbours → Leiden → UMAP, then cell-type annotation | `leiden`, `cell_type`, embeddings |

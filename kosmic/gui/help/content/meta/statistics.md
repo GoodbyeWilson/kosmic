@@ -150,7 +150,8 @@ testing its parents.
 
 Everything above pools *by gene name*. Studies annotated against
 different releases name the same gene differently, so KOSMIC harmonises
-symbols to the current HGNC nomenclature before pooling (see
+symbols to the current nomenclature (HGNC for human, MGI for mouse)
+before pooling (see
 [Gene Names](../scrna/gene_names.md)), and counts how many genes are
 shared across the studies before an atlas is built. A gene absent from
 one study is absent from the pooled result; harmonisation is what keeps

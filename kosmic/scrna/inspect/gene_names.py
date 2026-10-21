@@ -1,7 +1,13 @@
-# Gene name harmonisation using the HGNC approved symbol table.
+# Gene name harmonisation against the current official symbol table of the
+# dataset's species: HGNC for human, MGI for mouse.
 #
-# Maps previous symbols and aliases to current HGNC-approved symbols,
-# ensuring consistency across datasets from different genome annotation builds.
+# Maps earlier symbols and aliases to current symbols, ensuring consistency
+# across datasets from different genome annotation builds. The species is
+# detected from the gene names (kosmic.scrna.inspect.detection): mouse
+# symbols are mixed case. Mouse data harmonised against the human table
+# would have mouse symbols renamed to unrelated human genes wherever the
+# upper-case form happens to be an HGNC alias (Hc -> CLTC), so the two
+# tables are never mixed.
 
 import os
 from dataclasses import dataclass, field
@@ -14,6 +20,11 @@ import pandas as pd
 _DEFAULT_HGNC_PATH = str(files("kosmic.reference.hgnc") / "hgnc_symbols.tsv")
 _DEFAULT_LOCUS_PATH = str(
     files("kosmic.reference.hgnc") / "hgnc_locus_groups.tsv.gz")
+_DEFAULT_MGI_PATH = str(files("kosmic.reference.mgi") / "mgi_symbols.tsv.gz")
+_MGI_VERSION_PATH = str(files("kosmic.reference.mgi") / "mgi_symbols.json")
+
+#: Name of the symbol table used for each species, for display and records.
+REFERENCE_NAMES = {'human': 'HGNC', 'mouse': 'MGI'}
 
 # The 13 mtDNA protein-coding genes are routinely labelled with legacy symbols
 # (ND1, CYTB, ATP6, COI, ...) whose HGNC aliases collide with unrelated nuclear
@@ -53,9 +64,13 @@ class HarmonisationReport:
     locus_after: Dict[str, int] = field(default_factory=dict)
     """The same counts as they would be after harmonisation."""
     unrecognised: List[str] = field(default_factory=list)
-    """Names HGNC does not know, after harmonisation. Retired clone-based
-    names and bare Ensembl IDs -- they match nothing in another study, so
-    they are lost to any cross-study join."""
+    """Names the symbol table does not know, after harmonisation. Retired
+    clone-based names and bare Ensembl IDs -- they match nothing in another
+    study, so they are lost to any cross-study join."""
+    species: str = 'human'
+    """'human' or 'mouse': which symbol table was used."""
+    reference: str = 'HGNC'
+    """The table's name, from :data:`REFERENCE_NAMES`."""
 
 
 def load_hgnc_lookup(
@@ -127,27 +142,121 @@ def load_hgnc_lookup(
     return lookup, reasons
 
 
-def load_locus_groups(path: str = None) -> Dict[str, str]:
-    """Load the HGNC approved symbol -> locus group table.
+def load_mgi_lookup(
+    path: str = None,
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Load the MGI mouse symbol table and build old-name -> symbol lookup.
 
-    Locus groups are HGNC's own coarse classification: ``'protein-coding
-    gene'``, ``'non-coding RNA'``, ``'pseudogene'`` or ``'other'``.
+    MGI lists each gene's synonyms, which include its earlier symbols,
+    without saying which are which, so every mapping has the reason
+    ``'synonym'``. As for HGNC, a name is mapped only when exactly one
+    current gene claims it and it is not itself a current symbol; an
+    ambiguous name is left unchanged rather than guessed.
 
     Parameters
     ----------
     path : str, optional
-        Path to the locus-group TSV. Defaults to the bundled
-        kosmic/reference/hgnc/hgnc_locus_groups.tsv.gz.
+        Path to the MGI TSV. Defaults to the bundled
+        kosmic/reference/mgi/mgi_symbols.tsv.gz.
+
+    Returns
+    -------
+    tuple of (lookup, reasons)
+        'lookup': old symbol -> current MGI symbol.
+        'reasons': old symbol -> 'synonym'.
+    """
+    if path is None:
+        path = _DEFAULT_MGI_PATH
+    mgi = pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False)
+    current = set(mgi['Symbol'])
+
+    claimants = {}
+    for symbol, synonyms in zip(mgi['Symbol'], mgi['Synonyms']):
+        for old in synonyms.split('|'):
+            old = old.strip()
+            if not old or old == symbol or old in current:
+                continue
+            claimants.setdefault(old, set()).add(symbol)
+
+    lookup = {old: next(iter(s)) for old, s in claimants.items() if len(s) == 1}
+    reasons = dict.fromkeys(lookup, 'synonym')
+    return lookup, reasons
+
+
+def load_locus_groups(path: str = None, species: str = 'human') -> Dict[str, str]:
+    """Load the current symbol -> locus group table for a species.
+
+    Locus groups are HGNC's own coarse classification: ``'protein-coding
+    gene'``, ``'non-coding RNA'``, ``'pseudogene'`` or ``'other'``. For
+    mouse, MGI's feature types are reduced to the same four groups, so
+    both species are counted the same way.
+
+    Parameters
+    ----------
+    path : str, optional
+        Path to the table. Defaults to the bundled HGNC locus-group table
+        (human) or MGI symbol table (mouse).
+    species : str
+        'human' or 'mouse'.
 
     Returns
     -------
     dict
-        Approved symbol -> locus group.
+        Current symbol -> locus group.
     """
-    if path is None:
-        path = _DEFAULT_LOCUS_PATH
-    table = pd.read_csv(path, sep='	')
+    if species == 'mouse':
+        table = pd.read_csv(path or _DEFAULT_MGI_PATH, sep='\t', dtype=str,
+                            keep_default_na=False)
+        return dict(zip(table['Symbol'], table['Locus group']))
+    table = pd.read_csv(path or _DEFAULT_LOCUS_PATH, sep='\t')
     return dict(zip(table['Approved symbol'], table['Locus group']))
+
+
+def load_symbol_lookup(species: str = 'human'
+                       ) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """The bundled old-name -> current-symbol lookup for a species:
+    :func:`load_mgi_lookup` for ``'mouse'``, :func:`load_hgnc_lookup`
+    otherwise. Returns ``(lookup, reasons)``."""
+    return load_mgi_lookup() if species == 'mouse' else load_hgnc_lookup()
+
+
+def reference_version(species: str = 'human') -> Dict[str, str]:
+    """Which release of the bundled symbol table is in use, for the record.
+
+    Mouse: the MGI report's download and build dates from
+    ``mgi_symbols.json`` (written by ``dev/scripts/build_mgi_symbols.py``).
+    Both species: a short SHA-1 of the table file, which identifies the
+    exact table even where no date was recorded (the HGNC table) or the
+    table has been updated in place.
+    """
+    import hashlib
+    import json
+
+    path = _DEFAULT_MGI_PATH if species == 'mouse' else _DEFAULT_HGNC_PATH
+    info = {'table': REFERENCE_NAMES.get(species, 'HGNC')}
+    if species == 'mouse':
+        try:
+            with open(_MGI_VERSION_PATH, encoding='utf-8') as f:
+                meta = json.load(f)
+            info.update({k: str(meta[k]) for k in ('source', 'downloaded', 'built')
+                         if k in meta})
+        except (OSError, ValueError):
+            pass
+    try:
+        with open(path, 'rb') as f:
+            info['sha1'] = hashlib.sha1(f.read()).hexdigest()[:12]
+    except OSError:
+        pass
+    return info
+
+
+def detect_gene_species(var_names) -> str:
+    """'human' or 'mouse', from the case of the gene names.
+
+    See :func:`kosmic.scrna.inspect.detection.detect_species`.
+    """
+    from kosmic.scrna.inspect.detection import detect_species
+    return detect_species([str(n) for n in var_names])
 
 
 def count_locus_groups(var_names, locus_groups: Dict[str, str] = None,
@@ -211,27 +320,36 @@ def _remap_csr_columns_inplace(X, target, n_cols: int, chunk: int = 50_000_000) 
 def harmonise_adata(adata, lookup: Dict[str, str] = None,
                     reasons: Dict[str, str] = None,
                     hgnc_path: str = None,
-                    progress_callback=None) -> Tuple:
-    """Harmonise gene names in an AnnData object to current HGNC symbols.
+                    progress_callback=None,
+                    species: str = None) -> Tuple:
+    """Harmonise gene names in an AnnData object to current symbols.
 
     Parameters
     ----------
     adata : AnnData
         The dataset to harmonise. Modified in place.
     lookup : dict, optional
-        Pre-built old→new mapping. If None, loaded from HGNC table.
+        Pre-built old→new mapping. If None, loaded for the species: the
+        HGNC table for human, the MGI table for mouse.
     reasons : dict, optional
         Pre-built old→reason mapping.
     hgnc_path : str, optional
-        Path to HGNC TSV (only used if lookup is None).
+        Path to HGNC TSV (only used if lookup is None and the data is human).
+    species : str, optional
+        'human' or 'mouse'. Detected from the gene names when omitted.
 
     Returns
     -------
     (adata, HarmonisationReport)
         The modified AnnData and a report of what changed.
     """
+    if species is None:
+        species = detect_gene_species(adata.var_names[:100])
     if lookup is None:
-        lookup, reasons = load_hgnc_lookup(hgnc_path)
+        if species == 'mouse':
+            lookup, reasons = load_mgi_lookup()
+        else:
+            lookup, reasons = load_hgnc_lookup(hgnc_path)
     if reasons is None:
         reasons = {}
 
@@ -239,7 +357,8 @@ def harmonise_adata(adata, lookup: Dict[str, str] = None,
         if progress_callback is not None:
             progress_callback(msg)
 
-    report = HarmonisationReport(total_genes=adata.n_vars)
+    report = HarmonisationReport(total_genes=adata.n_vars, species=species,
+                                 reference=REFERENCE_NAMES.get(species, 'HGNC'))
 
     _progress(f"Mapping {adata.n_vars:,} gene names...")
     var_names = list(adata.var_names)
