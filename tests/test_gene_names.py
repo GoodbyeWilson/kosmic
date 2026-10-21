@@ -139,3 +139,57 @@ def test_merge_matches_column_sum_reference_and_keeps_order():
         np.testing.assert_array_equal(lay, exp_X)
         if sparse:
             assert result.X.has_canonical_format
+
+
+# --- mouse: MGI ---------------------------------------------------------------
+
+from kosmic.scrna.inspect.gene_names import (  # noqa: E402
+    detect_gene_species, load_locus_groups, load_mgi_lookup,
+)
+
+
+def _mouse(names):
+    rng = np.random.default_rng(1)
+    X = rng.integers(0, 20, size=(5, len(names))).astype(np.float32)
+    return ad.AnnData(X=X, obs=pd.DataFrame(index=[f'c{i}' for i in range(5)]),
+                      var=pd.DataFrame(index=names))
+
+
+def test_mgi_lookup_maps_earlier_symbols_and_skips_current_ones():
+    lookup, reasons = load_mgi_lookup()
+    assert lookup.get('Pih1d3') == 'Dnaaf6rt'
+    assert lookup.get('Ccdc115') == 'Vma22'
+    assert reasons.get('Pih1d3') == 'synonym'
+    assert 'Lrg1' not in lookup and 'Hc' not in lookup   # current symbols
+
+
+def test_mouse_genes_are_harmonised_against_mgi_not_hgnc():
+    """The bug this replaced: mouse data went through the human table, and
+    'Hc' (complement C5) became CLTC because 'HC' is an HGNC alias."""
+    assert detect_gene_species(['Xkr4', 'Lrg1', 'Hc', 'Pih1d3']) == 'mouse'
+    result, report = harmonise_adata(_mouse(['Xkr4', 'Lrg1', 'Hc', 'Pih1d3']))
+    assert report.species == 'mouse' and report.reference == 'MGI'
+    assert list(result.var_names) == ['Xkr4', 'Lrg1', 'Hc', 'Dnaaf6rt']
+    assert not any(n.isupper() for n in result.var_names)
+
+
+def test_mouse_locus_groups_use_the_hgnc_categories():
+    groups = load_locus_groups(species='mouse')
+    assert groups['Lrg1'] == 'protein-coding gene'
+    assert set(groups.values()) <= {'protein-coding gene', 'non-coding RNA',
+                                    'pseudogene', 'other'}
+
+
+def test_human_data_still_uses_hgnc():
+    result, report = harmonise_adata(_mouse(['FAM206A', 'GAPDH', 'ACTB']))
+    assert report.species == 'human' and report.reference == 'HGNC'
+    assert 'ABITRAM' in result.var_names
+
+
+def test_reference_version_identifies_the_table():
+    from kosmic.scrna.inspect.gene_names import reference_version
+    mouse = reference_version('mouse')
+    assert mouse['table'] == 'MGI' and len(mouse['downloaded']) == 10
+    assert len(mouse['sha1']) == 12
+    human = reference_version('human')
+    assert human['table'] == 'HGNC' and len(human['sha1']) == 12

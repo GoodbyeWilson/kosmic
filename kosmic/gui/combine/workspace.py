@@ -393,7 +393,7 @@ class CombineDialog(QDialog):
         self._estimate_label = SecondaryLabel("")
         layout.addWidget(self._estimate_label)
 
-        # Harmonisation sums two columns into one where HGNC has merged the
+        # Harmonisation sums two columns into one where HGNC or MGI has merged the
         # loci, but only in studies whose annotation carried both features.
         # The result is a gene that is a sum of two features in one cohort
         # and a single feature in another -- a constant per-study offset that
@@ -832,7 +832,8 @@ class CombineDialog(QDialog):
             parts.append(
                 f"{len(genes):,} gene(s) are a sum of several features in "
                 f"some of these studies and a single feature in others, "
-                f"because HGNC has merged those loci. Within a study that is "
+                f"because the symbol table has merged those loci. Within a "
+                f"study that is "
                 f"harmless; across studies it shifts the gene's counts by a "
                 f"constant amount per cohort.")
         if unknown:

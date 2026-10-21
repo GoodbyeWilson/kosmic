@@ -174,9 +174,9 @@ condition associated with each cell. The intended design is a
 comparison between two conditions within a cell type, with multiple
 biological donors in each condition.
 
-Human gene symbols can be harmonised to current HGNC nomenclature so
-that datasets produced using different annotation releases can be
-compared. Mouse datasets can also be analysed individually.
+Gene symbols can be harmonised to current nomenclature (HGNC for
+human, MGI for mouse) so that datasets produced using different
+annotation releases can be compared.
 
 ## Getting started
 

@@ -60,7 +60,7 @@ class ScRNAWorkspace(QWidget):
 
     WORKFLOW_STEPS = (
         ("Load Data", "Fetch from GEO, or import local files."),
-        ("Gene Names", "Harmonise gene symbols to current HGNC standard."),
+        ("Gene Names", "Harmonise gene symbols to current HGNC (human) or MGI (mouse) symbols."),
         ("Inspect", "Explore metadata, assign conditions and samples."),
         ("Quality Control", "Filter low-quality cells, detect doublets, normalize."),
         ("Cluster", "PCA, clustering, UMAP and cell type annotation."),

@@ -103,3 +103,12 @@ def test_project_honours_an_explicit_study_list(tmp_path, accessions):
         _write(proc / f"{accession}.h5ad", CORE)
     res = project_gene_overlap(tmp_path, accessions=accessions)
     assert set(res["studies"]) == set(accessions)
+
+
+def test_project_species_reads_the_gene_names(tmp_path):
+    from kosmic.scrna.load.gene_overlap import project_species
+    mouse = _write(tmp_path / "m.h5ad", ["Xkr4", "Lrg1", "Sox17"])
+    human = _write(tmp_path / "h.h5ad", ["TTN", "MYH7", "SOX17"])
+    assert project_species({"m": mouse}) == "mouse"
+    assert project_species({"h": human}) == "human"
+    assert project_species({}) == "human"

@@ -1,7 +1,7 @@
 # Gene Names Tab
-# Harmonises gene names to current HGNC-approved symbols.
-# Shows a summary and detailed mapping table so the user can review
-# before accepting.
+# Harmonises gene names to current official symbols: HGNC for human data,
+# MGI for mouse, chosen from the case of the gene names. Shows a summary
+# and detailed mapping table so the user can review before accepting.
 
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QFrame, QGridLayout, QPushButton,
@@ -31,12 +31,14 @@ class _ApplyWorker(BaseWorker):
     harmonisation or save step failed (errors are logged via 'progress').
     """
 
-    def __init__(self, adata, lookup, reasons, save_path=None, parent=None):
+    def __init__(self, adata, lookup, reasons, save_path=None, species=None,
+                 parent=None):
         super().__init__(parent)
         self._adata = adata
         self._lookup = lookup
         self._reasons = reasons
         self._save_path = save_path
+        self._species = species
 
     def _run(self):
         try:
@@ -44,6 +46,7 @@ class _ApplyWorker(BaseWorker):
             adata_new, _ = harmonise_adata(
                 self._adata, lookup=self._lookup, reasons=self._reasons,
                 progress_callback=lambda msg: self.progress.emit(msg),
+                species=self._species,
             )
             # Make sure we have a concrete AnnData (not a view) before writing.
             try:
@@ -76,7 +79,8 @@ class _ApplyWorker(BaseWorker):
 
 class _HarmoniseWorker(BaseWorker):
     """
-    Analyse gene names against HGNC — lightweight, no adata copy.
+    Analyse gene names against the species' symbol table (HGNC for
+    human, MGI for mouse) — lightweight, no adata copy.
 
     Emits 'finished_ok' with a tuple '(report, (lookup, reasons))' on
     success or '(None, error_str)' on failure so the caller's single
@@ -90,17 +94,22 @@ class _HarmoniseWorker(BaseWorker):
     def _run(self):
         try:
             from kosmic.scrna.inspect.gene_names import (
-                HarmonisationReport, count_locus_groups, load_hgnc_lookup,
-                load_locus_groups,
+                REFERENCE_NAMES, HarmonisationReport, count_locus_groups,
+                detect_gene_species, load_locus_groups, load_symbol_lookup,
             )
-            self.progress.emit("Loading HGNC symbol table...")
-            lookup, reasons = load_hgnc_lookup()
-            locus_groups = load_locus_groups()
+            species = detect_gene_species(self._var_names[:100])
+            reference = REFERENCE_NAMES[species]
+            self.progress.emit(
+                f"Gene names look {species}: loading the {reference} "
+                f"symbol table...")
+            lookup, reasons = load_symbol_lookup(species)
+            locus_groups = load_locus_groups(species=species)
 
             self.progress.emit("Matching gene names...")
             # Build report without touching adata
             var_names = self._var_names
-            report = HarmonisationReport(total_genes=len(var_names))
+            report = HarmonisationReport(total_genes=len(var_names),
+                                         species=species, reference=reference)
             mappings = []
             for name in var_names:
                 if name in lookup:
@@ -131,7 +140,7 @@ class _HarmoniseWorker(BaseWorker):
                 var_names, locus_groups=locus_groups, lookup=lookup)
 
             # The sidebar counts these; without the names there is no way to
-            # see *which* genes match nothing in HGNC, and those are exactly
+            # see *which* genes match nothing in the table, and those are exactly
             # the ones that vanish from a cross-study join.
             report.unrecognised = sorted(
                 {lookup.get(n, n) for n in var_names} - set(locus_groups))
@@ -146,7 +155,7 @@ class _HarmoniseWorker(BaseWorker):
 # ---------------------------------------------------------------------------
 
 class GeneNamesTab(SidebarPage):
-    """Tab for reviewing and applying HGNC gene name harmonisation."""
+    """Tab for reviewing and applying gene name harmonisation."""
 
     help_id = "scrna/gene_names"
     CONTENT_MARGINS = (16, 16, 16, 16)
@@ -159,6 +168,7 @@ class GeneNamesTab(SidebarPage):
     _REASON_LABELS = {
         'previous_symbol': 'Previous symbol',
         'alias': 'Alias',
+        'synonym': 'Synonym',
         'mitochondrial': 'Mitochondrial',
         'merged': 'Merged',
         'unrecognised': 'Unrecognised',
@@ -169,6 +179,7 @@ class GeneNamesTab(SidebarPage):
         None: 'All',
         'previous_symbol': 'Previous symbol',
         'alias': 'Alias',
+        'synonym': 'Synonym',
         'mitochondrial': 'Mitochondrial',
         '_merged': 'Merged',
         '_unrecognised': 'Unrecognised',
@@ -185,6 +196,8 @@ class GeneNamesTab(SidebarPage):
         self._report = None
         self._lookup_data = None
         self._locus_groups = None
+        self._species = 'human'
+        self._reference = 'HGNC'
         self._harmonised = False
         self._applying = False  # guard against re-entrant set_adata
         self._last_adata_id = None  # track which adata we've already analysed
@@ -259,7 +272,7 @@ class GeneNamesTab(SidebarPage):
         side.addWidget(self._skip_btn)
 
         # Genes that harmonisation would build by summing two or more source
-        # columns. Within this study the sum is correct -- HGNC says the loci
+        # columns. Within this study the sum is correct -- the table says the loci
         # are one gene -- but it is also what later makes the gene mean
         # something different here than in a study whose annotation already
         # had them merged, so it is called out rather than left buried in the
@@ -294,13 +307,9 @@ class GeneNamesTab(SidebarPage):
         header.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         layout.addWidget(header)
 
-        desc = SecondaryLabel(
-            "Maps gene names to current HGNC-approved symbols, so that a "
-            "gene renamed between genome annotation builds still matches "
-            "the same gene in every other study."
-        )
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
+        self._desc = SecondaryLabel(self._description())
+        self._desc.setWordWrap(True)
+        layout.addWidget(self._desc)
 
         layout.addSpacing(10)
 
@@ -331,21 +340,24 @@ class GeneNamesTab(SidebarPage):
             (None, "All",
              "Every name this run would change."),
             ('previous_symbol', "Previous symbol",
-             "HGNC's most authoritative mapping: the name was formally "
-             "retired in favour of the new one."),
+             "Human (HGNC): the name was formally retired in favour of the "
+             "new one -- HGNC's most authoritative mapping."),
             ('alias', "Alias",
-             "A looser HGNC mapping. Worth reading before you accept the "
-             "run."),
+             "Human (HGNC): a looser mapping. Worth reading before you "
+             "accept the run."),
+            ('synonym', "Synonym",
+             "Mouse (MGI): a name MGI lists for the gene, either an earlier "
+             "symbol or an alias; MGI does not say which."),
             ('mitochondrial', "Mitochondrial",
              "Legacy mtDNA names (ND1, CYTB) mapped explicitly to MT-*."),
             ('_merged', "Merged",
-             "Columns whose counts are added together because HGNC has "
-             "merged the loci."),
+             "Columns whose counts are added together because the symbol "
+             "table has merged the loci."),
             ('_unrecognised', "Unrecognised",
-             "Names HGNC does not know at all -- retired clone-based names "
-             "and bare Ensembl IDs. Nothing is renamed; they are listed "
-             "because they match nothing in another study either, so they "
-             "drop out of any cross-study join."),
+             "Names the symbol table does not know at all -- retired "
+             "clone-based names and bare Ensembl IDs. Nothing is renamed; "
+             "they are listed because they match nothing in another study "
+             "either, so they drop out of any cross-study join."),
         )
         for key, label, tip in chips:
             chip = QPushButton(label)
@@ -368,16 +380,18 @@ class GeneNamesTab(SidebarPage):
         self._table.set_schema([
             Column("Current name", "old", "s",
                    tooltip="The name as it appears in this dataset."),
-            Column("HGNC symbol", "new", "s",
-                   tooltip="The approved symbol it will be renamed to."),
+            Column("Current symbol", "new", "s",
+                   tooltip="The current official symbol it will be renamed "
+                           "to (HGNC for human, MGI for mouse)."),
             Column("Change", "reason", "s",
-                   tooltip="Why HGNC maps this name: a previous symbol, an "
-                           "alias, or the mitochondrial special case."),
+                   tooltip="Why the table maps this name: a previous "
+                           "symbol, an alias or synonym, or the "
+                           "mitochondrial special case."),
             Column("Merged with", "merged_with", "s",
                    tooltip="Other columns whose counts are added into the "
                            "same gene. Blank when nothing is summed."),
             Column("Details", "details", "s",
-                   tooltip="What kind of gene HGNC says this is."),
+                   tooltip="What kind of gene the symbol table says this is."),
         ])
         # The two name columns carry the content, so they take the width.
         # 'Merged with' is populated on a small minority of rows -- letting
@@ -415,6 +429,13 @@ class GeneNamesTab(SidebarPage):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self._table, 1)
 
+    def _description(self) -> str:
+        return (f"Maps gene names to current {self._reference} symbols "
+                f"({'mouse' if self._species == 'mouse' else 'human'} gene "
+                f"names detected), so that a gene renamed between genome "
+                f"annotation builds still matches the same gene in every "
+                f"other study.")
+
     def _update_stats(self):
         """Fill the sidebar stats panel from the report.
 
@@ -451,7 +472,8 @@ class GeneNamesTab(SidebarPage):
             verb = "were" if done else "will be"
             self._merge_note.setText(
                 f"{n_merged:,} gene(s) {verb} built by adding two or more "
-                f"columns together, because HGNC has merged those loci. "
+                f"columns together, because {self._reference} has merged "
+                f"those loci. "
                 f"Correct here; check it at Combine time, where studies "
                 f"differ in how many columns they contribute.")
             self._merge_note.show()
@@ -610,6 +632,12 @@ class GeneNamesTab(SidebarPage):
         lookup, reasons, locus_groups = lookup_data
         self._lookup_data = (lookup, reasons)
         self._locus_groups = locus_groups
+        self._species = self._report.species
+        self._reference = self._report.reference
+        self._desc.setText(self._description())
+        # The download button fetches the HGNC table; the MGI table is
+        # rebuilt with dev/scripts/build_mgi_symbols.py.
+        self._update_btn.setVisible(self._species == 'human')
 
         # Update summary stats
 
@@ -648,12 +676,13 @@ class GeneNamesTab(SidebarPage):
             if adata is not None and adata.n_vars:
                 sample_names = adata.var_names[:200]
                 n_ens = int(sample_names.str.upper()
-                            .str.startswith("ENSG").sum())
+                            .str.startswith(("ENSG", "ENSMUSG")).sum())
                 looks_ensembl = n_ens > len(sample_names) * 0.5
             if looks_ensembl:
                 self._set_status(
-                    "Gene names look like Ensembl IDs (ENSG...), which the "
-                    "HGNC table cannot match. Re-import the data so symbols "
+                    "Gene names look like Ensembl IDs (ENSG..., ENSMUSG...), "
+                    "which the symbol table cannot match. Re-import the data "
+                    "so symbols "
                     "are used, or continue knowing downstream marker lists "
                     "and pathways will not match.")
                 self.log_message.emit(
@@ -662,9 +691,11 @@ class GeneNamesTab(SidebarPage):
                     "will fail")
             else:
                 self._set_status(
-                    "All gene names are already up to date with HGNC.")
+                    f"All gene names are already up to date with "
+                    f"{self._reference}.")
                 self.log_message.emit(
-                    "Gene names: all already current HGNC symbols")
+                    f"Gene names: all already current {self._reference} "
+                    f"symbols")
             self._harmonised = True
             self._update_stats()
             self.main_window.mark_step_complete(1)
@@ -740,7 +771,7 @@ class GeneNamesTab(SidebarPage):
             # shows the name alone and says why it is here.
             entries = [{'old': name, 'new': '', 'reason': 'unrecognised',
                         'merged_with': '',
-                        'details': 'Not an HGNC symbol'}
+                        'details': f'Not a current {self._reference} symbol'}
                        for name in report.unrecognised]
         else:
             merge_sources = {target: list(sources)
@@ -851,7 +882,8 @@ class GeneNamesTab(SidebarPage):
 
         lookup, reasons = self._lookup_data
         save_path = self.main_window.current_h5ad_path
-        self._apply_worker = _ApplyWorker(adata, lookup, reasons, save_path=save_path)
+        self._apply_worker = _ApplyWorker(adata, lookup, reasons, save_path=save_path,
+                                          species=self._species)
         run_worker(
             self._apply_worker,
             on_finished=self._on_apply_finished,
@@ -907,9 +939,16 @@ class GeneNamesTab(SidebarPage):
         was built from two features here and one elsewhere.
         """
         report = self._report
+        from kosmic.scrna.inspect.gene_names import reference_version
         self.main_window.record_provenance(
             'gene_names',
             {
+                'species': report.species,
+                'reference': report.reference,
+                # Which release of the table: a gene renamed by MGI or HGNC
+                # after it was built is not renamed here, so two studies
+                # harmonised with different releases can disagree.
+                'reference_version': reference_version(report.species),
                 'total_genes_before': report.total_genes,
                 'total_genes_after': int(adata_new.n_vars),
                 'renamed': report.renamed,

@@ -9,7 +9,8 @@
 #
 # The loss is silent -- concat just returns a narrower object -- so this
 # module measures it up front, and measures what harmonising gene names to
-# current HGNC symbols would recover, before anyone commits to a combine.
+# current symbols (HGNC for human, MGI for mouse) would recover, before
+# anyone commits to a combine.
 from __future__ import annotations
 
 from functools import reduce
@@ -50,8 +51,8 @@ def gene_overlap(datasets: dict, lookup: Optional[dict] = None,
         of the shared set, so one broken file does not make the whole
         summary read as zero.
     lookup : dict, optional
-        Old-symbol -> approved-symbol map from
-        :func:`kosmic.scrna.inspect.gene_names.load_hgnc_lookup`. When
+        Old-symbol -> current-symbol map from
+        :func:`kosmic.scrna.inspect.gene_names.load_symbol_lookup`. When
         given, a second set of figures is reported under
         ``'harmonised'`` showing what the join would yield if every
         study's names were harmonised first.
@@ -115,14 +116,14 @@ def gene_overlap(datasets: dict, lookup: Optional[dict] = None,
     return out
 
 
-def project_gene_overlap(project_dir, accessions: Optional[Iterable[str]] = None,
-                         **kwargs) -> dict:
-    """Run :func:`gene_overlap` over a project's studies.
+def project_datasets(project_dir,
+                     accessions: Optional[Iterable[str]] = None) -> dict:
+    """``{accession: h5ad_path}`` for a project's studies.
 
     Each study contributes its newest ``processed_data/*.h5ad`` -- the
     same file the rest of the app treats as the study's dataset. Studies
-    with nothing processed yet are skipped entirely rather than reported
-    as errors: they simply have no genes to contribute.
+    with nothing processed yet are left out: they have no genes to
+    contribute.
     """
     from kosmic.paths import list_studies, processed_data_dir, study_dir
 
@@ -138,4 +139,26 @@ def project_gene_overlap(project_dir, accessions: Optional[Iterable[str]] = None
                        key=lambda p: p.stat().st_mtime, reverse=True)
         if h5ads:
             datasets[accession] = h5ads[0]
-    return gene_overlap(datasets, **kwargs)
+    return datasets
+
+
+def project_species(datasets: dict) -> str:
+    """'human' or 'mouse', from the gene names of the first readable study
+    in ``datasets`` (see :func:`project_datasets`); 'human' when none can
+    be read."""
+    from kosmic.scrna.inspect.gene_names import detect_gene_species
+    for path in datasets.values():
+        try:
+            names = read_var_names(path)
+        except Exception:                             # unreadable / not h5ad
+            continue
+        if names:
+            return detect_gene_species(names[:100])
+    return "human"
+
+
+def project_gene_overlap(project_dir, accessions: Optional[Iterable[str]] = None,
+                         **kwargs) -> dict:
+    """Run :func:`gene_overlap` over a project's studies
+    (:func:`project_datasets`)."""
+    return gene_overlap(project_datasets(project_dir, accessions), **kwargs)

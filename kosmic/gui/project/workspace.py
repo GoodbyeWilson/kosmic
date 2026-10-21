@@ -80,17 +80,23 @@ class _GeneOverlapWorker(BaseWorker):
 
     def _run(self):
         from kosmic.scrna.inspect.gene_names import (
-            load_hgnc_lookup, load_locus_groups,
+            load_locus_groups, load_symbol_lookup,
         )
-        from kosmic.scrna.load.gene_overlap import project_gene_overlap
+        from kosmic.scrna.load.gene_overlap import (
+            gene_overlap, project_datasets, project_species,
+        )
 
         self.progress.emit("Reading gene names...")
-        lookup, _ = load_hgnc_lookup()
-        groups = load_locus_groups()
+        datasets = project_datasets(self._project_dir)
+        # The symbol table of the project's species: the HGNC table would
+        # rename mouse genes to unrelated human ones.
+        species = project_species(datasets)
+        lookup, _ = load_symbol_lookup(species)
+        groups = load_locus_groups(species=species)
         protein_coding = {sym for sym, group in groups.items()
                           if group == "protein-coding gene"}
-        return project_gene_overlap(
-            self._project_dir, lookup=lookup, protein_coding=protein_coding)
+        return gene_overlap(
+            datasets, lookup=lookup, protein_coding=protein_coding)
 
 
 class _ProjectPage(SidebarPage):
