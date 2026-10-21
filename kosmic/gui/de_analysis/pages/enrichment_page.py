@@ -609,6 +609,7 @@ class EnrichmentPage(SidebarTabbedPage):
             return
 
         self._lfc_map = dict(zip(gene_de['names'], gene_de['logfoldchanges']))
+        self._gsea_library_id = lib_id
         self.ws.gsea_library_name = self._library_combo.currentText()
         self._run_btn.setEnabled(False)
         self._status_label.setText(f"Running preranked GSEA ({lib_id})...")
@@ -647,6 +648,19 @@ class EnrichmentPage(SidebarTabbedPage):
         self.ws.status_message.emit(message)
         self._show_gsea_results(res)
 
+    def _gsea_results_path(self):
+        """Where a library GSEA run is saved, or None to not save it.
+
+        The study's pathway-scoring folder, under the one file name the
+        Figure Export library GSEA page reloads; each run replaces the
+        last. The meta-analysis host overrides this.
+        """
+        if not getattr(self.ws, 'project_dir', None):
+            return None
+        from kosmic.paths import de_pathway_scoring_dir
+        from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+        return de_pathway_scoring_dir(self.ws.project_dir) / GSEA_LIBRARY_RESULTS_FILE
+
     def _show_gsea_results(self, res):
         """Populate the shared table + bar plot with the fgsea (NES) results."""
         import pandas as pd
@@ -660,12 +674,10 @@ class EnrichmentPage(SidebarTabbedPage):
         self.ws.gsea_library_results = res
 
         # Persist so Figure Export reloads the exact run instead of recomputing.
-        if getattr(self.ws, 'project_dir', None):
-            from kosmic.paths import de_pathway_scoring_dir
-            from kosmic.de.fgsea import save_fgsea_results, GSEA_LIBRARY_RESULTS_FILE
-            save_fgsea_results(
-                res, de_pathway_scoring_dir(self.ws.project_dir)
-                / GSEA_LIBRARY_RESULTS_FILE)
+        path = self._gsea_results_path()
+        if path is not None:
+            from kosmic.de.fgsea import save_fgsea_results
+            save_fgsea_results(res, path)
 
         alpha = self._p_thresh.value()
         down = QBrush(QColor(get_color('plot_downregulated')))

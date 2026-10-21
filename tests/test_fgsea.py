@@ -24,6 +24,19 @@ def _gene_de(seed=0):
                          "pvals": rng.uniform(0, 1, n)}), up
 
 
+def test_fgsea_matches_mouse_genes_to_upper_case_sets():
+    """Mixed-case (mouse) gene names match upper-case gene sets, the same
+    case-insensitive rule as kosmic.de.ora.run_ora."""
+    de, up = _gene_de()
+    de = de.assign(names=[f"Gm{g[1:]}" for g in de["names"]])
+    gene_sets = {"UP": [f"GM{g[1:]}" for g in up]}
+    res = run_fgsea(de, gene_sets, permutation_num=200, seed=0)
+
+    row = res[res["names"] == "UP"].iloc[0]
+    assert row["nes"] > 1.5
+    assert row["pvals"] < 0.05
+
+
 def test_fgsea_recovers_planted_pathway():
     de, up = _gene_de()
     gene_sets = {"UP": up, "RANDOM": [f"G{i:04d}" for i in range(700, 740)]}

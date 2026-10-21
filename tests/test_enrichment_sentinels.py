@@ -40,6 +40,44 @@ def test_ora_finds_synthetic_enrichment():
     assert 'FDR' in result.columns
 
 
+def test_ora_matches_mouse_genes_to_upper_case_library():
+    """Mouse symbols ('Col4a1') match a human upper-case library
+    ('COL4A1'), and 'Genes' keeps the study's own spelling so the page's
+    gene -> log2FC lookup still finds them."""
+    library = {
+        'PathA': [f'COLA{i:02d}' for i in range(20)],
+        'PathB': [f'LRGB{i:02d}' for i in range(20)],
+    }
+    mouse = {g: g.capitalize() for genes in library.values() for g in genes}
+    background = list(mouse.values()) + [f'Xx{i:03d}' for i in range(300)]
+    study = [mouse[g] for g in library['PathA']]
+
+    result = run_ora(study, background, library, min_genes=5)
+
+    pa = result[result['Term'] == 'PathA'].iloc[0]
+    assert pa['Gene_Count'] == 20
+    assert pa['Term_Size'] == 20
+    assert pa['P_value'] < 1e-10
+    assert pa['Genes'] == sorted(study)
+    assert set(pa['Genes']) <= set(background)
+
+    # Same result as running on upper-cased inputs.
+    upper = run_ora([g.upper() for g in study],
+                    [g.upper() for g in background], library, min_genes=5)
+    assert np.isclose(upper.iloc[0]['P_value'], pa['P_value'])
+
+
+def test_ora_case_collision_counts_one_background_gene():
+    """Two background spellings of one symbol count once in the universe."""
+    library = {'PathA': [f'G{i}' for i in range(10)]}
+    background = [f'G{i}' for i in range(10)] + ['g0'] + [f'X{i}' for i in range(40)]
+    result = run_ora(['G0', 'G1', 'G2'], background, library, min_genes=5)
+    row = result.iloc[0]
+    assert row['Term_Size'] == 10
+    assert row['Gene_Count'] == 3
+    assert row['Genes'] == ['G0', 'G1', 'G2']
+
+
 # ----------------------------------------------------------------------
 # GO elim enrichment: shape sentinel using bundled reference data.
 # Correctness against goatools is implicit -- we delegate to that
