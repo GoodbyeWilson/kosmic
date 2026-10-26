@@ -22,6 +22,7 @@ from kosmic.gui.figure_export.pages.elbow import PCAElbowPage
 from kosmic.gui.figure_export.pages.enriched_terms import EnrichedTermsPage
 from kosmic.gui.figure_export.pages.fgsea import FgseaPage
 from kosmic.gui.figure_export.pages.gene_heatmap import GeneHeatmapPage
+from kosmic.gui.figure_export.pages.leading_edge import LeadingEdgeHeatmapPage
 from kosmic.gui.figure_export.pages.library_gsea import LibraryGseaPage
 from kosmic.gui.figure_export.pages.library_gsea_mountain import LibraryGseaMountainPage
 from kosmic.gui.figure_export.pages.meta_figures import (
@@ -65,6 +66,7 @@ _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     ("Enrichment", FgseaPage),
     ("Enrichment", LibraryGseaPage),
     ("Enrichment", LibraryGseaMountainPage),
+    ("Enrichment", LeadingEdgeHeatmapPage),
     # Meta-Analysis (ADR-010)
     ("Meta-Analysis", MetaVolcanoPage),
     ("Meta-Analysis", PathwayMetaVolcanoPage),
