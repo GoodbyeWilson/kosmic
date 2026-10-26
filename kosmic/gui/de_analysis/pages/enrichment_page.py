@@ -32,6 +32,12 @@ _GO_LIBRARIES = [
     ("GO Cellular Component", "GO_CC"),
 ]
 
+# Published libraries bundled with KOSMIC, used exactly as released
+# (kosmic.reference.pathways.libraries). Listed before the Enrichr ones.
+_BUNDLED_LIBRARIES = [
+    ("Hallmark 2026.2 (human)", "MSigDB_Hallmark_2026.2_Hs"),
+]
+
 _ENRICHR_LIBRARIES = [
     ("KEGG 2026", "KEGG_2026"),
     ("Reactome 2024", "Reactome_Pathways_2024"),
@@ -50,6 +56,11 @@ _METHODS = [
     ("Over-representation (ORA)", "ora"),
     ("Preranked GSEA (fgsea)", "gsea"),
 ]
+
+
+def _now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
 
 class EnrichmentPage(SidebarTabbedPage):
@@ -336,6 +347,8 @@ class EnrichmentPage(SidebarTabbedPage):
         if not gsea_only:
             for display, lib_id in _GO_LIBRARIES:
                 self._library_combo.addItem(f"GO: {display}", lib_id)
+        for display, lib_id in _BUNDLED_LIBRARIES:
+            self._library_combo.addItem(f"MSigDB: {display}", lib_id)
         for display, lib_id in _ENRICHR_LIBRARIES:
             self._library_combo.addItem(f"Enrichr: {display}", lib_id)
         self._library_combo.blockSignals(False)
@@ -568,6 +581,12 @@ class EnrichmentPage(SidebarTabbedPage):
         self.ws.status_message.emit(message)
         norm = self._normalise_go(results_df)
         self._annotate_direction_and_display(norm)
+        self._library_source = {
+            'library': self._library_combo.currentData(),
+            'provider': 'Gene Ontology (annotation files bundled with KOSMIC)',
+            'accessed': _now(),
+        }
+        self._record_study_enrichment('go')
 
     def _on_enrichr_finished(self, payload):
         results_df, message = payload
@@ -579,6 +598,8 @@ class EnrichmentPage(SidebarTabbedPage):
         self.ws.status_message.emit(message)
         norm = self._normalise_enrichr(results_df)
         self._annotate_direction_and_display(norm)
+        self._library_source = getattr(self._worker, 'library_source', None)
+        self._record_study_enrichment('ora')
 
     def _on_enrichment_failed(self, message: str):
         self._run_btn.setEnabled(True)
@@ -647,6 +668,69 @@ class EnrichmentPage(SidebarTabbedPage):
         self.ws.log_message.emit(message)
         self.ws.status_message.emit(message)
         self._show_gsea_results(res)
+        self._library_source = getattr(self._worker, 'library_source', None)
+        self._record_study_enrichment('gsea')
+
+    # ------------------------------------------------------------------
+    # Provenance
+    # ------------------------------------------------------------------
+
+    # The adjusted p-value column of each method's results table: ORA and
+    # GO are normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
+    _ADJ_P_COLUMN = {'go': 'FDR', 'ora': 'FDR', 'gsea': 'pvals_adj'}
+
+    def _enrichment_params(self, method) -> dict:
+        """What one enrichment run used and found, for the provenance."""
+        df = self._results_df
+        n_terms = 0 if df is None else len(df)
+        col = self._ADJ_P_COLUMN[method]
+        n_sig = 0
+        if df is not None and col in getattr(df, 'columns', []):
+            n_sig = int((df[col] < self._p_thresh.value()).sum())
+        study, background, _ = self._get_sig_genes()
+        return {
+            'method':      method,
+            'library':     self._library_combo.currentText(),
+            # Where the library came from: bundled file or Enrichr download,
+            # its version or address, a SHA-1 of its content, set and gene
+            # counts and the time it was loaded.
+            'library_source': getattr(self, '_library_source', None),
+            'direction':   self._direction_combo.currentData(),
+            'rank_by':     (getattr(self, 'rank_column', 'logfoldchanges')
+                            if method == 'gsea' else None),
+            'fdr':         self._p_thresh.value(),
+            'gene_fdr':    self._fdr_spin.value(),
+            'gene_lfc':    self._lfc_spin.value(),
+            'min_genes':   self._min_genes.value(),
+            'n_genes_in':  len(study or []),
+            'n_background': len(background or []),
+            'n_terms':     n_terms,
+            'n_terms_sig': n_sig,
+        }
+
+    def _record_study_enrichment(self, method):
+        """Record a DE-workspace enrichment run in the study's provenance.
+
+        One entry per method and library: rerunning a library replaces its
+        entry, running another library adds one. The meta-analysis host
+        has no study file and records into its own sidecar instead.
+        """
+        h5ad = getattr(self.ws, 'h5ad_path', None)
+        if not h5ad:
+            return
+        try:
+            from pathlib import Path
+
+            from kosmic import provenance
+            study_dir = Path(h5ad).parent
+            params = self._enrichment_params(method)
+            de_stage = provenance.last_stage(study_dir, 'gene_de')
+            provenance.record_stage(
+                study_dir, Path(h5ad).stem, 'enrichment', params,
+                consumed_token=(de_stage or {}).get('consumed_token'),
+                replace_matching={'method': method, 'library': params['library']})
+        except Exception as e:  # provenance is best-effort
+            self.ws.log_message.emit(f"Could not record enrichment provenance: {e}")
 
     def _gsea_results_path(self):
         """Where a library GSEA run is saved, or None to not save it.

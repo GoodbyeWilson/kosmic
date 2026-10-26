@@ -650,11 +650,13 @@ class GOEnrichmentWorker(BaseWorker):
 
 class EnrichrORAWorker(BaseWorker):
     """
-    Worker thread for over-representation analysis using Enrichr libraries.
+    Worker thread for over-representation analysis against a library.
 
-    Downloads the gene set library from Enrichr, then runs Fisher's exact test
-    for each term against the study gene list. BH correction applied.
-    Emits 'finished_ok' with '(results_df, message)'.
+    Loads the library (bundled with KOSMIC, or downloaded from Enrichr),
+    then runs Fisher's exact test for each term against the study gene
+    list. BH correction applied. Emits 'finished_ok' with
+    '(results_df, message)'; 'library_source' then records where the
+    library came from (kosmic.reference.pathways.libraries).
     """
 
     def __init__(self, study_genes, background_genes, library_name,
@@ -665,13 +667,14 @@ class EnrichrORAWorker(BaseWorker):
         self.library_name = library_name
         self.alpha = alpha
         self.min_genes = min_genes
+        self.library_source = None
 
     def _run(self):
         from kosmic.de.ora import run_ora
-        from kosmic.reference.pathways.enrichr import fetch_library
+        from kosmic.reference.pathways.libraries import load_library
 
-        self.progress.emit(f"Downloading {self.library_name} from Enrichr...")
-        library = fetch_library(self.library_name)
+        self.progress.emit(f"Loading {self.library_name}...")
+        library, self.library_source = load_library(self.library_name)
         if not library:
             raise RuntimeError(f"Empty library: {self.library_name}")
 
@@ -917,12 +920,14 @@ class FgseaWorker(BaseWorker):
 
 
 class LibraryGseaWorker(BaseWorker):
-    """Preranked GSEA of a fetched Enrichr library against the ranked gene DE.
+    """Preranked GSEA of a library against the ranked gene DE.
 
-    Fetches the library's gene sets (network) then runs fgsea, so the
-    unbiased 'which pathways are enriched genome-wide' question is answered
-    with the same rank-based method as the a-priori panel. Emits
-    'finished_ok' with '(summary_df, message)'.
+    Loads the library's gene sets (bundled with KOSMIC, or downloaded from
+    Enrichr) then runs fgsea, so the unbiased 'which pathways are enriched
+    genome-wide' question is answered with the same rank-based method as
+    the a-priori panel. Emits 'finished_ok' with '(summary_df, message)';
+    'library_source' then records where the library came from
+    (kosmic.reference.pathways.libraries).
     """
 
     def __init__(self, gene_de_results, library_name,
@@ -931,13 +936,14 @@ class LibraryGseaWorker(BaseWorker):
         self._gene_de = gene_de_results
         self._library_name = library_name
         self._rank_by = rank_by
+        self.library_source = None
 
     def _run(self):
         from kosmic.de.fgsea import run_fgsea
-        from kosmic.reference.pathways.enrichr import fetch_library
+        from kosmic.reference.pathways.libraries import load_library
 
-        self.progress.emit(f"Fetching {self._library_name}...")
-        gene_sets = fetch_library(self._library_name)
+        self.progress.emit(f"Loading {self._library_name}...")
+        gene_sets, self.library_source = load_library(self._library_name)
         if not gene_sets:
             raise RuntimeError(f"Could not fetch library '{self._library_name}'.")
 

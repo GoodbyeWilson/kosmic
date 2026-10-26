@@ -517,7 +517,8 @@ def _meta_staleness_note(studies, meta_rec) -> str:
 
 
 def record_meta_stage(project_folder, stage: str, params: dict,
-                      selection: Optional[str] = None) -> bool:
+                      selection: Optional[str] = None,
+                      replace_matching: Optional[dict] = None) -> bool:
     """Record one meta-analysis stage into the selection's sidecar.
 
     'selection' is the output folder of what was pooled
@@ -535,6 +536,10 @@ def record_meta_stage(project_folder, stage: str, params: dict,
     own sidecar next to the CSV, which records the outcome and library
     versions; this record is the current state, not an audit log.
 
+    'replace_matching' narrows that to earlier entries whose params match
+    it (see provenance.record_stage), for a stage run once per item that
+    should all be kept -- enrichment, one entry per method and library.
+
     Best-effort: returns False rather than raising, because failing to
     write a methods note must never lose an analysis result.
     """
@@ -547,7 +552,8 @@ def record_meta_stage(project_folder, stage: str, params: dict,
             name = f"{name} ({selection})"
         provenance.record_stage(
             meta_provenance_dir(project_folder, selection),
-            name, stage, params, replace=True)
+            name, stage, params, replace=replace_matching is None,
+            replace_matching=replace_matching)
         return True
     except Exception:
         return False
