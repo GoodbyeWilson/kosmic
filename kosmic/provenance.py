@@ -105,7 +105,8 @@ def record_stage(study_dir, study: str, stage: str, params: dict, *,
                  fingerprint: Optional[dict] = None,
                  consumed_token: Optional[str] = None,
                  source: Optional[str] = None,
-                 replace: bool = False) -> dict:
+                 replace: bool = False,
+                 replace_matching: Optional[dict] = None) -> dict:
     """Append a stage entry to the study's sidecar (creating it if absent).
 
     'fingerprint' (from compute_fingerprint) updates the record's current data
@@ -124,6 +125,10 @@ def record_stage(study_dir, study: str, stage: str, params: dict, *,
     that emits a file: re-running a meta-analysis overwrites its output
     but was appending another entry, so the record grew a click history
     describing results that no longer existed.
+
+    'replace_matching' drops only the earlier entries of the same stage
+    whose params equal it on every given key: a stage run once per item,
+    such as enrichment once per library, keeps one entry per item.
     """
     rec = load(study_dir) or {
         'schema_version': SCHEMA_VERSION,
@@ -142,6 +147,11 @@ def record_stage(study_dir, study: str, stage: str, params: dict, *,
     stages = rec.setdefault('stages', [])
     if replace:
         stages[:] = [st for st in stages if st.get('stage') != stage]
+    elif replace_matching:
+        stages[:] = [st for st in stages if not (
+            st.get('stage') == stage
+            and all((st.get('params') or {}).get(k) == v
+                    for k, v in replace_matching.items()))]
     stages.append(entry)
     _save(study_dir, rec)
     write_methods(study_dir)  # keep the readable companion in sync
@@ -226,6 +236,7 @@ _STAGE_TITLES = {
     'cluster': 'Clustering', 'decontx': 'DecontX decontamination',
     'qc_recheck': 'QC limits re-applied to the decontaminated counts',
     'doublets': 'Doublet detection',
+    'enrichment': 'Pathway enrichment',
     'annotate': 'Cell-type annotation',
     'annotate_manual': 'Manual cell-type relabelling',
     'propagate_labels': 'Cell-type labels from the atlas',
@@ -281,7 +292,9 @@ def _abbrev_value(key: str, value, limit: int = _VALUE_LIMIT) -> str:
 
 # Stages whose every entry is a separate result rather than a re-run of
 # the one before: each subclustering refines a different population.
-_EVERY_ENTRY_STAGES = frozenset({'subcluster'})
+# Stages whose every entry is current: one per subclustering, one per
+# enrichment method and library (record_stage(replace_matching=...)).
+_EVERY_ENTRY_STAGES = frozenset({'subcluster', 'enrichment', 'meta_enrichment'})
 
 
 def current_subclusterings(stages: list) -> list:

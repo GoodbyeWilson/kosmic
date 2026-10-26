@@ -53,6 +53,7 @@ own terms, which take precedence over the GPL for that data.
 | `go/go-basic.obo` | Gene Ontology Consortium | CC BY 4.0 |
 | `go/gene2go_human.gz`, `go/hgnc_entrez.tsv` | NCBI Gene | public domain (US government work) |
 | `orthologs/mgi_human_mouse_1to1.tsv` | Mouse Genome Informatics (MGI) | CC BY 4.0 |
+| `msigdb/h.all.v2026.2.Hs.symbols.gmt` | MSigDB Hallmark gene sets, release 2026.2.Hs (Liberzon et al., Cell Systems 2015), unaltered | CC BY 4.0 |
 | `mgi/mgi_symbols.tsv.gz` | Mouse Genome Informatics (MGI), `MRK_List2.rpt`; built by `dev/scripts/build_mgi_symbols.py` | CC BY 4.0 |
 | `gwas/gene_positions_GRCh37.tsv` | UCSC refFlat (hg19); built by `dev/scripts/generate_gene_positions.py` | free for all uses |
 

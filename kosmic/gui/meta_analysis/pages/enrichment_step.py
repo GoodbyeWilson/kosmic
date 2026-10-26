@@ -114,6 +114,10 @@ class MetaEnrichmentPage(EnrichmentPage):
     # that the Methods step renders, which the DE workspace has no part
     # in. Both finish handlers funnel through _record_enrichment.
 
+    def _on_go_finished(self, payload):
+        super()._on_go_finished(payload)
+        self._record_enrichment('go')
+
     def _on_enrichr_finished(self, payload):
         super()._on_enrichr_finished(payload)
         self._record_enrichment('ora')
@@ -121,10 +125,6 @@ class MetaEnrichmentPage(EnrichmentPage):
     def _on_gsea_finished(self, payload):
         super()._on_gsea_finished(payload)
         self._record_enrichment('gsea')
-
-    # The adjusted p-value column of each method's results table: ORA is
-    # normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
-    _ADJ_P_COLUMN = {'ora': 'FDR', 'gsea': 'pvals_adj'}
 
     def _gsea_results_path(self):
         """The selection's meta-analysis folder, one file per library.
@@ -142,32 +142,19 @@ class MetaEnrichmentPage(EnrichmentPage):
                 / f"{stem}_{self._gsea_library_id}.csv")
 
     def _record_enrichment(self, method):
+        """One entry per method and library in the selection's record:
+        rerunning a library replaces its entry, another library adds one."""
         from kosmic.meta_analysis.io import record_meta_stage
-        df = self._results_df
-        n_terms = 0 if df is None else len(df)
-        n_sig = 0
-        col = self._ADJ_P_COLUMN[method]
-        if df is not None and col in getattr(df, 'columns', []):
-            n_sig = int((df[col] < self._p_thresh.value()).sum())
-        study, background, _ = self._get_sig_genes()
+        params = self._enrichment_params(method)
+        if method == 'gsea':
+            params['library'] = self.ws.gsea_library_name
         results_file = None
-        if method == 'gsea' and n_terms:
+        if method == 'gsea' and params['n_terms']:
             path = self._gsea_results_path()
             if path is not None:
                 results_file = path.relative_to(self._project_folder).as_posix()
-        record_meta_stage(self._project_folder, 'meta_enrichment', {
-            'method':      method,
-            'library':     (self.ws.gsea_library_name if method == 'gsea'
-                            else self._library_combo.currentText()),
-            'direction':   self._direction_combo.currentData(),
-            'rank_by':     self.rank_column if method == 'gsea' else None,
-            'fdr':         self._p_thresh.value(),
-            'gene_fdr':    self._fdr_spin.value(),
-            'gene_lfc':    self._lfc_spin.value(),
-            'min_genes':   self._min_genes.value(),
-            'n_genes_in':  len(study or []),
-            'n_background': len(background or []),
-            'n_terms':     n_terms,
-            'n_terms_sig': n_sig,
-            'results_file': results_file,
-        }, selection=self._selection)
+        params['results_file'] = results_file
+        record_meta_stage(
+            self._project_folder, 'meta_enrichment', params,
+            selection=self._selection,
+            replace_matching={'method': method, 'library': params['library']})

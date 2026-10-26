@@ -54,14 +54,30 @@ def fetch_library(library_name, timeout=60):
     ValueError
         If the response is empty or unparseable.
     """
-    url = f"{BASE_URL}/geneSetLibrary?mode=text&libraryName={library_name}"
-    req = urllib.request.Request(url)
+    return parse_library_text(fetch_library_text(library_name, timeout))
+
+
+def library_url(library_name):
+    """The Enrichr address a library is downloaded from."""
+    return f"{BASE_URL}/geneSetLibrary?mode=text&libraryName={library_name}"
+
+
+def fetch_library_text(library_name, timeout=60):
+    """Download a library from Enrichr as the text Enrichr serves.
+
+    Kept separate from the parsing so a caller can fingerprint exactly
+    what was downloaded (see kosmic.reference.pathways.libraries).
+    """
+    req = urllib.request.Request(library_url(library_name))
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         text = resp.read().decode("utf-8")
-
     if not text.strip():
         raise ValueError(f"Empty response for library '{library_name}'")
+    return text
 
+
+def parse_library_text(text):
+    """Parse Enrichr's library text into {pathway_name: [gene_list]}."""
     pathways = {}
     for line in text.strip().split("\n"):
         if not line.strip():

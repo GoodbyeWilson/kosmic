@@ -78,7 +78,7 @@ kosmic/                 the installable package
   meta_analysis/        pooling methods, consensus, leave-one-out, permutation calibration
   combine/              shared atlas: concatenation, gene merging, label propagation
   visualisation/        matplotlib figures; style.py writes every exported figure (ADR-009)
-  reference/            bundled reference data (HGNC, MGI, gene sets, markers, GO, GWAS, Olink)
+  reference/            bundled reference data (HGNC, MGI, MSigDB Hallmark, gene sets, markers, GO, GWAS, Olink)
   gui/                  the PyQt6 layer
     shared/             theme, widgets, page archetypes, Explorer pane, plot widgets
     project/            Project workspace
