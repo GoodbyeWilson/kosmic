@@ -131,6 +131,7 @@ nav:
       - DE genes by pathway: figures/topde_summary.md
       - Enriched terms: figures/enriched_terms.md
       - Enriched term links: figures/term_links.md
+      - Leading-edge heatmap: figures/leading_edge.md
       - Pathway bubble: figures/pathway_bubble.md
       - Meta-analysis volcano: figures/meta_volcano.md
       - Meta-analysis forest plot: figures/meta_forest.md
