@@ -30,11 +30,44 @@ BUNDLED = {
                 '2026.2.Hs/h.all.v2026.2.Hs.symbols.gmt'),
         'citation': 'Liberzon et al., Cell Systems 2015',
     },
+    # MSigDB's own mouse edition of the same release, in mouse symbols
+    # (mapped by MSigDB), for mouse data.
+    'MSigDB_Hallmark_2026.2_Mm': {
+        'package': 'kosmic.reference.msigdb',
+        'file': 'mh.all.v2026.2.Mm.symbols.gmt',
+        'provider': 'MSigDB (file bundled with KOSMIC)',
+        'version': '2026.2.Mm',
+        'url': ('https://data.broadinstitute.org/gsea-msigdb/msigdb/release/'
+                '2026.2.Mm/mh.all.v2026.2.Mm.symbols.gmt'),
+        'citation': 'Liberzon et al., Cell Systems 2015',
+    },
 }
 
 
 def is_bundled(library_id: str) -> bool:
     return library_id in BUNDLED
+
+
+#: Prefixes MSigDB puts on the name of every set in a collection
+#: ('HALLMARK_OXIDATIVE_PHOSPHORYLATION'). They say which collection a set
+#: is from, which the library already says.
+_COLLECTION_PREFIXES = ('HALLMARK_',)
+
+
+def term_label(name) -> str:
+    """How a gene-set name is shown in tables and figures.
+
+    The collection prefix is dropped and underscores become spaces
+    ('HALLMARK_OXIDATIVE_PHOSPHORYLATION' is shown as 'OXIDATIVE
+    PHOSPHORYLATION'). Display only: results, exports and the provenance
+    keep the name exactly as the library gives it.
+    """
+    s = str(name)
+    for prefix in _COLLECTION_PREFIXES:
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s.replace('_', ' ')
 
 
 def _parse_gmt_text(text: str) -> dict:

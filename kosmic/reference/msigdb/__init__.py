@@ -4,6 +4,10 @@
 2026.2.Hs, human gene symbols: 50 gene sets, 4,384 genes. Downloaded
 unaltered from the Broad Institute's public release folder
 (https://data.broadinstitute.org/gsea-msigdb/msigdb/release/2026.2.Hs/).
+`mh.all.v2026.2.Mm.symbols.gmt` -- MSigDB's mouse edition of the same
+release, 2026.2.Mm, in mouse gene symbols mapped by MSigDB: 50 gene sets,
+4,291 genes. Same source folder for Mm.
+
 CC BY 4.0; cite Liberzon et al., Cell Systems 2015.
 
 The file is used exactly as published -- symbols are not updated -- so a

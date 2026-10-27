@@ -102,8 +102,8 @@ def test_meta_enrichment_offers_both_methods(enrich):
 
 def test_meta_enrichment_has_the_full_library_list(enrich):
     """Seven hardcoded Enrichr libraries became the DE page's eleven, plus
-    the bundled MSigDB Hallmark."""
-    assert enrich._library_combo.count() == 12
+    the bundled MSigDB Hallmark, human and mouse."""
+    assert enrich._library_combo.count() == 13
 
 
 def test_meta_ranks_gsea_by_pooled_z(enrich):
@@ -339,7 +339,7 @@ def test_method_still_constrains_the_library_list(enrich):
     ora_n = enrich._library_combo.count()
     enrich._method_combo.setCurrentIndex(1)          # GSEA
     gsea_n = enrich._library_combo.count()
-    assert ora_n == 12 and gsea_n == 9
+    assert ora_n == 13 and gsea_n == 10
     assert not enrich._fdr_spin.isEnabled()          # GSEA is threshold-free
     enrich._method_combo.setCurrentIndex(0)
     assert enrich._fdr_spin.isEnabled()

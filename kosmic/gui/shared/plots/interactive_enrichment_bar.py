@@ -36,7 +36,8 @@ def _brush(theme_key: str, alpha: int) -> QColor:
 
 
 def _trim(name: str) -> str:
-    s = str(name).replace('_', ' ')
+    from kosmic.reference.pathways.libraries import term_label
+    s = term_label(name)
     return s if len(s) <= _MAX_LABEL else s[:_MAX_LABEL - 1] + '…'
 
 
