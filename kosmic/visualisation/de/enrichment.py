@@ -29,7 +29,9 @@ def top_terms(enrichment_df, fdr_threshold=DEFAULT_FDR, top_n=20,
         sig = enrichment_df.head(top_n)
         title = f'No terms at {significance_label} < {fdr_threshold:g}: top {len(sig)} shown'
     sig = sig.copy()
-    sig['Term'] = sig['Term'].astype(str).str.replace(_GO_ID, '', regex=True)
+    from kosmic.reference.pathways.libraries import term_label
+    sig['Term'] = (sig['Term'].astype(str).str.replace(_GO_ID, '', regex=True)
+                   .map(term_label))
     return sig, title
 
 

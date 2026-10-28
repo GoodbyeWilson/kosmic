@@ -38,7 +38,8 @@ def create_fgsea_nes_plot(res, disease_label=None, control_label=None,
     df = df.copy()
     df['pvals_adj'] = pd.to_numeric(df['pvals_adj'], errors='coerce')
 
-    names = [str(n).replace('_', ' ') for n in df['names']]
+    from kosmic.reference.pathways.libraries import term_label
+    names = [term_label(n) for n in df['names']]
     nes = df['nes'].to_numpy(dtype=float)
     padj = df['pvals_adj'].to_numpy(dtype=float)
     sig = np.isfinite(padj) & (padj < fdr_threshold)

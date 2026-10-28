@@ -36,6 +36,7 @@ _GO_LIBRARIES = [
 # (kosmic.reference.pathways.libraries). Listed before the Enrichr ones.
 _BUNDLED_LIBRARIES = [
     ("Hallmark 2026.2 (human)", "MSigDB_Hallmark_2026.2_Hs"),
+    ("Hallmark 2026.2 (mouse)", "MSigDB_Hallmark_2026.2_Mm"),
 ]
 
 _ENRICHR_LIBRARIES = [
@@ -772,9 +773,11 @@ class EnrichmentPage(SidebarTabbedPage):
         display['_le_n'] = display['_le'].str.split(';').apply(
             lambda gs: len([g for g in gs if g.strip()]))
         display['_le_disp'] = display['_le'].str.slice(0, 200)
+        from kosmic.reference.pathways.libraries import term_label
+        display['_label'] = display['names'].map(term_label)
 
         cols = [
-            Column('Gene set',           'names',     's'),
+            Column('Gene set',           '_label',    's'),
             Column('NES',                'nes',       '.2f'),
             Column('ES',                 'es',        '.2f'),
             Column('P-value',            'pvals',     '.2e'),
@@ -793,6 +796,8 @@ class EnrichmentPage(SidebarTabbedPage):
                 item.setForeground(down if row['nes'] < 0 else up)
             elif key == '_le_disp':
                 item.setToolTip(row['_le'])
+            elif key == '_label':
+                item.setToolTip(str(row['names']))      # the library's own name
 
         self._table.set_schema(cols)
         self._table.set_data(display, decorate=_decorate)
@@ -935,9 +940,11 @@ class EnrichmentPage(SidebarTabbedPage):
         display['_genes_display'] = display['_genes_str'].str.slice(0, 200)
         if 'Term_Size' not in display.columns:
             display['Term_Size'] = display['_n_overlap']
+        from kosmic.reference.pathways.libraries import term_label
+        display['_term'] = display['Term'].map(term_label)
 
         cols = [
-            Column('Term',         'Term',            's'),
+            Column('Term',         '_term',           's'),
             Column('P-value',      'P_value',         '.2e'),
             Column('FDR',          'FDR',             '.2e'),
             Column('Fold Enrich.', 'Fold_Enrichment', '.2f'),
@@ -960,6 +967,8 @@ class EnrichmentPage(SidebarTabbedPage):
                 item.setForeground(down_color)
             elif key == '_genes_display':
                 item.setToolTip(row['_genes_str'])
+            elif key == '_term':
+                item.setToolTip(str(row['Term']))       # the library's own name
 
         self._table.set_schema(cols)
         self._table.set_data(display, decorate=_decorate)

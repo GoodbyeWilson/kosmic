@@ -14,6 +14,7 @@ import pandas as pd
 
 from kosmic import DEFAULT_FDR
 from kosmic.de.de_analysis import excluded_genes
+from kosmic.reference.pathways.libraries import term_label
 from kosmic.visualisation.style import CATEGORY_COLORS, FG, diverging_cmap
 
 _GO_ID = re.compile(r'^GO:\d+\s+')
@@ -49,7 +50,7 @@ def select_term_genes(enrichment_df, de_results, n_terms=8, genes_per_term=8,
         genes = [g for g in dict.fromkeys(genes) if g in lfc_all.index]
         if genes:
             keep = lfc_all[genes].abs().nlargest(genes_per_term).index
-            members[_GO_ID.sub('', str(term))] = [g for g in genes if g in keep]
+            members[term_label(_GO_ID.sub('', str(term)))] = [g for g in genes if g in keep]
         if len(members) == n_terms:
             break
     all_genes = list(dict.fromkeys(g for gs in members.values() for g in gs))

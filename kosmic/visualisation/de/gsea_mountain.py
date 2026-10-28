@@ -60,7 +60,8 @@ def create_gsea_mountain_plot(res_curve, hits, term, nes=None, fdr=None,
     ax.set_ylabel('Running enrichment score',
                   fontsize=font_sizes['axis_label'])
 
-    title = textwrap.fill(str(term).replace('_', ' '), 45)
+    from kosmic.reference.pathways.libraries import term_label
+    title = textwrap.fill(term_label(term), 45)
     ax.set_title(title, fontsize=font_sizes['title'], fontweight='bold')
     stats = []
     if nes is not None and np.isfinite(nes):

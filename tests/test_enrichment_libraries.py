@@ -23,6 +23,41 @@ def test_bundled_hallmark_is_the_published_file_unaltered():
     assert source['accessed'].endswith('+00:00')
 
 
+def test_bundled_mouse_hallmark_has_mouse_symbols():
+    """MSigDB's mouse edition, including the MHC genes the human file's
+    names cannot match ('HLA-DRA' against mouse 'H2-Ea')."""
+    sets, source = libraries.load_library('MSigDB_Hallmark_2026.2_Mm')
+    assert len(sets) == 50 and source['version'] == '2026.2.Mm'
+    assert source['sha1'] == '6a3ff2442fa2' and source['n_genes'] == 4291
+    assert 'H2-Ea' in {g for genes in sets.values() for g in genes}
+
+
+def test_enrichment_of_an_earlier_pooling_is_left_out_of_the_methods(tmp_path):
+    """Rerunning the gene meta-analysis makes the enrichment of the
+    previous pooled list describe a result that no longer exists."""
+    def record(stage, params):
+        provenance.record_stage(tmp_path, 'S', stage, params,
+                                replace=stage == 'meta_gene',
+                                replace_matching=({'method': params['method'],
+                                                   'library': params['library']}
+                                                  if stage == 'meta_enrichment' else None))
+
+    record('meta_gene', {'n_significant': 178})
+    record('meta_enrichment', {'method': 'gsea', 'library': 'KEGG 2026'})
+    record('meta_gene', {'n_significant': 451})          # pooling rerun
+    record('meta_enrichment', {'method': 'gsea', 'library': 'Hallmark 2026.2'})
+    text = provenance.render_methods(provenance.load(tmp_path))
+    assert 'Hallmark 2026.2' in text and 'KEGG 2026' not in text
+    assert '1 pathway enrichment of the pooled genes run(s) on an earlier run' in text
+    assert len(provenance.load(tmp_path)['stages']) == 3     # the record keeps it
+
+
+def test_set_names_are_shown_without_the_collection_prefix():
+    assert libraries.term_label('HALLMARK_OXIDATIVE_PHOSPHORYLATION') == 'OXIDATIVE PHOSPHORYLATION'
+    assert libraries.term_label('TNF-alpha Signaling via NF-kB') == 'TNF-alpha Signaling via NF-kB'
+    assert libraries.term_label('CITRATE CYCLE (TCA CYCLE)') == 'CITRATE CYCLE (TCA CYCLE)'
+
+
 def test_an_enrichr_download_is_fingerprinted(monkeypatch):
     from kosmic.reference.pathways import enrichr
     text = "SET A\t\tG1\tG2\nSET B\t\tG2\tG3\n"

@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QDoubleSpinBox, QListWidget, QListWidgetItem, QSpinB
 
 from kosmic.gui.figure_export.pages._enrichment import EnrichmentFigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
+from kosmic.reference.pathways.libraries import term_label
 
 #: Gene sets ticked when the page first shows a run.
 _DEFAULT_TICKED = 2
@@ -138,7 +139,7 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
                                _n=-pd.to_numeric(res['nes'], errors='coerce').abs()
                                ).sort_values(['_p', '_n'])
             for k, (name, nes, fdr) in enumerate(zip(order['names'], order['nes'], order['_p'])):
-                item = QListWidgetItem(f"{name}  (NES {nes:+.2f}, FDR {fdr:.2g})")
+                item = QListWidgetItem(f"{term_label(name)}  (NES {nes:+.2f}, FDR {fdr:.2g})")
                 item.setData(Qt.ItemDataRole.UserRole, str(name))
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 tick = (str(name) in kept) if kept else k < _DEFAULT_TICKED
@@ -170,7 +171,8 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
             genes = leading_edge_genes(row['leading_edge'], ranking, nes, n=n)
             lfc, padj = leading_edge_table(genes, columns)
             blocks.append({
-                'title': f"{name.replace('_', ' ')}  (NES {nes:+.2f}, "
+                'name': name,
+                'title': f"{term_label(name)}  (NES {nes:+.2f}, "
                          f"FDR {float(row['pvals_adj']):.2g})",
                 'lfc': lfc, 'padj': padj})
         return blocks or None
@@ -206,7 +208,7 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
             long = (b['lfc'].stack(future_stack=True).rename('log2fc').to_frame()
                     .join(b['padj'].stack(future_stack=True).rename('padj')))
             long.index.names = ['gene', 'column']
-            long.insert(0, 'gene_set', b['title'])
+            long.insert(0, 'gene_set', b['name'])       # the library's own name
             rows.append(long.reset_index())
         out = Path(fig_path).with_suffix('.csv')
         pd.concat(rows, ignore_index=True).round(6).to_csv(out, index=False)

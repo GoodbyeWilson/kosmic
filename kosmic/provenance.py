@@ -291,10 +291,25 @@ def _abbrev_value(key: str, value, limit: int = _VALUE_LIMIT) -> str:
 
 
 # Stages whose every entry is a separate result rather than a re-run of
-# the one before: each subclustering refines a different population.
-# Stages whose every entry is current: one per subclustering, one per
-# enrichment method and library (record_stage(replace_matching=...)).
+# the one before: one per subclustering, one per enrichment method and
+# library (record_stage(replace_matching=...)).
 _EVERY_ENTRY_STAGES = frozenset({'subcluster', 'enrichment', 'meta_enrichment'})
+
+# Stages computed from another stage's result. An entry made before the
+# latest run of the stage it came from describes a result that no longer
+# exists -- an enrichment of the previous pooling -- so the methods leave
+# it out and say how many were left out. The record keeps it.
+_DERIVED_FROM = {'enrichment': 'gene_de', 'meta_enrichment': 'meta_gene'}
+
+
+def _superseded(stages: list) -> set:
+    """ids of derived entries made before the latest run of their source."""
+    last = {}
+    for i, st in enumerate(stages):
+        last[st.get('stage')] = i
+    return {id(st) for i, st in enumerate(stages)
+            if st.get('stage') in _DERIVED_FROM
+            and i < last.get(_DERIVED_FROM[st['stage']], -1)}
 
 
 def current_subclusterings(stages: list) -> list:
@@ -317,7 +332,9 @@ def _final_stages(stages: list) -> list:
     every attempt as an equal makes the document describe settings that
     produced nothing. The count is kept so nothing is hidden silently.
     Every entry of a stage in _EVERY_ENTRY_STAGES is kept, except
-    subclusterings an automated annotation has since replaced.
+    subclusterings an automated annotation has since replaced and
+    derived entries (_DERIVED_FROM) made before their source was rerun;
+    the source entry counts those in '_n_superseded'.
     """
     counts = {}
     for st in stages:
@@ -326,14 +343,25 @@ def _final_stages(stages: list) -> list:
     for st in stages:
         latest[st.get('stage')] = st
     current = {id(st) for st in current_subclusterings(stages)}
+    stale = _superseded(stages)
+    n_stale = {}
+    for st in stages:
+        if id(st) in stale:
+            n_stale[st['stage']] = n_stale.get(st['stage'], 0) + 1
     out = []
     for st in stages:
+        if id(st) in stale:
+            continue
         if st.get('stage') in _EVERY_ENTRY_STAGES:
             if st.get('stage') != 'subcluster' or id(st) in current:
                 out.append(dict(st))
         elif latest.get(st.get('stage')) is st:
             entry = dict(st)
             entry['_n_runs'] = counts.get(st.get('stage'), 1)
+            superseded = {derived: n for derived, n in n_stale.items()
+                          if _DERIVED_FROM[derived] == st.get('stage')}
+            if superseded:
+                entry['_n_superseded'] = superseded
             out.append(entry)
     return out
 
@@ -381,6 +409,10 @@ def render_methods(record: Optional[dict], *, full: bool = False) -> str:
         n_runs = stage.get('_n_runs', 1)
         rerun = f"  [last of {n_runs} runs]" if n_runs > 1 else ""
         lines.append(f"{i}. {title}  ({ts}){rerun}")
+        for derived, n in (stage.get('_n_superseded') or {}).items():
+            what = _STAGE_TITLES.get(derived, derived).lower()
+            lines.append(f"     ({n} {what} run(s) on an earlier run of this "
+                         f"step not shown; kept in provenance.json)")
         for key, val in (stage.get('params') or {}).items():
             rendered = (_fmt_value(val) if full
                         else _abbrev_value(key, val))

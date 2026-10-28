@@ -68,12 +68,14 @@ class LibraryGseaMountainPage(EnrichmentFigurePage):
     def _sync_terms(self):
         terms = self._ordered_terms()
         combo = self._controls.term_combo
-        current = combo.currentText()
+        from kosmic.reference.pathways.libraries import term_label
+        current = combo.currentData()
         combo.blockSignals(True)
         combo.clear()
-        combo.addItems(terms)
+        for t in terms:                      # shown without the prefix; data is the name
+            combo.addItem(term_label(t), t)
         if current in terms:
-            combo.setCurrentText(current)
+            combo.setCurrentIndex(terms.index(current))
         combo.blockSignals(False)
 
     # -- render ---------------------------------------------------------
@@ -84,7 +86,7 @@ class LibraryGseaMountainPage(EnrichmentFigurePage):
         terms = self._ordered_terms()
         if not det or not terms:
             return None
-        term = self._controls.term_combo.currentText() or terms[0]
+        term = self._controls.term_combo.currentData() or terms[0]
         if term not in det:
             term = terms[0]
         d = det[term]
