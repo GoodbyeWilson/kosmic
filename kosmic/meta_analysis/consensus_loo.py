@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from kosmic.meta_analysis.pooling_dispatch import (
+    RULE_METHODS,
     get_analytical_pool_fn,
     merge_consensus_methods,
 )
@@ -373,7 +374,11 @@ def _build_fold_consensus(fold_datasets: List[pd.DataFrame],
         pool_fn = get_analytical_pool_fn(key, min_studies)
         analytical_dfs[key] = pool_fn(fold_datasets, min_studies=min_studies)
 
-    if calibration == 'cc_perm':
+    # A rule method (vote counting; every fold study must agree) has no
+    # p-value to calibrate.
+    rules = {k: analytical_dfs.pop(k) for k in list(analytical_dfs)
+             if k in RULE_METHODS}
+    if calibration == 'cc_perm' and analytical_dfs:
         if not fold_pseudobulk:
             raise ValueError(
                 "CC perm calibration requires pseudobulk data; none "
@@ -390,6 +395,7 @@ def _build_fold_consensus(fold_datasets: List[pd.DataFrame],
         )
     else:
         method_dfs = analytical_dfs
+    method_dfs.update(rules)
 
     return merge_consensus_methods(method_keys, method_dfs)
 

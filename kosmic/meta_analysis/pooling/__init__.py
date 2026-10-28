@@ -18,6 +18,7 @@ from kosmic.meta_analysis.pooling.stouffer import stouffer_fast
 from kosmic.meta_analysis.pooling.wop import wop_fast
 from kosmic.meta_analysis.pooling.gwop import gwop_fast
 from kosmic.meta_analysis.pooling.sign_test import pool_sign_test
+from kosmic.meta_analysis.pooling.vote_count import vote_count_fast
 
 __all__ = [
     'dl_fast',
@@ -29,4 +30,5 @@ __all__ = [
     'wop_fast',
     'gwop_fast',
     'pool_sign_test',
+    'vote_count_fast',
 ]

@@ -1,6 +1,9 @@
 # Results tab: per-gene consensus table, sig-count label, panel summary.
 # A checkbox limits the table to genes whose studies disagree in
-# direction ('direction_conflict', see kosmic.meta_analysis.direction).
+# direction ('direction_conflict', see kosmic.meta_analysis.direction),
+# and a row of level checkboxes (0/k ... k/k, conflict: the studies that
+# call a gene significant in the same direction, see
+# kosmic.meta_analysis.pooling.vote_count) limits it to chosen levels.
 #
 # Parent drives via 'populate'; 'gene_selected' fires on row click.
 from __future__ import annotations
@@ -58,6 +61,14 @@ class ResultsTab(QWidget):
         self.conflict_only_cb.setEnabled(False)
         lay.addWidget(self.conflict_only_cb)
 
+        # One checkbox per level, rebuilt by populate (k varies by run).
+        self._level_row = QHBoxLayout()
+        self._level_row.setContentsMargins(0, 0, 0, 0)
+        self._level_row.setSpacing(10)
+        lay.addLayout(self._level_row)
+        self.level_checks: dict = {}
+        self._levels: Optional[pd.Series] = None
+
         self.table = ResultsTable()
         self.table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
@@ -97,8 +108,13 @@ class ResultsTab(QWidget):
         self,
         meta_df: Optional[pd.DataFrame],
         method_keys: Optional[list],
+        n_studies: Optional[int] = None,
     ) -> None:
-        """Build the schema + load rows from the consensus result."""
+        """Build the schema + load rows from the consensus result.
+
+        'n_studies' (k) labels the agreement levels; without it the
+        largest per-gene study count is used.
+        """
         if meta_df is None:
             self._df = None
             self.table.setRowCount(0)
@@ -116,10 +132,15 @@ class ResultsTab(QWidget):
 
         cols.append(Column('log2FC', 'logfoldchanges', '.3f'))
 
-        if 'ci_lower' in df.columns:
+        # Vote counting has no confidence interval: run on its own, its CI
+        # and I² columns come from the inverse-variance fit kept for the
+        # plots, so they are not shown as if they were its own.
+        votes = 'votes' in df.columns
+        vote_only = list(method_keys or []) == ['vote_count']
+        if 'ci_lower' in df.columns and not vote_only:
             cols += [Column('CI lo', 'ci_lower', '.3f'),
                      Column('CI hi', 'ci_upper', '.3f')]
-        if 'heterogeneity_i2' in df.columns:
+        if 'heterogeneity_i2' in df.columns and not vote_only:
             cols.append(Column('I²', 'heterogeneity_i2', '.1%'))
 
         # Per-method FDR (precomputed in worker).
@@ -131,6 +152,10 @@ class ResultsTab(QWidget):
 
         cols.append(Column('Consensus FDR', 'fdr', '.2e'))
         cols.append(Column('k', 'n_studies', 'd'))
+        if votes:                       # vote counting was one of the methods
+            cols.append(Column('Votes', 'votes', 'd',
+                               tooltip='Studies with study FDR < 0.05 in the '
+                                       'more frequent direction'))
 
         has_direction = 'direction_conflict' in df.columns
         if has_direction:
@@ -154,6 +179,7 @@ class ResultsTab(QWidget):
         self.conflict_only_cb.setEnabled(has_direction)
         if not has_direction:
             self.conflict_only_cb.setChecked(False)
+        self._build_levels(df, n_studies)
         self._apply_filter()
 
         sig_count, n_conflict = count_significant_conflicts(
@@ -164,14 +190,47 @@ class ResultsTab(QWidget):
                      f"across studies")
         self.sig_label.setText(text)
 
+    def _build_levels(self, df: pd.DataFrame, n_studies: Optional[int]) -> None:
+        """One checkbox per agreement level, labelled with its gene count."""
+        from kosmic.meta_analysis.pooling.vote_count import vote_levels, vote_level
+
+        while self._level_row.count():
+            item = self._level_row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.level_checks = {}
+        self._levels = None
+        if not {'n_up', 'n_down'} <= set(df.columns) or df.empty:
+            return
+        k = int(n_studies or df['n_studies'].max())
+        self._levels = pd.Series(
+            vote_level(df['n_up'], df['n_down'], k).to_numpy(), index=df.index)
+        counts = vote_levels(df, k)['total']
+        label = QLabel("Studies agreeing:")
+        label.setToolTip("Studies that call the gene significant (study FDR "
+                         "< 0.05) in the same direction; 'conflict' means "
+                         "significant up in one study and down in another.")
+        self._level_row.addWidget(label)
+        for level, n in counts.items():
+            cb = QCheckBox(f"{level} ({n:,})")
+            cb.setChecked(True)
+            cb.toggled.connect(self._apply_filter)
+            self.level_checks[level] = cb
+            self._level_row.addWidget(cb)
+        self._level_row.addStretch(1)
+
     def _apply_filter(self) -> None:
-        """Load the table, limited to direction conflicts if ticked."""
+        """Load the table, limited to direction conflicts and to the
+        ticked agreement levels."""
         if self._df is None:
             return
         df = self._df
         if (self.conflict_only_cb.isChecked()
                 and 'direction_conflict' in df.columns):
             df = df[df['direction_conflict'].fillna(False).astype(bool)]
+        if self._levels is not None and self.level_checks:
+            shown = [lv for lv, cb in self.level_checks.items() if cb.isChecked()]
+            df = df[self._levels.reindex(df.index).isin(shown)]
         self.table.set_data(df)
 
     def clear(self) -> None:

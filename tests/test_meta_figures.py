@@ -130,3 +130,22 @@ def test_meta_volcano_gates_on_fdr_unless_lfc_set(qapp):
     page._controls.lfc_gate.blockSignals(True)
     page._controls.lfc_gate.setValue(0.25)
     assert n_coloured() == 1                 # FDR and |log2FC| > 0.25
+
+
+def test_vote_levels_page_draws_and_exports_the_counts(qapp, tmp_path):
+    from kosmic.gui.figure_export.pages.meta_figures import VoteLevelsPage
+    results = pd.DataFrame({'names': list('ABCD'), 'n_up': [3, 1, 0, 1],
+                            'n_down': [0, 0, 0, 1], 'fdr_reml': [0.01, 0.5, 0.5, 0.5],
+                            'fdr': [0.01, 0.5, 0.5, 0.5]})
+    inputs = {'gene_results': results, 'gene_studies': [('S1', None), ('S2', None),
+                                                         ('S3', None)],
+              'selection': 'Cardiomyocyte', 'project_folder': None}
+    page = VoteLevelsPage(SimpleNamespace(
+        meta_ws=SimpleNamespace(figure_inputs=lambda: inputs), data_version=lambda: 0))
+    page._controls.populate_methods(page._methods())
+    assert page.dependencies_met() and page._controls.overlay.currentText() == 'reml'
+    plt.close(page._make_render_func()())
+    (csv,) = page._export_companions(tmp_path / 'votes.png')
+    counts = pd.read_csv(csv, index_col='level')
+    assert counts.loc['3/3', ['up', 'total', 'significant']].tolist() == [1, 1, 1]
+    assert counts.loc['conflict', 'total'] == 1

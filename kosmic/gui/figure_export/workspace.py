@@ -27,7 +27,7 @@ from kosmic.gui.figure_export.pages.library_gsea import LibraryGseaPage
 from kosmic.gui.figure_export.pages.library_gsea_mountain import LibraryGseaMountainPage
 from kosmic.gui.figure_export.pages.meta_figures import (
     LeaveOneOutPage, MetaVolcanoPage, PathwayForestPage, PathwayMetaVolcanoPage,
-    StudyForestPage,
+    StudyForestPage, VoteLevelsPage,
 )
 from kosmic.gui.figure_export.pages.patient_dotplot import PatientDotplotPage
 from kosmic.gui.figure_export.pages.pathway_bubble import PathwayBubblePage
@@ -73,6 +73,7 @@ _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     ("Meta-Analysis", StudyForestPage),
     ("Meta-Analysis", PathwayForestPage),
     ("Meta-Analysis", LeaveOneOutPage),
+    ("Meta-Analysis", VoteLevelsPage),
 ]
 
 

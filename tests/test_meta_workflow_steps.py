@@ -597,3 +597,53 @@ def test_a_run_saves_where_it_started(app, tmp_path):
     assert not (meta / "Fib").exists()
     rec = provenance.load(meta_provenance_dir(tmp_path, "Endo"))
     assert rec["stages"][-1]["params"]["studies"] == labels
+
+
+# -- vote counting (#30) -----------------------------------------------
+
+def test_vote_counting_is_a_family_and_its_table_shows_votes_not_a_ci(app):
+    from kosmic.gui.meta_analysis.pages.gene_ma.workers import GeneMAWorker
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+
+    page = GeneMAPage()
+    assert "vote" in page._family_checks
+    studies = _tiny_studies("Endo", n=4)
+    data = GeneMAWorker([d["df"] for d in studies], [d["name"] for d in studies],
+                        {"method_keys": ["vote_count"], "calibration": "analytical",
+                         "min_studies": 2})._run()
+    page._results_tab.populate(data["meta_df"], ["vote_count"])
+    table = page._results_tab.table
+    headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
+    assert "Votes" in headers and "CI lo" not in headers and "I²" not in headers
+
+
+def test_the_vote_threshold_reaches_the_run_and_levels_filter_the_table(app, tmp_path):
+    from kosmic.gui.meta_analysis.pages.gene_ma.workers import GeneMAWorker
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+
+    page = GeneMAPage()
+    studies = _tiny_studies("Endo", n=4)
+    labels = [d["name"] for d in studies]
+    page.set_datasets(studies, labels, str(tmp_path))
+    spin = page._min_votes_spin
+    assert (spin.maximum(), spin.value(), spin.suffix()) == (4, 4, " of 4")
+    spin.setValue(2)
+    assert page._vote_params(["reml", "vote_count"]) == {"min_votes": 2}
+    assert page._vote_params(["reml"]) == {}
+
+    for df in (d["df"] for d in studies):          # G0 called up in every study
+        df.loc[df["names"] == "G0", ["pvals_adj", "logfoldchanges"]] = [0.001, 1.0]
+    params = {"method_keys": ["reml", "vote_count"], "calibration": "analytical",
+              "min_studies": 2, "min_votes": 2}
+    page._last_consensus_labels = labels
+    data = GeneMAWorker([d["df"] for d in studies], labels, params)._run()
+    page._meta_df, page._method_keys = data["meta_df"], data["method_keys"]
+    page._populate_result_tabs()
+
+    tab = page._results_tab
+    assert list(tab.level_checks) == ["0/4", "1/4", "2/4", "3/4", "4/4", "conflict"]
+    assert tab.level_checks["4/4"].text() == "4/4 (1)"
+    for level, cb in tab.level_checks.items():
+        cb.setChecked(level == "4/4")
+    assert tab.table.rowCount() == 1 and tab.table.item(0, 0).text() == "G0"
+    assert page._votes_tab.levels.loc["4/4", "total"] == 1

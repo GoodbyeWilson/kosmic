@@ -751,6 +751,8 @@ def _pool_stouffer_pvals(effects, var_matrix, valid_mask, pval_matrix=None,
 
 
 # Dispatch: pooling_key -> (pool_fn, calling_convention).
+# Rule methods (pooling_dispatch.RULE_METHODS, vote counting) have no
+# p-value to calibrate and are not listed.
 # Keys mirror the method options in ma_settings_dialog.METHOD_FAMILIES
 # combined with the top50 / hksj modifier checkboxes.
 _MATRIX_POOLERS = {

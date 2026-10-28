@@ -17,7 +17,7 @@ The figure list is grouped by the analysis each figure draws on. A figure whose 
 | Enrichment | [Enriched Terms](enriched_terms.md), [Enriched Term Links](term_links.md) | An over-representation run (GO or an Enrichr library) from the DE workspace or the Meta-Analysis Enrichment step |
 | Enrichment | Pathway Enrichment (GSEA) | Preranked GSEA on the Pathway DE page of the DE workspace |
 | Enrichment | Library Enrichment (GSEA), Library GSEA (running enrichment), [Leading-Edge Heatmap](leading_edge.md) | A preranked GSEA run against a library, from the DE workspace's Enrichment page or the Meta-Analysis Enrichment step |
-| Meta-Analysis | [Gene and Pathway Meta-Analysis Volcano](meta_volcano.md), [Gene and Pathway Forest Plot](meta_forest.md), [Leave-One-Out Sensitivity](meta_loo.md) | A gene or pathway meta-analysis in the Meta-Analysis workspace |
+| Meta-Analysis | [Gene and Pathway Meta-Analysis Volcano](meta_volcano.md), [Gene and Pathway Forest Plot](meta_forest.md), [Leave-One-Out Sensitivity](meta_loo.md), [Study Agreement (Vote Levels)](meta_vote_levels.md) | A gene or pathway meta-analysis in the Meta-Analysis workspace |
 
 ## Exporting
 

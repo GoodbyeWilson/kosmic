@@ -117,8 +117,14 @@ class IndividualMethodsWorker(BaseWorker):
             meta_df = pool_fn(self.datasets, min_studies=min_st)
             analytical_dfs[key] = meta_df
 
-        # Step 2: CC perm calibration (optional)
-        if calibration == 'cc_perm':
+        # Step 2: CC perm calibration (optional). A rule method (vote
+        # counting) has no p-value to calibrate and is kept as it is.
+        from kosmic.meta_analysis.pooling_dispatch import RULE_METHODS
+        rules = {k: analytical_dfs.pop(k) for k in list(analytical_dfs)
+                 if k in RULE_METHODS}
+        if calibration == 'cc_perm' and not analytical_dfs:
+            method_dfs = {}
+        elif calibration == 'cc_perm':
             pb_paths = self.params.get('pseudobulk_paths', [])
             self.progress.emit(
                 f"CC perm: {len(pb_paths)} pseudobulk path(s) received")
@@ -171,6 +177,7 @@ class IndividualMethodsWorker(BaseWorker):
                 f"/{len(method_dfs)} methods")
         else:
             method_dfs = analytical_dfs
+        method_dfs.update(rules)
 
         # Step 3: Per-method FDR + contributing-study counts.
         # DO NOT merge. Keep per-method outputs separate.

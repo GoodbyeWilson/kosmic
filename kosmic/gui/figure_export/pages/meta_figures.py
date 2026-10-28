@@ -1,5 +1,6 @@
 # Meta-analysis figure pages: pooled volcano, per-study forest and
-# leave-one-out sensitivity, for gene- or pathway-level results.
+# leave-one-out sensitivity, for gene- or pathway-level results, and the
+# study agreement (vote levels) of a gene-level run.
 #
 # Read the Meta-Analysis workspace through 'workspace.meta_ws.figure_inputs()'
 # (ADR-010): the pooled tables of the latest runs and the studies' own DE
@@ -279,3 +280,87 @@ class LeaveOneOutPage(_ItemPage):
 
     def _default_export_basename(self) -> str:
         return f"leave_one_out_{self._controls.item.currentText()}"
+
+
+# -- Study agreement (vote levels) ---------------------------------------------
+
+_NO_OVERLAY = "None"
+
+
+class _VoteLevelsControls(FigureControls):
+    def __init__(self):
+        super().__init__(7, 5)
+        self.overlay = QComboBox()
+        self.overlay.setToolTip(
+            "Hatch, at each level, the genes this method of the run calls "
+            "significant (FDR < 0.05).")
+        self.overlay.currentIndexChanged.connect(self.changed)
+        self.add_row("Overlay:", self.overlay)
+
+    def populate_methods(self, keys: list[str]):
+        prev = self.overlay.currentText()
+        self.overlay.blockSignals(True)
+        self.overlay.clear()
+        self.overlay.addItems(keys + [_NO_OVERLAY])
+        idx = self.overlay.findText(prev)
+        self.overlay.setCurrentIndex(idx if idx >= 0 else 0)
+        self.overlay.blockSignals(False)
+
+
+class VoteLevelsPage(MetaFigurePage):
+    """Genes by the number of studies agreeing (0/k ... k/k, conflict)."""
+
+    TITLE = "Study Agreement (Vote Levels)"
+
+    def _build_controls(self):
+        return _VoteLevelsControls()
+
+    def dependencies_met(self) -> bool:
+        df = self._results()
+        return df is not None and {'n_up', 'n_down'} <= set(df.columns)
+
+    def _methods(self) -> list[str]:
+        """The run's methods with an FDR column, other than vote counting."""
+        df = self._results()
+        if df is None:
+            return []
+        return [c[len('fdr_'):] for c in df.columns
+                if c.startswith('fdr_') and c != 'fdr_vote_count']
+
+    def on_activated(self):
+        self._controls.populate_methods(self._methods())
+        super().on_activated()
+
+    def _levels(self):
+        from kosmic.meta_analysis.pooling.vote_count import run_vote_levels
+        df = self._results()
+        method = self._controls.overlay.currentText()
+        keys = [] if method in ('', _NO_OVERLAY) else [method]
+        return run_vote_levels(df, keys, len(self._studies()))
+
+    def _make_render_func(self):
+        if not self.dependencies_met():
+            return None
+        levels, sig_label = self._levels()
+        title = f"Study Agreement: {self._selection_label()}"
+        figsize = self._controls.figsize.get_figsize()
+        font_sizes = self._font_sizes()
+
+        def _render(levels=levels, sig_label=sig_label, title=title,
+                    sz=figsize, f=font_sizes):
+            from kosmic.visualisation.meta.vote_levels import create_vote_levels_plot
+            return create_vote_levels_plot(levels, title=title,
+                                           significant_label=sig_label,
+                                           figsize=sz, font_sizes=f)
+        return _render
+
+    def _export_companions(self, fig_path: Path) -> list[Path]:
+        """The counts behind the bars."""
+        if not self.dependencies_met():
+            return []
+        out = Path(fig_path).with_suffix('.csv')
+        self._levels()[0].to_csv(out)
+        return [out]
+
+    def _default_export_basename(self) -> str:
+        return "study_agreement_vote_levels"

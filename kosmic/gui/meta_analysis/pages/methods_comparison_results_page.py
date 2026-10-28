@@ -358,6 +358,7 @@ _METHOD_SHORT = {
     'fisher': 'Fisher',
     'sumrank': 'SumRank',
     'gwop': 'gwOP',
+    'vote_count': 'Votes',
 }
 
 

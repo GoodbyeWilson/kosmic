@@ -60,6 +60,9 @@ different assumptions and fail in different ways:
   of genes within each study and are insensitive to effect-size scale.
 - **p-value combination** — Fisher's method (unsigned) and Stouffer's
   (signed) — which pool evidence without an effect size.
+- **Vote counting** — the number of studies that call a gene
+  significant in the same direction. See
+  [Vote counting](#vote-counting).
 
 The Discovery Meta-Analysis step can run any combination and show the
 overlap. Genes found by every family are a **high-confidence consensus
@@ -74,6 +77,36 @@ With two studies, the DerSimonian–Laird and REML estimates coincide
 in its t-distribution and finds nothing, and the rank methods have
 almost no resolution. Two studies is the minimum that runs; five or
 more is where the method choice starts to matter.
+
+### Vote counting
+
+Vote counting asks in how many studies a gene is significant (study
+FDR < 0.05) with the same sign of log2 fold change. A study that did
+not measure the gene, or whose results have no adjusted p-values, is
+left out. A gene **passes** when at least *N* studies call it
+significant in the same direction and no study calls it significant in
+the opposite direction; *N* is the **Vote threshold** (*N* of *k*) in
+the Discovery Meta-Analysis settings, all studies by default. It is a
+rule, not a test: there is no p-value, and CC permutation calibrates
+only the other methods of a run. In a consensus run, a gene that fails
+the rule fails the consensus.
+
+Every gene also has a **level**: 0/*k* to *k*/*k* for the studies
+agreeing, or *conflict* when it is significant up in one study and down
+in another. The Results tab can show any set of levels, and the Votes
+tab and the Study Agreement figure count the genes at each level, with
+the genes another method of the run calls significant overlaid.
+
+Vote counting ignores the size of the effects and their standard
+errors, and gives no pooled estimate or confidence interval: the log2
+fold change shown for it in the volcano and results table is the
+inverse-variance mean, as for Fisher's method. It is a robustness check
+beside DerSimonian–Laird or REML, not a replacement: a gene with a
+consistent but modest effect that no single study calls significant
+gets no votes, however many studies there are. In the DCM ventricular
+cardiomyocyte meta-analysis (five studies, 9,263 genes), 1,131 of the
+3,324 genes REML called significant were called by no more than one
+study, and 571 by four or five.
 
 ### Direction of effect across studies
 
