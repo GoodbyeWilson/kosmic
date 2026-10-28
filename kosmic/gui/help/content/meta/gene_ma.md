@@ -8,7 +8,32 @@ Pool per-study gene-level DE results with one or more methods. Single mode = one
 
 ## Top 50% and HKSJ modifiers
 
-*TODO.*
+**Top 50% selection** changes how SumRank, DL and REML use each gene's
+studies. It does not remove genes before pooling.
+
+- With **SumRank**, each gene's score is the sum of its best ceil(k/2)
+  study ranks (the best 3 of 5), tested against the null distribution of
+  that partial sum. It asks whether a gene is highly ranked in at least
+  half of the studies, which suits an effect present in a subset of
+  cohorts. When the cohorts agree it is stricter than the full sum,
+  because the other studies' evidence is not used: on five DCM
+  cardiomyocyte studies it called 378 genes against 1,348 for plain
+  SumRank.
+- With **DL** and **REML**, each gene is pooled over its ceil(k/2) most
+  precise studies (smallest standard error, at least 2).
+
+**HKSJ correction** (Hartung-Knapp-Sidik-Jonkman) applies to DL and
+REML. It replaces the normal test with a t-test on k - 1 degrees of
+freedom, which is appropriate for one outcome pooled over a few
+studies. Over thousands of genes it has little power when k is small:
+with five studies a t of 20 gives p of about 4e-5, while
+Benjamini-Hochberg over 11,000 genes needs about 4e-6 for the strongest
+gene to pass. With fewer than 10 studies selected, a note under the box
+gives the smallest reachable p-value, and a run that calls no gene says
+so in the output panel.
+
+The Methods page states each pooling method in words, including these
+modifiers.
 
 ## Calibration (analytical / CC permutation)
 
