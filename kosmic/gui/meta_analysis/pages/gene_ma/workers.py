@@ -53,17 +53,23 @@ class GeneMAWorker(BaseWorker):
 
         # Step 1: Analytical pooling for each method
         from kosmic.meta_analysis.pooling_dispatch import (
-            get_analytical_pool_fn)
+            RULE_METHODS, get_analytical_pool_fn)
         analytical_dfs = {}
         for i, key in enumerate(method_keys):
             self.progress.emit(
                 f"Analytical pooling {i+1}/{n_methods}: {key}...")
-            pool_fn = get_analytical_pool_fn(key, min_st)
+            pool_fn = get_analytical_pool_fn(
+                key, min_st, min_votes=self.params.get('min_votes'))
             meta_df = pool_fn(self.datasets, min_studies=min_st)
             analytical_dfs[key] = meta_df
 
-        # Step 2: CC permutation calibration (if selected)
-        if calibration == 'cc_perm':
+        # Step 2: CC permutation calibration (if selected). A rule method
+        # (vote counting) has no p-value to calibrate and is kept as it is.
+        rules = {k: analytical_dfs.pop(k) for k in list(analytical_dfs)
+                 if k in RULE_METHODS}
+        if calibration == 'cc_perm' and not analytical_dfs:
+            method_dfs = dict(analytical_dfs)
+        elif calibration == 'cc_perm':
             pb_paths = self.params.get('pseudobulk_paths', [])
             if not pb_paths:
                 raise RuntimeError(
@@ -92,6 +98,7 @@ class GeneMAWorker(BaseWorker):
             self.progress.emit("CC permutation complete")
         else:
             method_dfs = analytical_dfs
+        method_dfs.update(rules)
 
         # Step 3: Merge (computes per-method FDR + consensus FDR =
         # max of per-method FDR, so a gene passes consensus iff it

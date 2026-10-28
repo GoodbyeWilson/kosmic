@@ -52,6 +52,7 @@ _METHODS = [
     ('fisher', 'Fisher'),
     ('sumrank', 'SumRank'),
     ('gwop', 'gwOP'),
+    ('vote_count', 'Vote count'),
 ]
 
 _METHOD_KEYS_BASE = {name: key for key, name in _METHODS}
@@ -337,6 +338,21 @@ class GeneMAPage(SidebarTabbedPage):
             "Capped at the number of studies loaded, because a threshold"
             " above that would silently discard every gene.")
         grid.addWidget(self._min_studies_spin, r, 1)
+        r += 1
+
+        grid.addWidget(QLabel("Vote threshold:"), r, 0)
+        self._min_votes_spin = QSpinBox()
+        self._min_votes_spin.setRange(1, 20)
+        self._min_votes_spin.setValue(20)      # lowered to the studies loaded
+        self._min_votes_spin.setToolTip(
+            "Vote counting: a gene passes when at least this many studies "
+            "call it significant (study FDR < 0.05) in the same direction, "
+            "and none in the opposite direction.")
+        grid.addWidget(self._min_votes_spin, r, 1)
+        vote_cb = self._family_checks.get('vote')
+        self._min_votes_spin.setEnabled(bool(vote_cb and vote_cb.isChecked()))
+        if vote_cb is not None:
+            vote_cb.toggled.connect(self._min_votes_spin.setEnabled)
 
         sg.addLayout(grid)
 
@@ -583,6 +599,11 @@ class GeneMAPage(SidebarTabbedPage):
         self._venn_tab.log_message.connect(self.log_message)
         self._tabs.addTab(self._venn_tab, "Venn")
 
+        # -- Tab 3: Votes (studies agreeing per gene) --
+        from kosmic.gui.meta_analysis.pages.gene_ma.votes import VotesTab
+        self._votes_tab = VotesTab()
+        self._tabs.addTab(self._votes_tab, "Votes")
+
         self._tabs.currentChanged.connect(self._place_search_strip)
 
         # Make headline labels selectable so users can copy numbers into papers.
@@ -649,13 +670,19 @@ class GeneMAPage(SidebarTabbedPage):
             self._method_keys = cached['method_keys']
             self._apply_translational_annotation()
             self._populate_volcano()
-            self._results_tab.populate(self._meta_df, self._method_keys)
+            self._populate_result_tabs()
             self._venn_tab.populate(self._meta_df, self._method_keys)
             self._update_panel_summary_label()
             self._update_gene_completer()
             cached_loo = cached.get('loo_result') if isinstance(cached, dict) else None
             if cached_loo is not None:
                 self._loo_result = cached_loo
+
+    def _populate_result_tabs(self):
+        """Fill the Results table and the Votes chart from the current run."""
+        n = len(self._run_study_names())
+        self._results_tab.populate(self._meta_df, self._method_keys, n_studies=n)
+        self._votes_tab.populate(self._meta_df, self._method_keys, n)
 
     def _clear_results(self):
         """Clear all result widgets and cached state."""
@@ -678,6 +705,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._set_gene_legend("")
 
         self._venn_tab.clear()
+        self._votes_tab.clear()
 
         if hasattr(self, '_pathway_forest_tab'):
             self._pathway_forest_tab.clear()
@@ -738,7 +766,7 @@ class GeneMAPage(SidebarTabbedPage):
             self._method_dfs = cached['method_dfs']
             self._method_keys = cached['method_keys']
             self._populate_volcano()
-            self._results_tab.populate(self._meta_df, self._method_keys)
+            self._populate_result_tabs()
             self._venn_tab.populate(self._meta_df, self._method_keys)
             self._update_panel_summary_label()
             self._update_gene_completer()
@@ -995,6 +1023,12 @@ class GeneMAPage(SidebarTabbedPage):
         clear_pb_path_cache()
         return (len(new_datasets), len(de_entries), fallback)
 
+    def _vote_params(self, method_keys) -> dict:
+        """'min_votes' for a run that includes vote counting, else nothing."""
+        if 'vote_count' not in method_keys:
+            return {}
+        return {'min_votes': self._min_votes_spin.value()}
+
     def _sync_min_studies(self):
         """Cap 'Min studies' at the number of studies actually loaded.
 
@@ -1009,6 +1043,14 @@ class GeneMAPage(SidebarTabbedPage):
         n_loaded = len(self._datasets)
         if n_loaded < 2:
             return
+        # The vote threshold reads 'N of k'; a threshold left at the old
+        # k (every study) follows the new one.
+        votes = self._min_votes_spin
+        at_all = votes.value() >= votes.maximum()
+        votes.setMaximum(n_loaded)
+        votes.setSuffix(f" of {n_loaded}")
+        if at_all:
+            votes.setValue(n_loaded)
         spin.setMaximum(n_loaded)
         if spin.value() > n_loaded:
             spin.setValue(n_loaded)
@@ -1157,6 +1199,7 @@ class GeneMAPage(SidebarTabbedPage):
             'cc_n_perms': 1000,
             'pseudobulk_paths': pb_paths,
             'de_method':   cc_de_method,
+            **self._vote_params(method_keys),
         }
 
         # LOO worker re-uses these so the user doesn't have to re-pick methods.
@@ -1252,7 +1295,7 @@ class GeneMAPage(SidebarTabbedPage):
         }
 
         self._populate_volcano()
-        self._results_tab.populate(self._meta_df, self._method_keys)
+        self._populate_result_tabs()
         self._update_gene_completer()
         self._run_output_selection = self._pending_output_selection
         self._auto_save()
@@ -1454,7 +1497,12 @@ class GeneMAPage(SidebarTabbedPage):
 
         use_z = (self._yaxis_combo.currentIndex() == 1
                  and 'z_stat' in meta_df.columns)
-        if use_z:
+        # Vote counting on its own has no p-value (its FDR is 0 or 1): the
+        # y axis is the number of studies agreeing, whichever axis is set.
+        votes_axis = base_key == 'vote_count' and 'votes' in meta_df.columns
+        if votes_axis:
+            y = meta_df['votes'].to_numpy(float)
+        elif use_z:
             y = np.abs(meta_df['z_stat'].values.astype(float))
         else:
             y = neg_log10(base_fdr)
@@ -1487,7 +1535,8 @@ class GeneMAPage(SidebarTabbedPage):
                 else:
                     brushes.append(_shade(50, 50, 220, frac))
 
-        y_label = '|Z-statistic|' if use_z else f'-Log10 FDR ({base_key})'
+        y_label = ('Studies agreeing' if votes_axis
+                   else '|Z-statistic|' if use_z else f'-Log10 FDR ({base_key})')
         n_sig = int((n_sig_per_gene >= 1).sum())
         if n_methods == 1:
             method_name = (self._method_keys[0] if self._method_keys
@@ -1526,7 +1575,7 @@ class GeneMAPage(SidebarTabbedPage):
             self._volcano_plot.add_overlay_ring(
                 mask, color=(0, 200, 255, 160), size=10, pen_width=1)
 
-        if not use_z:
+        if not use_z and not votes_axis:
             self._volcano_plot.add_threshold_line(y=-np.log10(DEFAULT_FDR))
 
         self._volcano_plot.set_symmetric_x()
@@ -1732,7 +1781,7 @@ class GeneMAPage(SidebarTabbedPage):
 
     # Methods whose forest uses the p-value renderer (combined-p, no pooled logFC).
     _PVALUE_FOREST_KEYS = frozenset((
-        'fisher', 'rop', 'wop', 'gwop',
+        'fisher', 'rop', 'wop', 'gwop', 'vote_count',
     ))
 
     def _on_gene_search_entered(self):
@@ -2149,6 +2198,12 @@ class GeneMAPage(SidebarTabbedPage):
                 'study_tokens': tokens,
             }
             params.update(self._direction_params())
+            min_votes = (self._last_consensus_params or {}).get('min_votes')
+            if min_votes:
+                params['vote_threshold'] = (
+                    f"significant (study FDR < {DEFAULT_FDR:g}) in at least "
+                    f"{min_votes} of {params['n_studies']} studies in the same "
+                    "direction, none in the opposite direction")
             # Through the shared recorder, so this keeps only the
             # latest run like every other meta stage. Calling
             # record_stage directly here bypassed that and kept
@@ -2462,6 +2517,7 @@ class GeneMAPage(SidebarTabbedPage):
             'cc_n_perms': 1000,
             'pseudobulk_paths': pb_paths,
             'de_method':   cc_de_method,
+            **self._vote_params(method_keys),
         }
 
         # LOO worker re-uses these so the user doesn't have to re-pick methods.

@@ -6,6 +6,32 @@ Pool per-study gene-level DE results with one or more methods. Single mode = one
 
 *TODO.*
 
+### Vote counting
+
+The **Vote counting** family passes a gene when at least *N* studies
+call it significant (study FDR < 0.05) in the same direction and none
+calls it significant in the opposite direction. Set *N* with **Vote
+threshold** (*N* of *k*, all studies by default); it is active when the
+family is ticked. Run with REML in Consensus mode, the consensus genes
+are those with a pooled effect that at least *N* studies also call on
+their own. It ignores effect sizes and gives no pooled estimate, so use
+it beside DL or REML, not in place of them. Run on its own, the volcano
+shows the number of studies agreeing on its vertical axis.
+
+The **Results** tab shows **Votes** beside **k** (the studies in which
+the gene was tested) when vote counting is one of the methods, and
+**Up** and **Down** for every run. The **Studies agreeing** row has one
+box per level, 0/*k* to *k*/*k* and *conflict*, each with its number of
+genes; untick levels to hide their genes from the table. The **Votes**
+tab draws the genes at each level, split up and down, with the genes
+the run's other method calls significant hatched; Figure Export's
+[Study Agreement](../figures/meta_vote_levels.md) page draws the same
+figure for export. See
+[Statistical approach](statistics.md#vote-counting).
+
+Vote counting is new in the method list; it is enabled by default and
+can be hidden in **View → Meta-Analysis Settings**.
+
 ## Top 50% and HKSJ modifiers
 
 **Top 50% selection** changes how SumRank, DL and REML use each gene's

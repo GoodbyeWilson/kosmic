@@ -28,6 +28,9 @@ METHOD_FAMILIES: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ('fisher',   'Fisher'),
         ('stouffer', 'Stouffer'),
     ]),
+    ('vote', 'Vote counting', [
+        ('vote_count', 'Vote count'),
+    ]),
 ]
 
 # All method keys across all families
@@ -40,30 +43,45 @@ ALL_METHOD_KEYS = [k for _, _, methods in METHOD_FAMILIES
 #   Rank-based:        SumRank (score 25, best direction replication)
 #   P-value combining: Stouffer (score 23, direction-aware)
 # Others are available in View > Meta-Analysis Settings.
+#   Vote counting:     the only method of its family
 DEFAULT_ENABLED = {
     'reml',
     'sumrank',
     'stouffer',
+    'vote_count',
 }
 
 _SETTINGS_KEY = 'meta_analysis/enabled_methods'
+_KNOWN_KEY = 'meta_analysis/known_methods'
 _DE_METHOD_KEY = 'meta_analysis/de_method'
+
+# The methods that existed before the known-methods list was saved: a
+# saved selection without that list was made among these.
+_METHODS_BEFORE_KNOWN_LIST = {'dl', 'reml', 'sumrank', 'gwop', 'fisher', 'stouffer'}
 
 DE_METHODS = ['DESeq2', 'Welch CPM', 'Welch Raw']
 DEFAULT_DE_METHOD = 'DESeq2'
 
 
 def load_enabled_methods(settings: QSettings) -> set:
-    """Load enabled method keys from QSettings, or return defaults."""
+    """Load enabled method keys from QSettings, or return defaults.
+
+    A method added since the selection was saved takes its default, so a
+    new method enabled by default is not hidden by an older selection.
+    """
     saved = settings.value(_SETTINGS_KEY)
     if saved is not None and isinstance(saved, list):
-        return set(saved) & set(ALL_METHOD_KEYS)
+        known = settings.value(_KNOWN_KEY)
+        known = set(known) if isinstance(known, list) else _METHODS_BEFORE_KNOWN_LIST
+        new = set(ALL_METHOD_KEYS) - known
+        return (set(saved) & set(ALL_METHOD_KEYS)) | (new & DEFAULT_ENABLED)
     return set(DEFAULT_ENABLED)
 
 
 def save_enabled_methods(settings: QSettings, enabled: set):
     """Persist enabled method keys to QSettings."""
     settings.setValue(_SETTINGS_KEY, sorted(enabled))
+    settings.setValue(_KNOWN_KEY, sorted(ALL_METHOD_KEYS))
 
 
 def load_de_method(settings: QSettings) -> str:

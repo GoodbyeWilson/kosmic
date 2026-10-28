@@ -26,6 +26,11 @@ import numpy as np
 import pandas as pd
 
 
+#: Methods that apply a rule rather than a test: their table carries a
+#: boolean '<rule column>' instead of a p-value to adjust, and CC
+#: permutation does not calibrate them.
+RULE_METHODS = {'vote_count': 'vote_pass'}
+
 _METHOD_NAMES = {
     'dl': 'DerSimonian-Laird random effects',
     'reml': 'REML random effects',
@@ -34,6 +39,7 @@ _METHOD_NAMES = {
     'fisher': "Fisher's method",
     'stouffer': "Stouffer's Z",
     'stouffer_weighted': "weighted Stouffer's Z",
+    'vote_count': 'vote counting',
 }
 
 
@@ -77,11 +83,13 @@ def hksj_smallest_p(n_studies: int, t_max: float = 20.0) -> float:
 
 
 def get_analytical_pool_fn(pooling_key: str,
-                           min_studies: int) -> Callable:
+                           min_studies: int,
+                           min_votes: Optional[int] = None) -> Callable:
     """Return 'fn(datasets, min_studies=...)' for the given pooling key.
 
     Keys must match the UI's method list (see METHOD_FAMILIES) plus the
     Top50 / HKSJ modifier combinations exposed by the consensus sidebar.
+    'min_votes' is the vote-counting threshold (default: every study).
     The returned table has the columns added by 'annotate_direction'.
     """
     from kosmic.meta_analysis.direction import annotate_direction
@@ -91,6 +99,7 @@ def get_analytical_pool_fn(pooling_key: str,
     from kosmic.meta_analysis.pooling.fisher import fisher_fast
     from kosmic.meta_analysis.pooling.stouffer import stouffer_fast
     from kosmic.meta_analysis.pooling.gwop import gwop_fast
+    from kosmic.meta_analysis.pooling.vote_count import vote_count_fast
 
     _ms = min_studies
     # Each lambda accepts an optional min_studies override; defaults to
@@ -110,6 +119,7 @@ def get_analytical_pool_fn(pooling_key: str,
         'fisher':           lambda ds, min_studies=_ms: fisher_fast(ds, min_studies=min_studies),
         'stouffer':         lambda ds, min_studies=_ms: stouffer_fast(ds, min_studies=min_studies),
         'stouffer_weighted': lambda ds, min_studies=_ms: stouffer_fast(ds, min_studies=min_studies, weighted=True),
+        'vote_count':       lambda ds, min_studies=_ms: vote_count_fast(ds, min_studies=min_studies, min_votes=min_votes),
     }
     if pooling_key not in dispatch:
         raise KeyError(
@@ -189,6 +199,18 @@ def merge_consensus_methods(method_keys: List[str],
 
     for key in method_keys:
         mdf = method_dfs[key].set_index('names')
+        rule_col = RULE_METHODS.get(key)
+        if rule_col and rule_col in mdf.columns:
+            # A rule has no p-value to adjust: passing is FDR 0, failing 1.
+            passes = mdf[rule_col].reindex(
+                consensus.index, fill_value=False).astype(bool).values
+            consensus[f'pvals_{key}'] = np.where(passes, 1e-300, 1.0)
+            consensus[f'fdr_{key}'] = np.where(passes, 0.0, 1.0)
+            for col in ('votes', 'vote_fraction', 'vote_conflict', 'vote_pass',
+                        'min_votes', 'n_tested'):
+                if col in mdf.columns and col not in consensus.columns:
+                    consensus[col] = mdf[col].reindex(consensus.index).values
+            continue
         pvals = mdf['pvals_pooled'].reindex(
             consensus.index, fill_value=1.0).values.astype(float)
         # Clamp exact zeros to 1e-300 so FDR ordering survives underflow.
