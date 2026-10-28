@@ -1,9 +1,9 @@
 # Centralised dark / light theming via QPalette + a generated global QSS.
 from enum import Enum
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QEvent, QObject, QSettings
 from PyQt6.QtGui import QPalette, QColor
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QDoubleSpinBox, QSizePolicy, QSpinBox,
+    QApplication, QComboBox, QDoubleSpinBox, QSizePolicy, QSpinBox, QWidget,
 )
 import re
 
@@ -1746,6 +1746,54 @@ def apply_theme(app: QApplication, mode: ThemeMode) -> None:
     _current_mode = mode
     app.setPalette(get_palette())
     app.setStyleSheet(get_stylesheet())
+    _install_tooltip_wrapping(app)
+
+
+# Tooltip wrapping
+#
+# Qt shows a plain-text tooltip as one line per paragraph, however long:
+# a 240-character explanation ran across most of the screen. Rich text is
+# wrapped to a readable width. Rather than write each of the ~200 tooltips
+# as HTML, a widget's plain-text tooltip is converted when it is set, if
+# any line of it is longer than _TOOLTIP_WRAP_CHARS. Tooltips already
+# written as rich text, and short ones, are left alone. Tooltips of items
+# in a table or list (Qt.ItemDataRole.ToolTipRole) are not widget
+# tooltips and are not converted.
+
+_TOOLTIP_WRAP_CHARS = 80
+
+
+def wrapped_tooltip(text: str) -> str:
+    """'text' as rich text that Qt wraps, or unchanged if it need not be."""
+    import html
+    if (not text or text.lstrip().startswith('<')
+            or max(len(line) for line in text.split('\n')) <= _TOOLTIP_WRAP_CHARS):
+        return text
+    paragraphs = [p for p in text.split('\n\n') if p.strip()]
+    return ''.join(f"<p>{html.escape(p).replace(chr(10), '<br>')}</p>"
+                   for p in paragraphs)
+
+
+class _TooltipWrapper(QObject):
+    """Application event filter converting long plain tooltips on set."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.ToolTipChange and isinstance(obj, QWidget):
+            text = obj.toolTip()
+            wrapped = wrapped_tooltip(text)
+            if wrapped != text:
+                obj.setToolTip(wrapped)   # rich text now: not converted again
+        return False
+
+
+_tooltip_wrapper = None
+
+
+def _install_tooltip_wrapping(app: QApplication) -> None:
+    global _tooltip_wrapper
+    if _tooltip_wrapper is None:
+        _tooltip_wrapper = _TooltipWrapper(app)
+        app.installEventFilter(_tooltip_wrapper)
 
 
 # No-scroll widget variants
