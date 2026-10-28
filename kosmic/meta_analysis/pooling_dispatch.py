@@ -12,9 +12,14 @@
 #   'merge_consensus_methods(method_keys, method_dfs)' merges N pooled
 #   DataFrames into a consensus frame (per-method FDRs + max-FDR consensus).
 #   Only used in consensus mode.
+#
+#   'describe_pooling_method(key, n_studies)' states in words what a key
+#   runs, for the methods text; 'hksj_smallest_p(n_studies)' is the
+#   smallest p-value the HKSJ t-test can give with that many studies.
 
 from __future__ import annotations
 
+import math
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
@@ -25,6 +30,56 @@ import pandas as pd
 #: boolean '<rule column>' instead of a p-value to adjust, and CC
 #: permutation does not calibrate them.
 RULE_METHODS = {'vote_count': 'vote_pass'}
+
+_METHOD_NAMES = {
+    'dl': 'DerSimonian-Laird random effects',
+    'reml': 'REML random effects',
+    'sumrank': 'SumRank',
+    'gwop': 'gwOP',
+    'fisher': "Fisher's method",
+    'stouffer': "Stouffer's Z",
+    'stouffer_weighted': "weighted Stouffer's Z",
+    'vote_count': 'vote counting',
+}
+
+
+def describe_pooling_method(key: str, n_studies: Optional[int] = None) -> str:
+    """The pooling a key runs, in words, for the methods text.
+
+    The Top 50% modifier does different things by method: SumRank sums
+    each gene's best ceil(k/2) study ranks and tests that sum against the
+    top-r null; DL and REML pool each gene's ceil(k/2) most precise
+    studies (smallest standard error, at least 2).
+    """
+    hksj = key.endswith('_hksj')
+    base = key.removesuffix('_hksj')
+    top50 = base.endswith('_top50')
+    base = base.removesuffix('_top50')
+    text = _METHOD_NAMES.get(base, base)
+    if top50 and base == 'sumrank':
+        r = (f", r = {math.ceil(n_studies / 2)} of k = {n_studies}"
+             if n_studies else "")
+        text = f"SumRank over the best ceil(k/2) study ranks per gene (top-r sum{r})"
+    elif top50:
+        text += (" on the ceil(k/2) most precise studies per gene "
+                 "(smallest standard error, at least 2)")
+    if hksj:
+        text += (" with the Hartung-Knapp-Sidik-Jonkman adjustment "
+                 "(t-test on k - 1 degrees of freedom)")
+    return text
+
+
+def hksj_smallest_p(n_studies: int, t_max: float = 20.0) -> float:
+    """Two-sided p-value of the HKSJ t-test at 't_max' with k - 1 df.
+
+    With few studies even the strongest gene cannot reach the p-value a
+    genome-wide FDR needs: at k = 5 a t of 20 gives p of about 4e-5,
+    while Benjamini-Hochberg over 11,000 genes needs about 4e-6.
+    """
+    from scipy.stats import t
+    if n_studies < 2:
+        return 1.0
+    return float(2 * t.sf(t_max, df=n_studies - 1))
 
 
 def get_analytical_pool_fn(pooling_key: str,

@@ -22,7 +22,7 @@ from kosmic.gui.shared.theme import get_color, style_pg_plot
 from kosmic.gui.shared.widgets import (
     SidebarTabbedPage,
     SecondaryLabel, SectionHeader, PrimaryButton,
-    StageAccordion, StageSummaryCard,
+    StageAccordion, StageSummaryCard, HintLabel,
 )
 
 from kosmic.paths import meta_output_dir
@@ -179,6 +179,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._project_folder = project_folder
         self._sync_min_studies()
         self._refresh_ma_cards()
+        self._update_hksj_note()
         self._pathway_ma_results = pathway_ma_results
         self._pathway_gene_sets = pathway_gene_sets or {}
         n = len(self._datasets)
@@ -277,10 +278,14 @@ class GeneMAPage(SidebarTabbedPage):
         sg.setSpacing(6)
 
         self._top50_cb = QCheckBox("Top 50% selection")
+        # Rich text so Qt wraps it; a plain-text tooltip is one line
+        # per sentence and ran across most of the screen.
         self._top50_cb.setToolTip(
-            "Pre-filter to the top half of genes by per-study p-value "
-            "before pooling. Helps SumRank substantially, leaves DL "
-            "essentially unchanged.")
+            "<p><b>SumRank:</b> sum only the best half of each gene's study "
+            "ranks (the best 3 of 5), for effects present in a subset of "
+            "cohorts. Stricter than the full sum when the cohorts agree.</p>"
+            "<p><b>DL / REML:</b> pool only the more precise half of each "
+            "gene's studies (smallest standard error, at least 2).</p>")
         self._top50_cb.setChecked(False)
         sg.addWidget(self._top50_cb)
 
@@ -289,11 +294,19 @@ class GeneMAPage(SidebarTabbedPage):
         # tooltip, which is where it was already spelled out anyway.
         self._hksj_cb = QCheckBox("HKSJ correction")
         self._hksj_cb.setToolTip(
-            "Hartung-Knapp-Sidik-Jonkman adjustment: t-test on k-1 df "
-            "+ adjusted SE. Applied to DL/REML only. Conservative; "
-            "recommended by Cochrane for small k (<20) but reduces power.")
+            "<p><b>Hartung-Knapp-Sidik-Jonkman adjustment</b> (DL and REML "
+            "only): the pooled effect is tested with an adjusted standard "
+            "error and a t-test on k - 1 degrees of freedom, where k is the "
+            "number of studies.</p>"
+            "<p>It suits one outcome pooled over a few studies. Over "
+            "thousands of genes with fewer than about 10 studies, it rarely "
+            "lets any gene pass a genome-wide FDR.</p>")
         self._hksj_cb.setChecked(False)
         sg.addWidget(self._hksj_cb)
+        self._hksj_note = HintLabel("")
+        self._hksj_note.hide()
+        sg.addWidget(self._hksj_note)
+        self._hksj_cb.toggled.connect(self._update_hksj_note)
 
         # --- Calibration, DE method, Min studies ---
         grid = QGridLayout()
@@ -1267,6 +1280,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._log_direction_summary()
         self._method_dfs = data['method_dfs']
         self._method_keys = data['method_keys']
+        self._log_hksj_none_significant()
 
         # Annotate with Olink panel membership + (hypothesis mode)
         # the parent pathway each consensus gene came from, before
@@ -1315,6 +1329,37 @@ class GeneMAPage(SidebarTabbedPage):
         self.log_message.emit(
             f"{n_sig:,} significant (FDR < {DEFAULT_FDR:g}), {n_conflict:,} "
             f"with opposite-direction effects across studies")
+
+    # Below this many studies the HKSJ t-test cannot reach genome-wide FDR.
+    _HKSJ_FEW_STUDIES = 10
+
+    def _hksj_note_text(self, n_studies: int) -> str:
+        """Why HKSJ with few studies calls no gene genome-wide, or ''."""
+        from kosmic.meta_analysis.pooling_dispatch import hksj_smallest_p
+        if not 2 <= n_studies < self._HKSJ_FEW_STUDIES:
+            return ""
+        p = hksj_smallest_p(n_studies)
+        return (f"With {n_studies} studies the HKSJ t-test has "
+                f"{n_studies - 1} degrees of freedom; the smallest p-value "
+                f"it can reach is about {p:.0e} (at t = 20), so a genome-wide "
+                "FDR is unlikely to call any gene.")
+
+    def _update_hksj_note(self, *_):
+        text = (self._hksj_note_text(len(self._datasets))
+                if self._hksj_cb.isChecked() else "")
+        self._hksj_note.setText(text)
+        self._hksj_note.setVisible(bool(text))
+
+    def _log_hksj_none_significant(self):
+        """Explain an HKSJ run that called nothing, rather than leave a 0."""
+        df = self._meta_df
+        if (df is None or 'fdr' not in df.columns
+                or not any('hksj' in k for k in (self._method_keys or []))
+                or (df['fdr'] < DEFAULT_FDR).any()):
+            return
+        text = self._hksj_note_text(len(self._run_study_names()))
+        if text:
+            self.log_message.emit(f"No gene passed FDR < {DEFAULT_FDR:g}. {text}")
 
     def _apply_translational_annotation(self):
         """
@@ -2127,14 +2172,22 @@ class GeneMAPage(SidebarTabbedPage):
         try:
             from kosmic.meta_analysis.io import (
                 gather_study_provenance, record_meta_stage)
+            from kosmic.meta_analysis.pooling_dispatch import (
+                describe_pooling_method)
             tokens = {
                 label: (rec.get('fingerprint') or {}).get('token')
                 for label, rec in gather_study_provenance(self._project_folder)
             }
+            n_run = len(self._run_study_names())
             if_active = (self._if_check.isChecked()
                          if hasattr(self, '_if_check') else False)
             params = {
                 'pooling_methods': list(self._method_keys or []),
+                # In words: a key such as 'sumrank_top50' tells a reader
+                # nothing. Joined with '; ' as the descriptions hold commas.
+                'pooling_described': '; '.join(
+                    describe_pooling_method(k, n_run)
+                    for k in (self._method_keys or [])),
                 'calibration': ('cc_perm' if self._cal_combo.currentIndex() == 1
                                 else 'analytical'),
                 'mode': getattr(self, '_mode', None),

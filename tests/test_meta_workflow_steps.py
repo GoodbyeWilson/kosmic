@@ -599,6 +599,50 @@ def test_a_run_saves_where_it_started(app, tmp_path):
     assert rec["stages"][-1]["params"]["studies"] == labels
 
 
+# -- HKSJ with few studies (#63) and pooling in words (#61) ------------
+
+def test_hksj_note_appears_with_few_studies(app, tmp_path):
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+    page = GeneMAPage()
+    five = _tiny_studies("Endo", n=5)
+    page.set_datasets(five, [d["name"] for d in five], str(tmp_path))
+    assert page._hksj_note.isHidden()
+    page._hksj_cb.setChecked(True)
+    assert not page._hksj_note.isHidden()
+    assert "With 5 studies" in page._hksj_note.text()
+    twelve = _tiny_studies("Endo", n=12)
+    page.set_datasets(twelve, [d["name"] for d in twelve], str(tmp_path))
+    assert page._hksj_note.isHidden()
+
+
+def test_an_hksj_run_that_calls_nothing_says_why(app, tmp_path):
+    from kosmic import provenance
+    from kosmic.gui.meta_analysis.pages.gene_ma.workers import GeneMAWorker
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+    from kosmic.meta_analysis.io import meta_provenance_dir
+
+    page = GeneMAPage()
+    studies = _tiny_studies("Endo", n=4)
+    labels = [d["name"] for d in studies]
+    params = {"method_keys": ["reml_hksj"], "calibration": "analytical",
+              "min_studies": 2}
+    page.set_datasets(studies, labels, str(tmp_path), output_selection="Endo")
+    page._pending_output_selection = page._output_selection
+    page._last_consensus_labels = labels
+    page._last_consensus_params = params
+    page._last_consensus_de_dfs = [d["df"] for d in studies]
+    data = GeneMAWorker([d["df"] for d in studies], labels, params)._run()
+    assert not (data["meta_df"]["fdr"] < 0.05).any()
+
+    logged = []
+    page.log_message.connect(logged.append)
+    page._on_finished(data)
+    assert any(m.startswith("No gene passed FDR") and "With 4 studies" in m
+               for m in logged)
+    rec = provenance.load(meta_provenance_dir(tmp_path, "Endo"))
+    assert "Hartung-Knapp" in rec["stages"][-1]["params"]["pooling_described"]
+
+
 # -- vote counting (#30) -----------------------------------------------
 
 def test_vote_counting_is_a_family_and_its_table_shows_votes_not_a_ci(app):
