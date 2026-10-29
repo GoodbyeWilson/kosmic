@@ -733,6 +733,15 @@ class EnrichmentPage(SidebarTabbedPage):
         except Exception as e:  # provenance is best-effort
             self.ws.log_message.emit(f"Could not record enrichment provenance: {e}")
 
+    def _results_folder(self):
+        """Where this page saves an over-representation run: the study's
+        pathway-scoring folder, or None to not save it. The meta-analysis
+        host overrides this."""
+        if not getattr(self.ws, 'project_dir', None):
+            return None
+        from kosmic.paths import de_pathway_scoring_dir
+        return de_pathway_scoring_dir(self.ws.project_dir)
+
     def _gsea_results_path(self):
         """Where a library GSEA run is saved, or None to not save it.
 
@@ -762,7 +771,11 @@ class EnrichmentPage(SidebarTabbedPage):
         path = self._gsea_results_path()
         if path is not None:
             from kosmic.de.fgsea import save_fgsea_results
+            from kosmic.de.saved import save_gsea_details
             save_fgsea_results(res, path)
+            # The running-enrichment curves the mountain figure draws.
+            save_gsea_details(path, self.ws.gsea_library_details or {},
+                              self.ws.gsea_library_name or '')
 
         alpha = self._p_thresh.value()
         down = QBrush(QColor(get_color('plot_downregulated')))
@@ -864,6 +877,15 @@ class EnrichmentPage(SidebarTabbedPage):
         )
 
         self._show_results(df)
+        # Saved so Figure Export can draw the run when this workspace no
+        # longer holds it (ADR-014).
+        folder = self._results_folder()
+        if folder is not None:
+            from kosmic.de.saved import save_enrichment
+            try:
+                save_enrichment(folder, df)
+            except OSError as exc:
+                self.ws.log_message.emit(f"Could not save the enrichment table: {exc}")
 
     # ------------------------------------------------------------------
     # Normalise results to common format

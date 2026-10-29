@@ -1173,9 +1173,14 @@ class DownloadTab(TabbedPage):
                 self._loaded_frame.show()
                 self._import_section.hide()
             elif self.main_window.isVisible():
-                # Load the most recent h5ad; _on_h5ad_loaded finishes the UI
-                most_recent = max(detected['files'], key=lambda f: f.stat().st_mtime)
-                self._load_and_set_adata(str(most_recent))
+                # Load the study's registered h5ad -- the manifest's file,
+                # else the newest -- the file DE and Figure Export open too,
+                # so a backup saved later is not loaded in its place.
+                # _on_h5ad_loaded finishes the UI.
+                from kosmic.scrna.load.h5ad_meta import registered_h5ad
+                path = registered_h5ad(self.project_dir) or max(
+                    detected['files'], key=lambda f: f.stat().st_mtime)
+                self._load_and_set_adata(str(path))
             else:
                 # The workspace is not on screen (a study was activated
                 # from the Project page or from DE). Loading now would put

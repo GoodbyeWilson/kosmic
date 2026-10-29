@@ -433,8 +433,9 @@ class MetaExportWorker(BaseWorker):
 
     def __init__(self, adata, sample_col, condition_col, min_cells,
                  primary_method, primary_moderate, primary_de_results,
-                 output_dir, gse_id, min_counts=0):
+                 output_dir, gse_id, min_counts=0, run_record=None):
         super().__init__()
+        self.run_record = run_record
         self.adata = adata
         self.sample_col = sample_col
         self.condition_col = condition_col
@@ -460,6 +461,9 @@ class MetaExportWorker(BaseWorker):
         if self.primary_de_results is not None and not self.primary_de_results.empty:
             out_path = de_result_path(self.output_dir, self.gse_id, label)
             self.primary_de_results.to_csv(out_path, index=False)
+            if self.run_record is not None:
+                from kosmic.de.saved import save_run_record
+                save_run_record(out_path, {**self.run_record, 'method': label})
             self.progress.emit(f"[{label}] Exported DE results for meta-analysis")
 
         # Per-donor pseudobulk for the consensus case-control permutation.
@@ -528,8 +532,9 @@ class CellTypeBatchWorker(BaseWorker):
                  output_dir, accession, cell_types=None,
                  de_method='deseq2', moderate=False, covariates=None,
                  min_cells=10, pathway_gene_sets=None, fdr_genes=None,
-                 min_counts=0, **pipeline_kwargs):
+                 min_counts=0, run_record=None, **pipeline_kwargs):
         super().__init__()
+        self.run_record = run_record
         self.adata = adata
         self.cell_type_col = cell_type_col
         self.sample_col = sample_col
@@ -584,6 +589,7 @@ class CellTypeBatchWorker(BaseWorker):
             fdr_genes=self.fdr_genes,
             progress_callback=_progress,
             cancelled=lambda: self._cancelled,
+            run_record=self.run_record,
             **self.pipeline_kwargs)
 
         summary = batch_summary(runs)

@@ -126,6 +126,13 @@ class MetaEnrichmentPage(EnrichmentPage):
         super()._on_gsea_finished(payload)
         self._record_enrichment('gsea')
 
+    def _results_folder(self):
+        """The selection's meta-analysis folder."""
+        if not self._project_folder:
+            return None
+        from kosmic.paths import meta_output_dir
+        return meta_output_dir(self._project_folder, self._selection)
+
     def _gsea_results_path(self):
         """The selection's meta-analysis folder, one file per library.
 

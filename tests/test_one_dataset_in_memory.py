@@ -146,6 +146,35 @@ def test_scrna_auto_load_waits_until_the_workspace_is_on_screen(app, tmp_path, m
     app.processEvents()
 
 
+def test_scrna_auto_load_opens_the_manifests_file_not_a_newer_backup(app, tmp_path,
+                                                                      monkeypatch):
+    """scRNA, DE and Figure Export open the same file: the one the manifest
+    names. A backup saved after it is not loaded in its place."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.scrna.workspace import ScRNAWorkspace
+    from kosmic.manifest import write_manifest
+    from kosmic.paths import processed_data_dir
+    study = tmp_path / 'study'
+    processed = processed_data_dir(study)
+    processed.mkdir(parents=True)
+    _study(processed / 's.h5ad')
+    _study(processed / 's_backup.h5ad')
+    later = (processed / 's.h5ad').stat().st_mtime + 60
+    os.utime(processed / 's_backup.h5ad', (later, later))
+    write_manifest(study, dataset={'file': 's.h5ad'})
+    ws = ScRNAWorkspace(embedded=True)
+    loads = []
+    monkeypatch.setattr(ws.download_tab, '_load_and_set_adata', lambda p: loads.append(p))
+    ws.show()
+    ws.set_project_directory(str(study))
+    ws.download_tab.on_tab_activated()
+    assert loads and all(os.path.basename(p) == 's.h5ad' for p in loads)
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
 def _fake_start(started, worker):
     """Record the load without running it; the worker counts as running
     until wait() is called, as a real thread does at completion time."""

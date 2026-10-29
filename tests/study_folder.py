@@ -70,6 +70,58 @@ def make_adata(form: str = 'log', seed: int = 0):
     return a
 
 
+def de_table(genes, seed: int = 0) -> pd.DataFrame:
+    """A gene DE table with the columns the DE steps write."""
+    rng = np.random.default_rng(seed)
+    lfc = rng.normal(size=len(genes))
+    p = rng.random(len(genes)) ** 3
+    return pd.DataFrame({
+        'names': list(genes), 'logfoldchanges': lfc, 'abs_logfoldchange': np.abs(lfc),
+        'pvals': p, 'pvals_adj': np.minimum(p * 4, 1.0), 'se': rng.random(len(genes)) + 0.1,
+        'disease_samples': 3, 'control_samples': 3})
+
+
+def write_de_outputs(study: Path) -> Path:
+    """Saved DE outputs named as on the real projects: per-cell-type runs
+    (one with the study name in lower case, as GSE174574 has), a whole-study
+    run of another method, the significant and pseudobulk files beside
+    them, a batch summary whose 'de_path' column points to another
+    computer, and the pathway scoring outputs at both levels."""
+    from kosmic.de.fgsea import FGSEA_RESULTS_FILE, GSEA_LIBRARY_RESULTS_FILE
+    from kosmic.paths import de_pathway_scoring_dir, de_stats_dir
+
+    name = Path(study).name
+    stats, scoring = de_stats_dir(study), de_pathway_scoring_dir(study)
+    genes = MARKER_GENES + [f'G{i}' for i in range(N_FILLER)]
+    for i, acc in enumerate([f'{name}_Endothelial', f'{name}_Fibroblast',
+                             f'{name.lower()}_Myeloid_NN']):
+        de_table(genes, seed=i).to_csv(stats / f'{acc}_DE_deseq2.csv', index=False)
+        de_table(genes[:5], seed=i).to_csv(stats / f'{acc}_significant_genes.csv',
+                                           index=False)
+        pd.DataFrame({'G0': [1, 2]}).to_csv(stats / f'{acc}_pseudobulk.csv')
+    de_table(genes, seed=9).to_csv(stats / f'{name}_DE_welch_cpm_eb.csv', index=False)
+    pd.DataFrame({
+        'cell_type': ['Endothelial', 'Fibroblast'],
+        'accession': [f'{name}_Endothelial', f'{name}_Fibroblast'],
+        'status': ['ok', 'ok'],
+        'de_path': [rf'C:\Users\someone\{name}\results\x_DE_deseq2.csv'] * 2,
+    }).to_csv(stats / f'{name}_by_cell_type_summary.csv', index=False)
+    pw = pd.DataFrame({'names': ['Glycolysis', 'OXPHOS'], 'logfoldchanges': [0.5, -0.4],
+                       'pvals': [0.01, 0.2], 'pvals_adj': [0.02, 0.3],
+                       'Effect_Size': [0.8, -0.5]})
+    pw.to_csv(scoring / 'pathway_de_results.csv', index=False)
+    pw.iloc[:1].to_csv(scoring / 'parent_pathway_de_results.csv', index=False)
+    pd.DataFrame({'sample': ['s1', 's4'], 'condition': ['Control', 'Disease'],
+                  'Glycolysis': [0.1, 0.9], 'OXPHOS': [0.4, 0.2]}).to_csv(
+        scoring / 'pathway_scores_per_donor.csv', index=False)
+    gsea = pd.DataFrame({'names': ['HALLMARK_A', 'HALLMARK_B'], 'nes': [1.8, -1.2],
+                         'es': [0.5, -0.3], 'pvals': [0.001, 0.04],
+                         'pvals_adj': [0.01, 0.2], 'leading_edge': ['VWF;PECAM1', 'LYZ']})
+    gsea.to_csv(scoring / FGSEA_RESULTS_FILE, index=False)
+    gsea.to_csv(scoring / GSEA_LIBRARY_RESULTS_FILE, index=False)
+    return study
+
+
 def make_study_folder(root: Path, name: str = 'StudyA', form: str = 'log') -> Path:
     """Write a study folder under 'root' and return it."""
     from kosmic.manifest import write_manifest

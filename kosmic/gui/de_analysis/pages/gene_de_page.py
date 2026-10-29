@@ -1094,6 +1094,19 @@ class GeneDEPage(SidebarTabbedPage):
                                       ('ribosomal', self.exclude_ribo_check))
                      if box.isChecked())
 
+    def _run_record(self, *, min_cells, min_counts, covariates=()) -> dict:
+        """The settings saved beside each DE table this page writes
+        ('kosmic.de.saved'), so figures drawn from the table later use them."""
+        from kosmic.de.saved import build_run_record
+        ws = self.ws
+        return build_run_record(
+            ws.current_adata, method=ws.de_method, sample_col=ws.sample_col,
+            condition_col=ws.condition_col, disease_label=ws.disease_label,
+            control_label=ws.control_label, min_cells=min_cells,
+            min_counts=min_counts, covariates=covariates,
+            pathway_gene_sets=ws.pathway_gene_sets, geneset_label=ws.geneset_label,
+            h5ad_path=ws.h5ad_path)
+
     def _count_source(self):
         """Which counts the loaded dataset holds: 'raw' or a layer name.
 
@@ -1376,27 +1389,28 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.log_message.emit(f"Could not load previous DE results: {e}")
 
     def _load_cell_type_runs(self, stats_dir, accession, label):
-        """Saved per-cell-type results ('{accession}_{cell type}_DE_{label}.csv')."""
-        import pandas as pd
-
+        """Saved per-cell-type results ('{accession}_{cell type}_DE_{label}.csv'),
+        as 'kosmic.de.saved' lists them for Figure Export too."""
         from kosmic.de.batch import CellTypeRun
         from kosmic.de.de_analysis import significant_subset
+        from kosmic.de.saved import gene_de_runs_in, read_gene_de
 
         runs = []
-        prefix, suffix = f"{accession}_", f"_DE_{label}.csv"
-        for path in sorted(stats_dir.glob(f"{prefix}*{suffix}")):
-            slug = path.name[len(prefix):-len(suffix)]
-            try:
-                df = pd.read_csv(path)
-            except Exception as e:
-                self.ws.log_message.emit(f"Could not load {path.name}: {e}")
+        prefix = f"{accession}_"
+        for saved in gene_de_runs_in(stats_dir, accession):
+            if saved.method != label or not saved.name.startswith(prefix):
                 continue
-            if df.empty or 'names' not in df.columns:
+            slug = saved.name[len(prefix):]
+            df = read_gene_de(saved)
+            if df is None:
+                self.ws.log_message.emit(f"Could not load {saved.path.name}.")
                 continue
+            path = saved.path
             donors = sum(int(df[c].iloc[0]) for c in
                          ('disease_samples', 'control_samples') if c in df.columns)
             runs.append(CellTypeRun(
-                cell_type=slug, slug=slug, accession=f"{accession}_{slug}",
+                cell_type=saved.cell_type or slug, slug=slug,
+                accession=f"{accession}_{slug}",
                 status='ok', n_samples=donors,
                 n_genes_tested=len(df),
                 n_significant=len(significant_subset(
@@ -2357,6 +2371,10 @@ class GeneDEPage(SidebarTabbedPage):
             filter_min_count=self.filter_min_count_spin.value(),
             filter_min_samples=int(self.filter_min_samples_spin.value()),
             exclude_gene_groups=self._excluded_gene_groups(),
+            run_record=self._run_record(
+                min_cells=self.min_cells_spin.value(),
+                min_counts=self.min_counts_spin.value(),
+                covariates=self._selected_covariates()),
         )
         run_worker(
             self._batch_worker,
@@ -2683,6 +2701,8 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.min_cells, self.ws.de_method, self.eb_checkbox.isChecked(),
             self.ws.de_results, self.ws.project_dir, gse_id,
             min_counts=self.ws.min_counts,
+            run_record=self._run_record(min_cells=self.ws.min_cells,
+                                        min_counts=self.ws.min_counts),
         )
         if self.ws.progress_bar:
             self.ws.progress_bar.setValue(0)

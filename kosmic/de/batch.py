@@ -250,6 +250,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                         write: bool = True,
                         progress_callback: Optional[Callable[[str], None]] = None,
                         cancelled: Optional[Callable[[], bool]] = None,
+                        run_record: Optional[dict] = None,
                         **pipeline_kwargs) -> list[CellTypeRun]:
     """Run the DE pipeline once per cell type and write per-type results.
 
@@ -275,6 +276,10 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
     Extra keyword arguments are forwarded to 'run_de_pipeline', so
     detection thresholds and DESeq2 filter settings can be kept identical
     across arms.
+
+    *run_record* (see 'kosmic.de.saved.build_run_record') is saved beside
+    each table written, with the cell type and design filled in, so a
+    figure drawn later from the table uses the run's settings.
     """
     from kosmic.de.de_analysis import (
         create_pseudobulk, run_de_pipeline, significant_subset,
@@ -366,6 +371,11 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
         if write:
             run.de_path = de_result_path(output_dir, run_accession, label)
             de_results.to_csv(run.de_path, index=False)
+            if run_record is not None:
+                from kosmic.de.saved import save_run_record
+                save_run_record(run.de_path, {
+                    **run_record, 'method': label, 'cell_type': plan.cell_type,
+                    'cell_type_column': cell_type_col, 'design': run.design})
 
             # The significant subset alongside the full table -- the same
             # selection the counts above report, so nobody has to re-derive
