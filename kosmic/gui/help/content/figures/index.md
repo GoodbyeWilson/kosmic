@@ -4,7 +4,9 @@ Figures drawn from the analyses in the other workspaces, with a preview, size co
 
 ## Available figures
 
-The figure list is grouped by the analysis each figure draws on. A figure whose results are not available shows a message naming the step to run.
+The switch above the figure list shows the figures of one workspace at a time: **scRNA**, **DE** or **Meta**. Figure Export opens on the section of the workspace you came from. Within a section the figures are grouped by the analysis they draw on, as in the table below; the Enrichment figures are in the DE section and also draw an enrichment run from the Meta-Analysis Enrichment step.
+
+A figure whose results are not available is greyed in the list, and its tooltip names the step to run; selecting it shows the same message. Tick **Show available only** to hide these figures.
 
 | Group | Figures | Draws on |
 |---|---|---|

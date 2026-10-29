@@ -536,6 +536,8 @@ class AppWindow(QMainWindow):
 
         # All workspaces are built eagerly during startup, so this is
         # now just a stack-page swap + the workspace's own activation.
+        # Figure Export opens on the figures of the page left behind.
+        self._page_before_switch = self._stack.currentIndex()
         self._stack.setCurrentIndex(page_index)
         getattr(self, activator)()
         self._output_panel.log(label)
@@ -595,6 +597,10 @@ class AppWindow(QMainWindow):
         ws.set_scrna_workspace(self._scrna_workspace)
         ws.set_de_workspace(self._de_workspace)
         ws.set_meta_workspace(self._meta_workspace)
+        # Coming from scRNA, DE or Meta opens that section of the figure
+        # list; from elsewhere the last section shown stays.
+        ws.show_section({PAGE_SCRNA: "scrna", PAGE_DE: "de", PAGE_META: "meta"}
+                        .get(getattr(self, '_page_before_switch', None)))
         ws.on_activated()
 
     def _activate_meta(self):
