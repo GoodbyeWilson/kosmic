@@ -21,6 +21,7 @@ import pandas as pd
 from kosmic.gui.shared.theme import NoScrollComboBox
 from kosmic.gui.shared.widgets import BaseWorker, Column, HintLabel, PrimaryButton, ResultsTable, SettingsGroup, SidebarPage
 from kosmic.gui.shared import dialogs, run_worker
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 class FilterWorker(BaseWorker):
@@ -114,7 +115,7 @@ class FilterWorker(BaseWorker):
 
         def _do_save():
             try:
-                adata_filtered.write_h5ad(self.output_path)
+                save_h5ad(adata_filtered, self.output_path)
             except Exception as e:
                 save_error[0] = e
 

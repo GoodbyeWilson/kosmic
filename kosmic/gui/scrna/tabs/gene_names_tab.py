@@ -17,6 +17,7 @@ from kosmic.gui.shared.widgets import (
     SecondaryButton, SecondaryLabel, SectionHeader, SidebarPage,
 )
 from kosmic.gui.shared import dialogs, run_worker
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ class _ApplyWorker(BaseWorker):
             if self._save_path:
                 self.progress.emit(f"Saving h5ad to {self._save_path} ...")
                 try:
-                    adata_new.write_h5ad(self._save_path)
+                    save_h5ad(adata_new, self._save_path)
                     import os
                     size = os.path.getsize(self._save_path)
                     self.progress.emit(f"Saved {size/1e6:.1f} MB to {self._save_path}")
@@ -912,7 +913,7 @@ class GeneNamesTab(SidebarPage):
         raw_path = getattr(self.main_window, 'raw_h5ad_path', None)
         if raw_path:
             try:
-                adata_new.write_h5ad(raw_path)
+                save_h5ad(adata_new, raw_path)
                 self.log_message.emit(f"Raw data updated with harmonised gene names: {raw_path}")
             except Exception as e:
                 self.log_message.emit(f"Warning: could not update raw file: {e}")

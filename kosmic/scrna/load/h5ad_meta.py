@@ -15,6 +15,9 @@
 # needs is set by 'chunk_bytes', not by the size of the study.
 from __future__ import annotations
 
+import os
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
@@ -35,7 +38,7 @@ def read_obs(h5ad_path) -> pd.DataFrame:
     import h5py
     from anndata.io import read_elem
 
-    with h5py.File(str(h5ad_path), 'r') as f:
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
         if 'obs' not in f:
             return pd.DataFrame()
         return read_elem(f['obs'])
@@ -45,7 +48,7 @@ def read_obs_columns(h5ad_path) -> list[str]:
     """The obs column names alone (no values read)."""
     import h5py
 
-    with h5py.File(str(h5ad_path), 'r') as f:
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
         if 'obs' not in f:
             return []
         g = f['obs']
@@ -59,7 +62,7 @@ def read_shape(h5ad_path) -> Tuple[int, int]:
     """(n_obs, n_vars) from the file's X without reading it."""
     import h5py
 
-    with h5py.File(str(h5ad_path), 'r') as f:
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
         X = f['X']
         if isinstance(X, h5py.Group):
             shape = X.attrs['shape']
@@ -71,7 +74,7 @@ def read_layer_names(h5ad_path) -> list[str]:
     """The names of the file's layers (none of them is read)."""
     import h5py
 
-    with h5py.File(str(h5ad_path), 'r') as f:
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
         return list(f['layers'].keys()) if 'layers' in f else []
 
 
@@ -89,7 +92,7 @@ def write_obs(h5ad_path, obs: pd.DataFrame) -> None:
     for col in obs.columns:
         if obs[col].dtype == object:
             obs[col] = pd.Categorical(obs[col].where(obs[col].notna(), None))
-    with h5py.File(str(h5ad_path), 'r+') as f:
+    with file_lock(h5ad_path).writing(), h5py.File(str(h5ad_path), 'r+') as f:
         write_elem(f, 'obs', obs)
 
 
@@ -115,7 +118,7 @@ def read_counts_adata(h5ad_path, *, counts_layer: Optional[str] = None,
     import h5py
     from anndata.io import read_elem
 
-    with h5py.File(str(h5ad_path), 'r') as f:
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
         obs = read_elem(f['obs'])
         var = read_elem(f['var'])
         layers = f['layers'] if 'layers' in f else {}
@@ -160,6 +163,114 @@ def registered_h5ad(study_dir) -> Optional[Path]:
     return h5ads[-1] if h5ads else None
 
 
+# -- Reading and saving one file from two threads ---------------------------------
+#
+# On Windows a file open for reading can neither be overwritten nor
+# replaced, and a reader that opens a file while a save writes it reads a
+# half-written file. Figure Export reads a study's file in a worker thread
+# while a step can be saving it, so both go through the per-file lock
+# below: a save waits for the chunk being read (about a second), and a
+# reader that waited for a save stops with 'StudyFileChanged' rather than
+# read a mix of two versions. The lock is for this process only.
+
+class FileLock:
+    """Readers share the file; a save has it alone. A waiting save goes
+    before readers that arrive after it, so a stream of chunk reads cannot
+    hold a save off. Not reentrant."""
+
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._readers = 0
+        self._writing = False
+        self._writers_waiting = 0
+
+    @contextmanager
+    def reading(self):
+        with self._cond:
+            self._cond.wait_for(lambda: not self._writing and not self._writers_waiting)
+            self._readers += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._readers -= 1
+                self._cond.notify_all()
+
+    @contextmanager
+    def writing(self):
+        with self._cond:
+            self._writers_waiting += 1
+            self._cond.wait_for(lambda: not self._writing and self._readers == 0)
+            self._writers_waiting -= 1
+            self._writing = True
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._writing = False
+                self._cond.notify_all()
+
+
+_LOCKS: dict = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+class StudyFileChanged(RuntimeError):
+    """The file was saved again while it was being read."""
+
+
+def file_lock(path) -> FileLock:
+    """The lock shared by everything in this process that reads or saves
+    the file at 'path'."""
+    key = os.path.normcase(os.path.abspath(str(path)))
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(key, FileLock())
+
+
+def save_h5ad(adata, path, *, atomic: bool = False, **write_kwargs) -> None:
+    """Write 'adata' to 'path' while no reader has the file open.
+
+    ``atomic=True`` writes a temporary file beside it and renames it into
+    place, so a failed write leaves the previous file intact; this needs
+    room for both files at once. ``atomic=False`` writes the file in place,
+    as 'AnnData.write_h5ad' does. Extra keyword arguments (``compression``)
+    go to 'write_h5ad'.
+    """
+    target = Path(str(path))
+    with file_lock(target).writing():
+        if not atomic:
+            adata.write_h5ad(str(target), **write_kwargs)
+            return
+        tmp = target.with_name(target.name + '.tmp')
+        adata.write_h5ad(str(tmp), **write_kwargs)
+        os.replace(tmp, target)
+
+
+class _StudyFile:
+    """A study's file, opened afresh for each read under its lock.
+
+    The file's modification time and size are taken when the first read
+    starts; a later open that finds them changed raises 'StudyFileChanged'.
+    """
+
+    def __init__(self, path):
+        self.path = Path(str(path))
+        self.lock = file_lock(self.path)
+        st = self.path.stat()
+        self.signature = (st.st_mtime_ns, st.st_size)
+
+    @contextmanager
+    def open(self):
+        import h5py
+
+        with self.lock.reading():
+            st = self.path.stat()
+            if (st.st_mtime_ns, st.st_size) != self.signature:
+                raise StudyFileChanged(f"{self.path.name} was saved while it was being read.")
+            with h5py.File(str(self.path), 'r') as f:
+                yield f
+
+
 def read_figure_meta(h5ad_path):
     """Everything in a study's file except its matrices: obs, var, uns and
     the embeddings figures draw ('X_umap', 'X_tsne').
@@ -170,10 +281,9 @@ def read_figure_meta(h5ad_path):
     (1.17 million cells) this holds about 1.3 GB, most of it obs.
     """
     import anndata as ad
-    import h5py
     from anndata.io import read_elem
 
-    with h5py.File(str(h5ad_path), 'r') as f:
+    with _StudyFile(h5ad_path).open() as f:
         obs = read_elem(f['obs'])
         var = read_elem(f['var'])
         uns = read_elem(f['uns']) if 'uns' in f else {}
@@ -207,32 +317,38 @@ def read_genes(h5ad_path, genes: Sequence[str], *, source: str = 'log',
         :func:`kosmic.scrna.counts.count_source`; ``uns['counts_loaded_from']``
         names where from.
     chunk_bytes : int
-        Bytes of matrix read at a time.
+        Bytes of matrix read at a time; the file is opened once per chunk.
 
     Returns
     -------
     AnnData
         All cells, the genes found, obs and the genes' var rows.
+
+    Raises
+    ------
+    StudyFileChanged
+        The file was saved again during the read.
     """
     import anndata as ad
-    import h5py
     import scipy.sparse as sp
     from anndata.io import read_elem
 
     if source not in ('log', 'counts'):
         raise ValueError(f"source must be 'log' or 'counts', not {source!r}")
-    with h5py.File(str(h5ad_path), 'r') as f:
+    sf = _StudyFile(h5ad_path)
+    with sf.open() as f:
         obs = read_elem(f['obs'])
-        if source == 'log' and _x_is_log(f, h5ad_path, chunk_bytes):
-            where, normalise = 'X', False
-        else:
+    if source == 'log' and _x_is_log(sf, chunk_bytes):
+        where, normalise = 'X', False
+    else:
+        with sf.open() as f:
             where = _count_where(f, counts_layer if source == 'counts' else None)
-            normalise = source == 'log'
-        node, var = _matrix(f, where)
-        pos = {n: i for i, n in enumerate(map(str, var.index))}
-        found = [str(g) for g in genes if str(g) in pos]
-        cols = np.array([pos[g] for g in found], dtype=np.int64)
-        sub, totals = _read_columns(node, cols, chunk_bytes, totals=normalise)
+        normalise = source == 'log'
+    m = _Matrix(sf, where)
+    pos = {n: i for i, n in enumerate(map(str, m.var.index))}
+    found = [str(g) for g in genes if str(g) in pos]
+    cols = np.array([pos[g] for g in found], dtype=np.int64)
+    sub, totals = m.columns(cols, chunk_bytes, totals=normalise)
     if normalise:
         scale = np.where(totals > 0, target_sum / np.where(totals > 0, totals, 1), 0.0)
         if sp.issparse(sub):
@@ -240,7 +356,7 @@ def read_genes(h5ad_path, genes: Sequence[str], *, source: str = 'log',
             sub.data = np.log1p(sub.data)
         else:
             sub = np.log1p(np.asarray(sub, dtype=np.float32) * scale[:, None])
-    a = ad.AnnData(X=sub, obs=obs, var=var.iloc[cols].copy())
+    a = ad.AnnData(X=sub, obs=obs, var=m.var.iloc[cols].copy())
     if source == 'log':
         a.uns['log1p'] = {'base': None}
     else:
@@ -263,23 +379,30 @@ def read_cells(h5ad_path, rows, *, source: str = 'log',
     -------
     AnnData
         The cells read (in ascending position), all genes of the source.
+
+    Raises
+    ------
+    StudyFileChanged
+        The file was saved again during the read.
     """
     import anndata as ad
-    import h5py
     import scipy.sparse as sp
     from anndata.io import read_elem
 
     if source not in ('log', 'counts'):
         raise ValueError(f"source must be 'log' or 'counts', not {source!r}")
     rows = np.unique(np.asarray(rows, dtype=np.int64))
-    with h5py.File(str(h5ad_path), 'r') as f:
+    sf = _StudyFile(h5ad_path)
+    with sf.open() as f:
         obs = read_elem(f['obs']).iloc[rows]
-        if source == 'log' and _x_is_log(f, h5ad_path, chunk_bytes):
-            where, normalise = 'X', False
-        else:
-            where, normalise = _count_where(f, None), source == 'log'
-        node, var = _matrix(f, where)
-        X = _read_rows(node, rows, chunk_bytes)
+    if source == 'log' and _x_is_log(sf, chunk_bytes):
+        where, normalise = 'X', False
+    else:
+        with sf.open() as f:
+            where = _count_where(f, None)
+        normalise = source == 'log'
+    m = _Matrix(sf, where)
+    X = m.rows(rows, chunk_bytes)
     if normalise:
         X = sp.csr_matrix(X, dtype=np.float32) if sp.issparse(X) else np.asarray(
             X, dtype=np.float32).copy()
@@ -292,7 +415,7 @@ def read_cells(h5ad_path, rows, *, source: str = 'log',
             X.data = np.log1p(X.data)
         else:
             X = np.log1p(X)
-    a = ad.AnnData(X=X, obs=obs, var=var.copy())
+    a = ad.AnnData(X=X, obs=obs, var=m.var.copy())
     if source == 'log':
         a.uns['log1p'] = {'base': None}
     return a
@@ -303,36 +426,34 @@ def read_cells(h5ad_path, rows, *, source: str = 'log',
 _X_IS_LOG: dict = {}
 
 
-def _x_is_log(f, h5ad_path, chunk_bytes: int) -> bool:
+def _x_is_log(sf: _StudyFile, chunk_bytes: int) -> bool:
     """The test :func:`kosmic.scrna.counts.log_normalised_genes` applies to a
     loaded study -- ``uns['log1p']`` present, or every stored value below 20
     -- applied to the file. Values are read a chunk at a time and the scan
     stops at the first value of 20 or more, so a count matrix is decided
     from its first chunk."""
-    if 'uns' in f and 'log1p' in f['uns']:
-        return True
-    st = Path(str(h5ad_path)).stat()
-    key = (str(Path(str(h5ad_path)).resolve()), st.st_mtime_ns, st.st_size)
+    import h5py
+
+    key = (os.path.normcase(str(sf.path.resolve())),) + sf.signature
     if key in _X_IS_LOG:
         return _X_IS_LOG[key]
-    import h5py
-    node = f['X']
-    values = node['data'] if isinstance(node, h5py.Group) else node
+    with sf.open() as f:
+        if 'uns' in f and 'log1p' in f['uns']:
+            _X_IS_LOG[key] = True
+            return True
+        node = f['X']
+        sparse = isinstance(node, h5py.Group)
+        values = node['data'] if sparse else node
+        n, itemsize = values.shape[0], values.dtype.itemsize
+        width = 1 if sparse else max(values.shape[1], 1)
+    step = max(1, chunk_bytes // (itemsize * width))
     is_log = True
-    if values.size:
-        step = max(1, chunk_bytes // max(values.dtype.itemsize, 1))
-        if isinstance(node, h5py.Group):
-            for i in range(0, values.shape[0], step):
-                if float(np.max(values[i:i + step])) >= 20.0:
-                    is_log = False
-                    break
-        else:
-            n_rows = max(1, step // max(values.shape[1], 1))
-            for i in range(0, values.shape[0], n_rows):
-                block = values[i:i + n_rows]
-                if block.size and float(np.max(block)) >= 20.0:
-                    is_log = False
-                    break
+    for i in range(0, n, step):
+        with sf.open() as f:
+            block = f['X']['data'][i:i + step] if sparse else f['X'][i:i + step]
+        if block.size and float(np.max(block)) >= 20.0:
+            is_log = False
+            break
     _X_IS_LOG[key] = is_log
     return is_log
 
@@ -352,27 +473,130 @@ def _count_where(f, counts_layer: Optional[str]) -> str:
     return 'X'
 
 
-def _matrix(f, where: str):
-    """(matrix node, var frame) for 'X', 'raw' or 'layer:<name>'."""
-    from anndata.io import read_elem
-
+def _node(f, where: str):
     if where == 'raw':
-        return f['raw']['X'], read_elem(f['raw']['var'])
-    var = read_elem(f['var'])
+        return f['raw']['X']
     if where.startswith('layer:'):
-        return f['layers'][where.split(':', 1)[1]], var
-    return f['X'], var
+        return f['layers'][where.split(':', 1)[1]]
+    return f['X']
 
 
-def _shape_kind(node) -> tuple:
-    import h5py
+class _Matrix:
+    """One matrix of a study's file ('X', 'raw' or 'layer:<name>'), read a
+    chunk at a time with the file opened afresh for each chunk."""
 
-    if isinstance(node, h5py.Group):
-        enc = node.attrs.get('encoding-type', 'csr_matrix')
-        enc = enc.decode() if isinstance(enc, bytes) else str(enc)
-        shape = tuple(int(s) for s in node.attrs['shape'])
-        return shape, ('csc' if enc.startswith('csc') else 'csr')
-    return tuple(node.shape), 'dense'
+    def __init__(self, sf: _StudyFile, where: str):
+        import h5py
+        from anndata.io import read_elem
+
+        self.sf, self.where = sf, where
+        with sf.open() as f:
+            node = _node(f, where)
+            self.var = read_elem(f['raw']['var'] if where == 'raw' else f['var'])
+            if isinstance(node, h5py.Group):
+                enc = node.attrs.get('encoding-type', 'csr_matrix')
+                enc = enc.decode() if isinstance(enc, bytes) else str(enc)
+                self.kind = 'csc' if enc.startswith('csc') else 'csr'
+                self.shape = tuple(int(s) for s in node.attrs['shape'])
+                self.indptr = node['indptr'][:].astype(np.int64)
+                self.dtype = node['data'].dtype
+                self.per_entry = node['data'].dtype.itemsize + node['indices'].dtype.itemsize
+            else:
+                self.kind, self.shape, self.dtype = 'dense', tuple(node.shape), node.dtype
+
+    def _spans(self, chunk_bytes: int):
+        """(first, stop) ranges along the stored axis -- rows of a CSR or
+        dense matrix, entries of a CSC one -- that fit in 'chunk_bytes'."""
+        if self.kind == 'dense':
+            step = max(1, chunk_bytes // max(self.shape[1] * self.dtype.itemsize, 1))
+            return [(r, min(r + step, self.shape[0])) for r in range(0, self.shape[0], step)]
+        if self.kind == 'csc':
+            n, step = int(self.indptr[-1]), max(1, chunk_bytes // self.per_entry)
+            return [(i, min(i + step, n)) for i in range(0, n, step)]
+        return list(_row_spans(self.indptr, self.per_entry, chunk_bytes))
+
+    def _csr_block(self, r0: int, r1: int):
+        import scipy.sparse as sp
+
+        a, b = int(self.indptr[r0]), int(self.indptr[r1])
+        with self.sf.open() as f:
+            node = _node(f, self.where)
+            data, indices = node['data'][a:b], node['indices'][a:b]
+        return sp.csr_matrix((data, indices, self.indptr[r0:r1 + 1] - a),
+                             shape=(r1 - r0, self.shape[1]))
+
+    def _dense_block(self, r0: int, r1: int):
+        with self.sf.open() as f:
+            return _node(f, self.where)[r0:r1]
+
+    def columns(self, cols: np.ndarray, chunk_bytes: int, *, totals: bool):
+        """(the columns 'cols' of every row, each row's total over all
+        columns or None). Sparse in, CSR out; dense in, dense out."""
+        import scipy.sparse as sp
+
+        n_rows = self.shape[0]
+        row_totals = np.zeros(n_rows, dtype=float) if totals else None
+        if self.kind == 'csr':
+            parts = []
+            for r0, r1 in self._spans(chunk_bytes):
+                block = self._csr_block(r0, r1)
+                parts.append(block[:, cols])
+                if totals:
+                    row_totals[r0:r1] = np.asarray(block.sum(axis=1), dtype=float).ravel()
+            sub = sp.vstack(parts, format='csr') if parts else sp.csr_matrix(
+                (n_rows, len(cols)), dtype=self.dtype)
+            return sub, row_totals
+        if self.kind == 'csc':
+            pieces = []
+            with self.sf.open() as f:
+                node = _node(f, self.where)
+                for c in cols:
+                    a, b = int(self.indptr[c]), int(self.indptr[c + 1])
+                    pieces.append(sp.csc_matrix(
+                        (node['data'][a:b], node['indices'][a:b], np.array([0, b - a])),
+                        shape=(n_rows, 1)))
+            sub = (sp.hstack(pieces, format='csr') if pieces
+                   else sp.csr_matrix((n_rows, 0), dtype=self.dtype))
+            if totals:
+                for i, j in self._spans(chunk_bytes):
+                    with self.sf.open() as f:
+                        node = _node(f, self.where)
+                        row_totals += np.bincount(node['indices'][i:j],
+                                                  weights=node['data'][i:j],
+                                                  minlength=n_rows)
+            return sub, row_totals
+        parts = []
+        for r0, r1 in self._spans(chunk_bytes):
+            block = self._dense_block(r0, r1)
+            parts.append(block[:, cols])
+            if totals:
+                row_totals[r0:r1] = np.asarray(block.sum(axis=1), dtype=float)
+        sub = np.vstack(parts) if parts else np.zeros((n_rows, len(cols)), dtype=self.dtype)
+        return sub, row_totals
+
+    def rows(self, rows: np.ndarray, chunk_bytes: int):
+        """The rows 'rows' (sorted, unique), all columns. A CSC matrix --
+        KOSMIC writes none -- is read whole."""
+        import scipy.sparse as sp
+
+        n_cols = self.shape[1]
+        if self.kind == 'csc':
+            from anndata.io import read_elem
+            with self.sf.open() as f:
+                return sp.csr_matrix(read_elem(_node(f, self.where)))[rows]
+        parts = []
+        for r0, r1 in self._spans(chunk_bytes):
+            want = rows[(rows >= r0) & (rows < r1)]
+            if not want.size:
+                continue
+            if self.kind == 'csr':
+                parts.append(self._csr_block(r0, r1)[want - r0])
+            else:
+                parts.append(self._dense_block(r0, r1)[want - r0])
+        if self.kind == 'csr':
+            return sp.vstack(parts, format='csr') if parts else sp.csr_matrix(
+                (0, n_cols), dtype=self.dtype)
+        return np.vstack(parts) if parts else np.zeros((0, n_cols), dtype=self.dtype)
 
 
 def _row_spans(indptr: np.ndarray, per_entry: int, chunk_bytes: int):
@@ -386,84 +610,3 @@ def _row_spans(indptr: np.ndarray, per_entry: int, chunk_bytes: int):
         r1 = min(max(r1, r0 + 1), n)
         yield r0, r1
         r0 = r1
-
-
-def _csr_block(node, indptr, r0: int, r1: int, n_cols: int):
-    import scipy.sparse as sp
-
-    a, b = int(indptr[r0]), int(indptr[r1])
-    return sp.csr_matrix(
-        (node['data'][a:b], node['indices'][a:b], indptr[r0:r1 + 1] - a),
-        shape=(r1 - r0, n_cols))
-
-
-def _read_columns(node, cols: np.ndarray, chunk_bytes: int, *, totals: bool):
-    """(the columns 'cols' of every row, each row's total over all columns
-    or None). Sparse in, CSR out; dense in, dense out."""
-    import scipy.sparse as sp
-
-    (n_rows, n_cols), kind = _shape_kind(node)
-    row_totals = np.zeros(n_rows, dtype=float) if totals else None
-    if kind == 'csr':
-        indptr = node['indptr'][:].astype(np.int64)
-        per = node['data'].dtype.itemsize + node['indices'].dtype.itemsize
-        parts = []
-        for r0, r1 in _row_spans(indptr, per, chunk_bytes):
-            block = _csr_block(node, indptr, r0, r1, n_cols)
-            parts.append(block[:, cols])
-            if totals:
-                row_totals[r0:r1] = np.asarray(block.sum(axis=1), dtype=float).ravel()
-        sub = sp.vstack(parts, format='csr') if parts else sp.csr_matrix(
-            (n_rows, len(cols)), dtype=node['data'].dtype)
-        return sub, row_totals
-    if kind == 'csc':
-        indptr = node['indptr'][:].astype(np.int64)
-        data, indices = node['data'], node['indices']
-        pieces = [sp.csc_matrix(
-            (data[indptr[c]:indptr[c + 1]], indices[indptr[c]:indptr[c + 1]],
-             np.array([0, indptr[c + 1] - indptr[c]])), shape=(n_rows, 1))
-            for c in cols]
-        sub = (sp.hstack(pieces, format='csr') if pieces
-               else sp.csr_matrix((n_rows, 0), dtype=data.dtype))
-        if totals:
-            step = max(1, chunk_bytes // (data.dtype.itemsize + indices.dtype.itemsize))
-            for i in range(0, data.shape[0], step):
-                row_totals += np.bincount(indices[i:i + step], weights=data[i:i + step],
-                                          minlength=n_rows)
-        return sub, row_totals
-    step = max(1, chunk_bytes // max(n_cols * node.dtype.itemsize, 1))
-    parts = []
-    for r0 in range(0, n_rows, step):
-        block = node[r0:r0 + step]
-        parts.append(block[:, cols])
-        if totals:
-            row_totals[r0:r0 + len(block)] = np.asarray(block.sum(axis=1), dtype=float)
-    sub = np.vstack(parts) if parts else np.zeros((n_rows, len(cols)), dtype=node.dtype)
-    return sub, row_totals
-
-
-def _read_rows(node, rows: np.ndarray, chunk_bytes: int):
-    """The rows 'rows' (sorted, unique) of a matrix node, all columns."""
-    import scipy.sparse as sp
-
-    (n_rows, n_cols), kind = _shape_kind(node)
-    if kind == 'csr':
-        indptr = node['indptr'][:].astype(np.int64)
-        per = node['data'].dtype.itemsize + node['indices'].dtype.itemsize
-        parts = []
-        for r0, r1 in _row_spans(indptr, per, chunk_bytes):
-            want = rows[(rows >= r0) & (rows < r1)]
-            if want.size:
-                parts.append(_csr_block(node, indptr, r0, r1, n_cols)[want - r0])
-        return sp.vstack(parts, format='csr') if parts else sp.csr_matrix(
-            (0, n_cols), dtype=node['data'].dtype)
-    if kind == 'csc':
-        from anndata.io import read_elem
-        return sp.csr_matrix(read_elem(node))[rows]
-    step = max(1, chunk_bytes // max(n_cols * node.dtype.itemsize, 1))
-    parts = []
-    for r0 in range(0, n_rows, step):
-        want = rows[(rows >= r0) & (rows < r0 + step)]
-        if want.size:
-            parts.append(node[r0:r0 + step][want - r0])
-    return np.vstack(parts) if parts else np.zeros((0, n_cols), dtype=node.dtype)

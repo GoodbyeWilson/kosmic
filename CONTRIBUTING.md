@@ -201,6 +201,15 @@ a worker thread and exports on the main thread, so both hold
 `_base.MPL_LOCK` while they build and draw a figure. Hold it in any new
 code that draws a figure off the main thread.
 
+**Save a study's h5ad with `save_h5ad`.** Figure Export reads a study's
+file on a worker thread while a step may be saving it (ADR-014). On
+Windows a file open for reading can be neither overwritten nor replaced,
+and a reader that opens a file mid-save reads half of it. Save through
+`kosmic.scrna.load.h5ad_meta.save_h5ad` (`atomic=True` for a temporary
+file renamed into place), never `adata.write_h5ad` on a study's file:
+it waits for the chunk being read, and the reader stops instead of
+mixing two versions.
+
 **A parentless `QWidget` is a window.** Calling `setVisible(True)` on
 one before adding it to a layout flashes an empty frame on screen.
 

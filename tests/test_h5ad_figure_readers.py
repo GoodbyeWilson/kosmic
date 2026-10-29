@@ -55,10 +55,9 @@ def test_figure_meta_holds_obs_var_uns_and_embeddings_but_no_matrix(study):
 
 def test_x_is_judged_log_normalised_as_the_loaded_study_is(study):
     path, full = study
-    import h5py
     h5ad_meta._X_IS_LOG.clear()
-    with h5py.File(path, 'r') as f:
-        assert h5ad_meta._x_is_log(f, path, SMALL_CHUNK) == looks_log_normalised(full.X)
+    sf = h5ad_meta._StudyFile(path)
+    assert h5ad_meta._x_is_log(sf, SMALL_CHUNK) == looks_log_normalised(full.X)
 
 
 def test_log_genes_equal_the_loaded_studys(study):

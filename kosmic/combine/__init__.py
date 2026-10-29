@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from kosmic.scrna.cluster.subcluster import SUBCLUSTER_COLUMN
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 # obs columns carried from each study onto the master. The atlas labels
@@ -310,7 +311,7 @@ def _ensure_int64_sparse(
         (X.data, X.indices.astype(np.int64), X.indptr.astype(np.int64)),
         shape=X.shape,
     )
-    a.write_h5ad(path)
+    save_h5ad(a, path)
 
 
 def _write_label(obs, col: str, values, suffix: str) -> None:

@@ -36,6 +36,7 @@ from kosmic.scrna.qc.decontx import (
     recheck_qc,
     run_decontx,
 )
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 # Workflow step index for the Decontaminate tab (after Marker Check=5).
 _STEP_INDEX = 6
@@ -77,7 +78,7 @@ class DecontXWorker(BaseWorker):
 
         if self.output_path:
             self.progress.emit("Saving decontaminated dataset...")
-            self.adata.write_h5ad(self.output_path)
+            save_h5ad(self.adata, self.output_path)
         return (self.adata, info, recheck)
 
 

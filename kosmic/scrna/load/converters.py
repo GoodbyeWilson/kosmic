@@ -15,6 +15,7 @@ from typing import List
 import numpy as np
 import pandas as pd
 from scipy import sparse
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 # Format detection
@@ -150,7 +151,7 @@ def convert_matrix_to_h5ad(matrix_file, sample_name=None, condition=None,
             base_name = base_name.replace('.txt.gz', '').replace('.txt', '')
             output_file = f"{base_name}.h5ad"
         _status(f"Writing {Path(output_file).name}...")
-        adata.write_h5ad(output_file)
+        save_h5ad(adata, output_file)
 
     return adata
 
@@ -224,7 +225,7 @@ def csv_to_h5ad(csv_path, output_path=None):
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    adata.write_h5ad(output_path)
+    save_h5ad(adata, output_path)
 
     return adata
 
@@ -346,7 +347,7 @@ def mtx_to_h5ad(mtx_path, output_path=None, genes_path=None, barcodes_path=None,
     if output_path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        adata.write_h5ad(output_path)
+        save_h5ad(adata, output_path)
 
     return adata
 
@@ -878,7 +879,7 @@ def load_10x_multi_sample(
 
     # Save
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    adata_combined.write_h5ad(output_path)
+    save_h5ad(adata_combined, output_path)
 
     summary = build_adata_summary(adata_combined, output_path)
     summary['n_samples'] = len(sample_names)

@@ -30,6 +30,7 @@ from kosmic.gui.shared import borderless, dialogs, run_worker
 from kosmic.scrna.cluster.subcluster import (
     EARLIER_EDITS_KEY, SUBCLUSTER_COLUMN, natural_key,
 )
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 def _refresh_style(widget) -> None:
@@ -230,7 +231,7 @@ class PCAHarmonyWorker(BaseWorker):
             self.progress.emit(f"Saving to {Path(self.output_path).name}...")
             self.progress_pct.emit(98)
             Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-            self.adata.write_h5ad(self.output_path)
+            save_h5ad(self.adata, self.output_path)
 
         self.progress_pct.emit(100)
         harmony_msg = " + Harmony" if self.harmony and self.harmony_key else ""
@@ -357,7 +358,7 @@ class ClusteringWorker(BaseWorker):
 
         self.progress.emit(f"Saving to {self.output_path}...")
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-        self.adata.write_h5ad(self.output_path)
+        save_h5ad(self.adata, self.output_path)
 
         self.progress_pct.emit(100)
         message = (
@@ -582,13 +583,10 @@ class _SaveStudyWorker(BaseWorker):
 
 def _save_study(adata, path: str, progress=None) -> None:
     """Write 'adata' to 'path' via a temporary file renamed into place."""
-    import os
     target = Path(path)
     if progress is not None:
         progress(f"Saving {target.name}...")
-    tmp = target.with_name(target.name + '.tmp')
-    adata.write_h5ad(str(tmp))
-    os.replace(tmp, target)
+    save_h5ad(adata, target, atomic=True)
 
 
 # ---------------------------------------------------------------------------
