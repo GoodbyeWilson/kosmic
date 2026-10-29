@@ -73,7 +73,10 @@ def _track(worker) -> None:
     for running renders before it quits."""
     global _quit_hooked
     _LIVE_RENDERS.add(worker)
-    worker.finished.connect(lambda w=worker: _LIVE_RENDERS.discard(w))
+    # 'finished' arrives just before the thread exits; wait for the exit
+    # before the last reference, and with it the QThread, goes.
+    worker.finished.connect(
+        lambda w=worker: (w.wait(), _LIVE_RENDERS.discard(w)))
     if not _quit_hooked:
         from PyQt6.QtWidgets import QApplication
         app = QApplication.instance()
@@ -250,7 +253,11 @@ class FigurePage(SidebarPage):
             self._render_worker.wait(50)
 
         self._status_lbl.setText("Rendering...")
-        self._render_worker = RenderWorker(func, parent=self)
+        # No Qt parent: a child of the page is destroyed with it, and a
+        # page discarded mid-render (a closed window, the end of a test)
+        # took the running thread with it and aborted the process. The
+        # registry keeps the worker until it has finished instead.
+        self._render_worker = RenderWorker(func)
         _track(self._render_worker)
         run_worker(
             self._render_worker,

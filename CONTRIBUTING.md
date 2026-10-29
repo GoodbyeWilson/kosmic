@@ -185,11 +185,14 @@ crashes mid-test.
 **A running `QThread` must not be destroyed.** Qt aborts the whole
 process ("QThread: Destroyed while thread is still running") when a
 worker is deleted mid-run, for example with the page that owns it when
-the application quits or a test ends. Wait for the worker first. Figure
-previews are tracked for this: the application waits for them before it
-quits, and a test that opens a figure page calls
-`kosmic.gui.figure_export.pages._base.wait_for_renders()` before the
-page is discarded.
+the application quits or a test ends. Do not give a worker that may
+outlive its widget that widget as Qt parent: a child is destroyed with
+its parent, running or not. Figure previews have no parent and are
+tracked instead: the application waits for them before it quits, and
+`tests/conftest.py` waits for them at the end of every test. Changing a
+figure control starts a preview render; in a test that calls the render
+function itself, block the control's signals first (`blockSignals(True)`)
+so no second render runs alongside it.
 
 **Matplotlib is not thread-safe.** Two figures drawn at once on
 different threads fail at random, most often in the mathtext parser
