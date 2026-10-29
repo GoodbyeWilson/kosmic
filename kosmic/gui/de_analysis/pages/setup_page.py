@@ -285,20 +285,11 @@ class SetupPage(SimplePage):
             self._auto_load_registered_dataset()
 
     def _registered_h5ad(self):
-        """The study's working h5ad: the manifest's file if it still
-        exists, else the newest in processed_data/. None if nothing."""
-        from kosmic.manifest import study_overview
+        """The study's working h5ad (see 'registered_h5ad'); the same file
+        Figure Export reads when no workspace holds the study."""
+        from kosmic.scrna.load.h5ad_meta import registered_h5ad
         proj = self.ws.project_dir
-        if not proj:
-            return None
-        processed = processed_data_dir(Path(proj))
-        dataset = study_overview(Path(proj))["dataset"] or {}
-        if dataset.get('file'):
-            named = processed / dataset['file']
-            if named.is_file():
-                return named
-        h5ads = sorted(processed.glob('*.h5ad'), key=lambda p: p.stat().st_mtime)
-        return h5ads[-1] if h5ads else None
+        return registered_h5ad(Path(proj)) if proj else None
 
     def _auto_load_registered_dataset(self):
         """Load the study's h5ad in the background, the way scRNA's
