@@ -44,6 +44,15 @@ def read_obs(h5ad_path) -> pd.DataFrame:
         return read_elem(f['obs'])
 
 
+def read_var(h5ad_path) -> pd.DataFrame:
+    """The var frame of an h5ad (the genes), read on its own."""
+    import h5py
+    from anndata.io import read_elem
+
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
+        return read_elem(f['var']) if 'var' in f else pd.DataFrame()
+
+
 def read_obs_columns(h5ad_path) -> list[str]:
     """The obs column names alone (no values read)."""
     import h5py

@@ -597,6 +597,9 @@ class AppWindow(QMainWindow):
         ws.set_scrna_workspace(self._scrna_workspace)
         ws.set_de_workspace(self._de_workspace)
         ws.set_meta_workspace(self._meta_workspace)
+        # The scRNA and DE figures show the active study, read from the
+        # workspace that holds it or else from its folder (ADR-014).
+        ws.set_study(self.current_study_path)
         # Coming from scRNA, DE or Meta opens that section of the figure
         # list; from elsewhere the last section shown stays.
         ws.show_section({PAGE_SCRNA: "scrna", PAGE_DE: "de", PAGE_META: "meta"}

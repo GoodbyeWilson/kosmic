@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from kosmic.gui.figure_export.pages._base import FigurePage
+from kosmic.gui.figure_export.shared.study_source import StudySource
 from kosmic.gui.shared import borderless
 from kosmic.gui.shared.theme import get_color
 from kosmic.gui.figure_export.pages.cell_types import (
@@ -111,6 +112,10 @@ class FigureExportWorkspace(QWidget):
         # (section, group, page) for every figure, in registry order.
         self._entries: list[tuple[str, str, FigurePage]] = []
         self._section = _SECTIONS[0][0]
+        # The study the scRNA and DE figures show, and where their data
+        # comes from: a workspace that holds it, else its folder (ADR-014).
+        self.source = StudySource(lambda: self.scrna_ws, lambda: self.de_ws, parent=self)
+        self.source.changed.connect(self._on_source_changed)
 
         self._setup_ui()
 
@@ -127,6 +132,17 @@ class FigureExportWorkspace(QWidget):
     def set_meta_workspace(self, ws):
         self.meta_ws = ws
         self.bump_data_version()
+
+    def set_study(self, study_dir) -> None:
+        """Show the scRNA and DE figures of 'study_dir' (a study folder)."""
+        self.source.set_study(study_dir)
+
+    def _on_source_changed(self):
+        # New data for the same figures: previews cached against the old
+        # objects must not be reused (a new object can reuse an old id).
+        self.bump_data_version()
+        if hasattr(self, '_list'):
+            self._rebuild_list()
 
     def bump_data_version(self):
         """Call after upstream workspace state changes; invalidates page caches."""
