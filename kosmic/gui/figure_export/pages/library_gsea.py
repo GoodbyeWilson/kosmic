@@ -1,10 +1,10 @@
 # Library preranked GSEA (fgsea) enrichment page.
 #
 # A matplotlib mirror of the Enrichment tab's library NES bar chart
-# (Hallmark, WikiPathways, GO, ...), from the DE workspace or the
-# Meta-Analysis workspace's Enrichment step (see _enrichment.py). It never
-# recomputes: it renders the in-memory summary of the last library run and,
-# for the DE workspace, falls back to the results saved to disk by that run.
+# (Hallmark, WikiPathways, GO, ...), from a study's DE or the Meta-Analysis
+# workspace's Enrichment step (see _enrichment.py). It never recomputes: it
+# renders the summary of the last library run, held in memory or, for a
+# study, saved in its folder.
 # The set-count rule matches the in-app plot (all sets for a small library,
 # else top per direction) so the figure mirrors what the Enrichment tab shows.
 
@@ -27,33 +27,11 @@ class LibraryGseaPage(EnrichmentFigurePage):
     def _build_controls(self) -> FigureControls:
         return self._add_source_row(FigureControls())
 
-    @staticmethod
-    def _saved_results(de):
-        """The DE workspace's library GSEA summary saved by its last run, or
-        None."""
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_pathway_scoring_dir
-        from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE, load_fgsea_results
-        return load_fgsea_results(
-            de_pathway_scoring_dir(de.project_dir) / GSEA_LIBRARY_RESULTS_FILE)
-
-    def _results(self, src, is_meta: bool):
-        """The summary to render: the in-memory result, else (DE only) the
-        one saved to disk. None if neither exists."""
-        res = getattr(src, 'gsea_library_results', None)
-        if res is not None and len(res) > 0:
-            return res
-        return None if is_meta else self._saved_results(src)
-
-    def _has_run(self, src, is_meta: bool) -> bool:
-        return src is not None and self._results(src, is_meta) is not None
-
     def _make_render_func(self):
         src = self._source()
-        if src is None:
+        res = getattr(src, 'gsea_library_results', None) if src is not None else None
+        if res is None or not len(res):
             return None
-        res = self._results(src, self._is_meta())
         d = getattr(src, 'disease_label', None)
         c = getattr(src, 'control_label', None)
         lib = getattr(src, 'gsea_library_name', None)

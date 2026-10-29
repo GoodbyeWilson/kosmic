@@ -1,10 +1,10 @@
 # Preranked GSEA (fgsea) enrichment page.
 #
 # A matplotlib mirror of the DE window's NES bar chart. It never recomputes:
-# it renders the in-memory fgsea summary from the last run
-# ('de_ws.fgsea_results') and falls back to the results saved to disk by that
-# run, so the figure always reflects the latest actual GSEA (against the
-# genome-wide gene ranking) rather than a recomputed approximation.
+# it renders the fgsea summary of the last run, from the DE workspace or as
+# saved in the study's folder (FigurePage._de), so the figure always
+# reflects the latest actual GSEA (against the genome-wide gene ranking)
+# rather than a recomputed approximation.
 
 from __future__ import annotations
 
@@ -26,36 +26,23 @@ class FgseaPage(FigurePage):
     def _build_controls(self) -> FigureControls:
         return FigureControls()
 
-    def _results_path(self) -> Optional[Path]:
-        """On-disk fgsea summary saved by the last run, or None."""
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_pathway_scoring_dir
-        from kosmic.de.fgsea import FGSEA_RESULTS_FILE
-        return de_pathway_scoring_dir(de.project_dir) / FGSEA_RESULTS_FILE
+    STALENESS_ATTR = 'fgsea_results'
 
     def _results(self):
-        """fgsea summary to render: the in-memory result from this session's run,
-        else the one saved to disk. None if neither exists."""
-        de = self.workspace.de_ws
-        if de is None:
-            return None
-        res = getattr(de, 'fgsea_results', None)
-        if res is not None and len(res) > 0:
-            return res
-        from kosmic.de.fgsea import load_fgsea_results
-        path = self._results_path()
-        return load_fgsea_results(path) if path else None
+        """fgsea summary to render, or None if fgsea was never run."""
+        de = self._de()
+        res = de.fgsea_results if de is not None else None
+        return res if res is not None and len(res) > 0 else None
 
     def dependencies_met(self) -> bool:
-        return self._results() is not None
+        de = self._de()
+        return de is not None and de.available('fgsea_results')
 
     def _make_render_func(self):
         res = self._results()
         if res is None:
             return None
-        de = self.workspace.de_ws
+        de = self._de()
         d = getattr(de, 'disease_label', None)
         c = getattr(de, 'control_label', None)
         font_sizes = self._font_sizes()
@@ -69,11 +56,7 @@ class FgseaPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()
 
     def _default_export_basename(self) -> str:
         return "pathway_enrichment_gsea"

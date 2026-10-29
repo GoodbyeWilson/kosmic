@@ -62,8 +62,8 @@ def _workspace(study=True, meta=True):
         inputs.update(enrichment_results=_ora('meta term'), enrichment_ranking=_ranking(2),
                       gsea_library_results=res, gsea_library_details=det,
                       gsea_library_name='Hallmark')
-    return SimpleNamespace(de_ws=de, scrna_ws=None, data_version=lambda: 0,
-                           meta_ws=SimpleNamespace(figure_inputs=lambda: inputs))
+    from tests.study_folder import figure_workspace
+    return figure_workspace(de=de, meta=SimpleNamespace(figure_inputs=lambda: inputs))
 
 
 def _pages():

@@ -1,6 +1,6 @@
 # QC violin plot page (genes/cell, total counts, MT%).
 #
-# Reads from 'workspace.scrna_ws.current_adata.obs'.
+# Reads the obs of the study's scRNA dataset (FigurePage._adata).
 
 from __future__ import annotations
 
@@ -19,12 +19,6 @@ class QCViolinsPage(FigurePage):
 
     def _build_controls(self) -> FigureControls:
         return FigureControls(default_w=12, default_h=6)
-
-    def _adata(self):
-        scrna = self.workspace.scrna_ws
-        if scrna is None:
-            return None
-        return getattr(scrna, 'current_adata', None)
 
     def dependencies_met(self) -> bool:
         adata = self._adata()
@@ -46,11 +40,7 @@ class QCViolinsPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        scrna = self.workspace.scrna_ws
-        if scrna is None or not getattr(scrna, 'current_project_dir', None):
-            return None
-        from kosmic.paths import scrna_figures_dir
-        return scrna_figures_dir(scrna.current_project_dir)
+        return self._scrna_export_dir()
 
     def _default_export_basename(self) -> str:
         return "qc_violins"

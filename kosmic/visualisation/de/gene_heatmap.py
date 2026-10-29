@@ -166,7 +166,7 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
 
 
 def prepare_heatmap_data(adata, pathway_gene_sets, sample_col, condition_col,
-                         min_cells=DE_MIN_CELLS, allowed_genes=None):
+                         min_cells=DE_MIN_CELLS, allowed_genes=None, species=None):
     """Prepare sample-level gene expression data for heatmaps.
 
     Parameters
@@ -186,6 +186,10 @@ def prepare_heatmap_data(adata, pathway_gene_sets, sample_col, condition_col,
         DE-tested gene set so the heatmap shows only genes the DE window kept
         (e.g. drops a one-donor gene) -- applied here so the in-app and exported
         heatmaps stay identical.
+    species : {'human', 'mouse'}, optional
+        The study's species. Detected from 'adata' when not given; a caller
+        that read only some of a study's genes (Figure Export, ADR-014)
+        passes the species detected on all of them.
 
     Returns
     -------
@@ -197,7 +201,7 @@ def prepare_heatmap_data(adata, pathway_gene_sets, sample_col, condition_col,
 
     from kosmic.scrna.counts import count_var_names, counts_adata, has_counts_layer
     count_names = count_var_names(adata)
-    species = detect_species(count_names)
+    species = species or detect_species(count_names)
     coverage_var = set(count_names)
 
     # Find available pathways

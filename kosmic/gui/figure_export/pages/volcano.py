@@ -1,6 +1,7 @@
 # Volcano plot page: gene-level DE results.
 #
-# Reads from 'workspace.de_ws' (DEWorkspace). Disabled until DE has run.
+# Reads the study's DE results (FigurePage._de): the DE workspace's run or a
+# saved one. Disabled until DE has run.
 
 from __future__ import annotations
 
@@ -70,14 +71,13 @@ class VolcanoPage(FigurePage):
         return _VolcanoControls()
 
     def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        return de is not None and getattr(de, 'de_results', None) is not None
+        de = self._de()
+        return de is not None and de.available('de_results')
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        de = self._de()
+        if de is None or de.de_results is None:
             return None
-
-        de = self.workspace.de_ws
         ctrl = self._controls
         dr = de.de_results.copy()
         d = de.disease_label
@@ -106,8 +106,4 @@ class VolcanoPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()

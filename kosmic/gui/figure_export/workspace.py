@@ -1,12 +1,18 @@
 # FigureExportWorkspace -- sibling to scRNA / DE / Meta. Holds references
-# to the scRNA + DE workspaces; figure pages read state from those
-# workspaces directly. Callers bump 'data_version' when underlying state
-# changes so cached pixmaps invalidate.
+# to the scRNA, DE and Meta-Analysis workspaces; the scRNA and DE figure
+# pages read them through the study source (below), the Meta figures
+# through the Meta workspace's figure_inputs(). Callers bump 'data_version'
+# when underlying state changes so cached pixmaps invalidate.
 #
 # The figure list shows one section at a time -- the figures of the scRNA,
 # DE or Meta-Analysis workspace, chosen with a switch above it -- and greys
 # the figures whose data is not available, naming the step to run in the
 # tooltip. main.py opens the section of the workspace the user came from.
+#
+# The scRNA and DE figures show one study, through 'self.source' (ADR-014):
+# a workspace's data when it holds the study, else the study's folder. When
+# the study has more than one DE run (one per cell type and method, say),
+# the DE section shows a Run selector above the list.
 from __future__ import annotations
 
 from typing import Optional
@@ -14,7 +20,7 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
-    QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QListWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -143,6 +149,9 @@ class FigureExportWorkspace(QWidget):
         self.bump_data_version()
         if hasattr(self, '_list'):
             self._rebuild_list()
+            page = self._stack.currentWidget()
+            if self.isVisible() and isinstance(page, FigurePage):
+                page.on_activated()
 
     def bump_data_version(self):
         """Call after upstream workspace state changes; invalidates page caches."""
@@ -182,6 +191,20 @@ class FigureExportWorkspace(QWidget):
         switch.addStretch(1)
         nav_lay.addLayout(switch)
 
+        # The DE run the DE figures draw (DE section, two runs or more).
+        self._run_row = QWidget()
+        run_lay = borderless(QHBoxLayout, self._run_row)
+        run_lay.setSpacing(6)
+        run_lay.addWidget(QLabel("Run:"))
+        self._run_combo = QComboBox()
+        self._run_combo.setToolTip(
+            "The DE run the DE figures draw: the one in the DE workspace, or\n"
+            "one saved in the study's folder (one per cell type and method).")
+        self._run_combo.currentIndexChanged.connect(self._on_run_chosen)
+        run_lay.addWidget(self._run_combo, 1)
+        self._run_row.setVisible(False)
+        nav_lay.addWidget(self._run_row)
+
         self._available_only = QCheckBox("Show available only")
         self._available_only.setToolTip(
             "Hide the figures whose data is not loaded or not yet computed.")
@@ -198,9 +221,10 @@ class FigureExportWorkspace(QWidget):
         for group_label, page_cls in _PAGE_REGISTRY:
             page = page_cls(workspace=self)
             page.log_message.connect(self.log_message.emit)
+            page.study_section = _SECTION_OF_GROUP[group_label]
             self._stack.addWidget(page)
             self._pages.append(page)
-            self._entries.append((_SECTION_OF_GROUP[group_label], group_label, page))
+            self._entries.append((page.study_section, group_label, page))
 
         layout.addWidget(nav)
         layout.addWidget(self._stack, stretch=1)
@@ -221,6 +245,29 @@ class FigureExportWorkspace(QWidget):
     def current_section(self) -> str:
         return self._section
 
+    def _sync_runs(self) -> None:
+        """Fill the Run selector with the study's DE runs: the DE
+        workspace's (when it holds one for this study), then each saved run.
+        Shown in the DE section when there is a choice."""
+        choices: list[tuple[str, object]] = []
+        live = self.source._live_de()
+        if live is not None and getattr(live, 'de_results', None) is not None:
+            choices.append(("Run in the DE workspace", None))
+        choices += [(run.label, run) for run in self.source.de_runs()]
+        chosen = self.source.de_run()
+        self._run_combo.blockSignals(True)
+        self._run_combo.clear()
+        for label, run in choices:
+            self._run_combo.addItem(label, run)
+        index = next((i for i, (_l, run) in enumerate(choices) if run == chosen), 0)
+        self._run_combo.setCurrentIndex(index)
+        self._run_combo.blockSignals(False)
+        self._run_row.setVisible(self._section == 'de' and len(choices) > 1)
+
+    def _on_run_chosen(self, index: int) -> None:
+        if index >= 0:
+            self.source.set_de_run(self._run_combo.itemData(index))
+
     @staticmethod
     def _available(page: FigurePage) -> bool:
         try:
@@ -233,6 +280,7 @@ class FigureExportWorkspace(QWidget):
         greyed with the step to run as tooltip, or left out when 'Show
         available only' is ticked. Keeps the open figure selected when it
         is still listed, else opens the first available one."""
+        self._sync_runs()
         current = self._stack.currentWidget()
         hide_unavailable = self._available_only.isChecked()
         grey = QBrush(QColor(get_color('fg_tertiary')))
@@ -260,7 +308,7 @@ class FigureExportWorkspace(QWidget):
             row.setData(Qt.ItemDataRole.UserRole, self._stack.indexOf(page))
             if not available:
                 row.setForeground(grey)
-                row.setToolTip(page.UNAVAILABLE_MESSAGE)
+                row.setToolTip(page.unavailable_reason())
             self._list.addItem(row)
             rows.append((row, page, available))
 

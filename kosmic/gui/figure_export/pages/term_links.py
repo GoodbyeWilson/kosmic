@@ -64,8 +64,10 @@ class TermLinksPage(EnrichmentFigurePage):
     def _build_controls(self) -> _TermLinksControls:
         return self._add_source_row(_TermLinksControls())
 
+    # The ribbons need the genes' fold changes as well as the terms.
+    DE_NEEDS = ('enrichment_results', 'de_results')
+
     def _has_run(self, src, is_meta: bool) -> bool:
-        # The ribbons need the genes' fold changes as well as the terms.
         enr = getattr(src, 'enrichment_results', None)
         dr = getattr(src, 'de_results', None)
         return (enr is not None and not enr.empty and 'Genes' in enr.columns
@@ -74,7 +76,7 @@ class TermLinksPage(EnrichmentFigurePage):
 
     def _make_render_func(self):
         src = self._source()
-        if src is None:
+        if src is None or not self._has_run(src, self._is_meta()):
             return None
         enr = src.enrichment_results.copy()
         dr = src.de_results[['names', 'logfoldchanges']].copy()

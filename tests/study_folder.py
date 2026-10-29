@@ -47,7 +47,8 @@ def make_adata(form: str = 'log', seed: int = 0):
         'pct_counts_mt': rng.random(N_CELLS) * 5,
     }, index=[f'cell{i}' for i in range(N_CELLS)])
     var = pd.DataFrame({'highly_variable': rng.random(len(genes)) < 0.3,
-                        'means': counts.mean(axis=0)}, index=genes)
+                        'means': counts.mean(axis=0),
+                        'variances_norm': rng.random(len(genes)) * 3}, index=genes)
     csr = sp.csr_matrix(counts)
     if form == 'log':
         totals = counts.sum(axis=1, keepdims=True)
@@ -139,3 +140,31 @@ def make_study_folder(root: Path, name: str = 'StudyA', form: str = 'log') -> Pa
                    'cell_type_column': 'cell_type',
                    'role_map': {'Control': 'control', 'Disease': 'disease'}})
     return study
+
+
+def figure_workspace(*, scrna_adata=None, de=None, meta=None, study=None,
+                     name: str = 'HeldStudy'):
+    """A stand-in for FigureExportWorkspace, for page tests: the pages read
+    their study through a real StudySource.
+
+    'scrna_adata' is held by a stand-in scRNA workspace and 'de' (an object
+    with the DE workspace's attribute names) is the DE workspace, both on
+    'study'; 'study' defaults to an empty temporary folder called 'name'.
+    'meta' is the Meta-Analysis workspace.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from kosmic.gui.figure_export.shared.study_source import StudySource
+    if study is None:
+        study = Path(tempfile.mkdtemp(prefix='kosmic_fig_')) / name
+        study.mkdir()
+    study = Path(study)
+    scrna = (SimpleNamespace(current_adata=scrna_adata, current_project_dir=str(study))
+             if scrna_adata is not None else None)
+    if de is not None:
+        de.project_dir = study
+    src = StudySource(lambda: scrna, lambda: de)
+    src.set_study(study)
+    return SimpleNamespace(scrna_ws=scrna, de_ws=de, meta_ws=meta, source=src,
+                           data_version=lambda: 0)

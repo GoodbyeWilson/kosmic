@@ -1,13 +1,14 @@
 # Base for figure pages drawn from an enrichment run, which can come from
-# the DE workspace (one study's DE) or the Meta-Analysis workspace's
-# Enrichment step (the pooled gene list, via figure_inputs(); ADR-010).
+# one study's DE (the DE workspace or the study's folder, through
+# FigurePage._de; ADR-014) or the Meta-Analysis workspace's Enrichment step
+# (the pooled gene list, via figure_inputs(); ADR-010).
 #
 # Each source is presented with the attribute names the DE workspace uses
 # ('enrichment_results', 'gsea_library_results', 'gsea_library_details',
 # 'gsea_library_name', 'de_results', 'disease_label', 'control_label'), so
-# a page reads 'self._source()' where it used to read 'workspace.de_ws'.
-# A Source selector appears when both workspaces hold a run; Meta-analysis
-# is the default.
+# a page reads 'self._source()' for either. A Source selector appears when
+# both hold a run; Meta-analysis is the default. Whether the study holds a
+# run is checked without reading its tables ('DE_NEEDS').
 
 from __future__ import annotations
 
@@ -28,6 +29,19 @@ class EnrichmentFigurePage(FigurePage):
     #: Which kind of run the page draws: 'ora' (GO / Enrichr
     #: over-representation) or 'gsea' (preranked GSEA of a library).
     KIND = 'ora'
+
+    #: The study DE results a run of this page needs; empty for the one
+    #: KIND implies ('enrichment_results' or 'gsea_library_results').
+    DE_NEEDS: tuple = ()
+
+    @property
+    def STALENESS_ATTR(self):
+        return self._de_needs()[0]
+
+    def _de_needs(self) -> tuple:
+        if self.DE_NEEDS:
+            return self.DE_NEEDS
+        return ('gsea_library_results',) if self.KIND == 'gsea' else ('enrichment_results',)
 
     def _add_source_row(self, ctrl):
         """Add the Source selector to *ctrl*; hidden until both sources hold
@@ -66,7 +80,8 @@ class EnrichmentFigurePage(FigurePage):
         )
 
     def _has_run(self, src, is_meta: bool) -> bool:
-        """Whether *src* holds a run of this page's KIND."""
+        """Whether *src* (the Meta-analysis source) holds a run of this
+        page's KIND."""
         if src is None:
             return False
         if self.KIND == 'gsea':
@@ -81,8 +96,8 @@ class EnrichmentFigurePage(FigurePage):
         meta = self._meta_source()
         if self._has_run(meta, True):
             out[SOURCE_META] = meta
-        de = self.workspace.de_ws
-        if self._has_run(de, False):
+        de = self._de()
+        if de is not None and all(de.available(n) for n in self._de_needs()):
             out[SOURCE_STUDY] = de
         return out
 
@@ -147,7 +162,4 @@ class EnrichmentFigurePage(FigurePage):
                 return None
             from kosmic.paths import meta_output_dir
             return meta_output_dir(src.project_folder, src.selection)
-        if src is None or not getattr(src, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(src.project_dir)
+        return self._de_export_dir()

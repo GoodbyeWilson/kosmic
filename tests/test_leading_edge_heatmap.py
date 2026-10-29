@@ -101,8 +101,9 @@ def _workspace(study=True, meta=True):
               'gsea_library_results': _gsea() if meta else None,
               'gsea_library_details': None, 'gsea_library_name': 'KEGG',
               'enrichment_ranking': pooled if meta else None}
-    return SimpleNamespace(de_ws=de, scrna_ws=None, data_version=lambda: 0,
-                           meta_ws=SimpleNamespace(figure_inputs=lambda: inputs))
+    from tests.study_folder import figure_workspace
+    return figure_workspace(de=de, meta=SimpleNamespace(figure_inputs=lambda: inputs),
+                            name='GSE174574')
 
 
 def _page(ws):

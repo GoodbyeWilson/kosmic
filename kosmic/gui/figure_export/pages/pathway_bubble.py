@@ -1,7 +1,8 @@
 # Pathway activity bubble plot page.
 #
-# Reads from 'workspace.de_ws.pathway_de_results' (requires Effect_Size
-# column, i.e. pathway-level scoring must have run -- not just gene-level DE).
+# Reads the study's pathway DE results (FigurePage._de; requires an
+# Effect_Size column, i.e. pathway-level scoring must have run -- not just
+# gene-level DE).
 
 from __future__ import annotations
 
@@ -34,22 +35,19 @@ class PathwayBubblePage(FigurePage):
     def _build_controls(self) -> _BubbleControls:
         return _BubbleControls()
 
+    STALENESS_ATTR = 'pathway_de_results'
+
     def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        pdr = getattr(de, 'pathway_de_results', None)
-        if pdr is None:
-            return False
-        # bubble_plot.create_bubble_plot accepts either column name.
-        return ('Effect_Size' in pdr.columns
-                or 'logfoldchanges' in pdr.columns)
+        de = self._de()
+        return de is not None and de.available('pathway_de_results')
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        de = self._de()
+        pdr = de.pathway_de_results if de is not None else None
+        # bubble_plot.create_bubble_plot accepts either column name.
+        if pdr is None or not {'Effect_Size', 'logfoldchanges'} & set(pdr.columns):
             return None
-        de = self.workspace.de_ws
-        sd = de.pathway_de_results.copy()
+        sd = pdr.copy()
         d = de.disease_label
         c = de.control_label
         title_override = self._controls.title_edit.text().strip()
@@ -74,11 +72,7 @@ class PathwayBubblePage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()
 
     def _default_export_basename(self) -> str:
         return "pathway_bubble"

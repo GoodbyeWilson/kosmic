@@ -235,7 +235,9 @@ class StudySource(QObject):
 
     def scrna_cells(self, rows):
         """Every gene for the cells at positions 'rows' (sorted, unique),
-        log-normalised. Call from a render thread."""
+        log-normalised. Not cached: a sample of a large atlas is gigabytes,
+        and the figure keeps what it computes from it. Call from a render
+        thread."""
         import numpy as np
         rows = np.unique(np.asarray(rows, dtype=np.int64))
         held = self._held_scrna()
@@ -244,9 +246,11 @@ class StudySource(QObject):
         path = self.h5ad_path()
         if path is None:
             return None
-        from kosmic.scrna.load.h5ad_meta import read_cells
-        key = ('cells', len(rows), hash(rows.tobytes()))
-        return self._cached_read(key, path, lambda: read_cells(path, rows, source='log'))
+        from kosmic.scrna.load.h5ad_meta import StudyFileChanged, read_cells
+        try:
+            return read_cells(path, rows, source='log')
+        except StudyFileChanged:
+            return read_cells(path, rows, source='log')
 
     # -- DE ----------------------------------------------------------------------
 
@@ -266,7 +270,10 @@ class StudySource(QObject):
     def set_de_run(self, run) -> None:
         """Serve the run-specific DE attributes from this saved run (None:
         the DE workspace's run when it has one, else the first saved)."""
+        if run == self._de_run:
+            return
         self._de_run = run
+        self.changed.emit()
 
     def de_run(self):
         return self._de_run
@@ -279,9 +286,11 @@ class StudySource(QObject):
         workspace's dataset when it holds this study, else read from the
         file from the count source the run used ('raw' or a layer name).
         Call from a render thread."""
+        from kosmic.scrna.counts import loaded_count_source
         live = self._live_de()
-        if live is not None and getattr(live, 'current_adata', None) is not None:
-            return live.current_adata
+        held = getattr(live, 'current_adata', None) if live is not None else None
+        if held is not None and loaded_count_source(held) == (counts_source or 'raw'):
+            return held
         path = self.h5ad_path()
         if path is None:
             return None
@@ -291,6 +300,18 @@ class StudySource(QObject):
         return self._cached_read(
             ('counts', tuple(genes), layer), path,
             lambda: read_genes(path, genes, source='counts', counts_layer=layer))
+
+    def var_names(self) -> Optional[list]:
+        """The gene names of the study's file (its var), cached; None with
+        no file."""
+        path = self.h5ad_path()
+        if path is None:
+            return None
+
+        def _read():
+            from kosmic.scrna.load.h5ad_meta import read_var
+            return [str(g) for g in read_var(path).index]
+        return self._saved_value(('var',), path, _read)
 
     def _saved_value(self, key, path: Optional[Path], read: Callable):
         """A saved output, cached against its file."""
@@ -461,12 +482,36 @@ class DEState:
         def _compute():
             from kosmic.de.de_analysis import prepare_gene_coverage
             from kosmic.scrna.inspect.detection import detect_species
-            from kosmic.scrna.load.h5ad_meta import read_var
-            names = [str(g) for g in read_var(path).index]
+            names = self._source.var_names()
             return prepare_gene_coverage(gene_sets, set(names), detect_species(names))[1]
 
         key = ('coverage', tuple(sorted(gene_sets)), str(self._run.path if self._run else ''))
         return self._source._saved_value(key, path, _compute)
+
+    def saved_path(self, name: str) -> Optional[Path]:
+        """The file 'name' is read from when the study's folder serves it;
+        None when the DE workspace does, or for a value with no file of its
+        own. For the note on results older than the study's dataset."""
+        if self._live_value(name) is not None or self.project_dir is None:
+            return None
+        from kosmic.de import saved
+        from kosmic.paths import de_pathway_scoring_dir
+        scoring = de_pathway_scoring_dir(self.project_dir)
+        if name == 'de_results':
+            return self._run.path if self._run is not None else None
+        if name == 'pathway_de_results':
+            return scoring / 'pathway_de_results.csv'
+        if name == 'pathway_score_data':
+            from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE
+            return scoring / PER_DONOR_SCORES_FILE
+        if name == 'fgsea_results':
+            from kosmic.de.fgsea import FGSEA_RESULTS_FILE
+            return scoring / FGSEA_RESULTS_FILE
+        if name in ('gsea_library_results', 'gsea_library_details'):
+            return saved.gsea_library_path(self.project_dir)
+        if name == 'enrichment_results':
+            return saved.enrichment_path(scoring)
+        return None
 
     # -- Cheap availability ------------------------------------------------------
 

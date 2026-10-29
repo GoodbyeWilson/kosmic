@@ -2,9 +2,12 @@
 # coloured by its module score, and cell-type composition by condition or
 # sample.
 #
-# Read 'workspace.scrna_ws.current_adata'. Disease and control come from
-# 'adata.obs["_role"]', so studies that name their conditions differently
-# are grouped the same way.
+# Read the study's scRNA dataset (FigurePage._adata). The marker figures
+# take expression from the study source: the scRNA workspace's dataset when
+# it holds the study, else the panel's genes (dot plot) or the sampled
+# cells (score embeddings) read from the study's file. Disease and control
+# come from 'adata.obs["_role"]', so studies that name their conditions
+# differently are grouped the same way.
 
 from __future__ import annotations
 
@@ -55,6 +58,7 @@ def _expression_label(adata) -> str:
     x = adata.X[:50]
     x = x.toarray() if sp.issparse(x) else np.asarray(x)
     sums = np.expm1(x.astype(float)).sum(axis=1)
+    sums = sums[sums > 0]             # a cell with no counts says nothing
     if len(sums) and np.allclose(sums, 1e4, rtol=0.01):
         return 'Mean expression\nlog1p(CP10K)'
     return 'Mean expression'
@@ -120,18 +124,10 @@ class _MarkerSource(QComboBox):
 
 
 class _ScRNAPage(FigurePage):
-    """Base: reads the scRNA workspace's current dataset."""
-
-    def _adata(self):
-        scrna = self.workspace.scrna_ws
-        return getattr(scrna, 'current_adata', None) if scrna is not None else None
+    """Base: reads the study's scRNA dataset."""
 
     def _default_export_dir(self) -> Optional[Path]:
-        scrna = self.workspace.scrna_ws
-        if scrna is None or not getattr(scrna, 'current_project_dir', None):
-            return None
-        from kosmic.paths import scrna_figures_dir
-        return scrna_figures_dir(scrna.current_project_dir)
+        return self._scrna_export_dir()
 
 
 class _CellTypePage(_ScRNAPage):
@@ -142,7 +138,13 @@ class _CellTypePage(_ScRNAPage):
 
     def dependencies_met(self) -> bool:
         adata = self._adata()
-        return adata is not None and self._column() in adata.obs.columns
+        if adata is None:
+            return False
+        if self._column() not in adata.obs.columns:
+            # Not opened yet with this dataset: the selector is filled when
+            # the page opens, and the list asks before then.
+            self._controls.populate_columns(label_columns(adata))
+        return self._column() in adata.obs.columns
 
     def on_activated(self):
         adata = self._adata()
@@ -167,17 +169,25 @@ class MarkerDotPlotPage(_CellTypePage):
         return ctrl
 
     def _summary(self, adata, col, source, markers):
-        """(mean, pct, owner) for the panel genes present, cached per dataset,
-        column and marker source."""
+        """(mean, pct, owner, colour bar label) for the panel genes present,
+        cached per dataset, column and marker source. Reads the panel's
+        expression, from the study's file when no workspace holds it."""
         key = (id(adata), self.workspace.data_version(), col, source,
                tuple(markers))
         if key not in self._cache:
             from kosmic.scrna.inspect.gene_group import marker_panel, summarise_gene_group
             genes, owner = marker_panel(markers, cell_types=list(markers))
-            keep = _labelled(adata.obs[col])
-            s = summarise_gene_group(adata[keep], genes, group_col=col)
+            src = self._study_source()
+            expr = src.scrna_expression(genes)
+            keep = _labelled(expr.obs[col])
+            s = summarise_gene_group(expr[keep], genes, group_col=col)
             owner = {g: owner[g] for g in s.present}
-            self._cache = {key: (s.mean_matrix, s.pct_matrix, owner)}
+            # The label judges the dataset's X, which a read of a few genes
+            # cannot show; a few cells with every gene can.
+            sample = expr if src.holds_scrna() else src.scrna_cells(
+                np.arange(min(50, adata.n_obs)))
+            self._cache = {key: (s.mean_matrix, s.pct_matrix, owner,
+                                 _expression_label(sample))}
         return self._cache[key]
 
     def _make_render_func(self):
@@ -193,17 +203,17 @@ class MarkerDotPlotPage(_CellTypePage):
         def _render(adata=adata, col=col, source=source, markers=markers,
                     sz=figsize, f=font_sizes):
             from kosmic.visualisation.scrna.markers import create_marker_dotplot
-            mean, pct, owner = self._summary(adata, col, source, markers)
+            mean, pct, owner, label = self._summary(adata, col, source, markers)
             if mean.empty:
                 return None
             return create_marker_dotplot(mean, pct, owner, figsize=sz, font_sizes=f,
-                                         colour_label=_expression_label(adata))
+                                         colour_label=label)
         return _render
 
     def _export_companions(self, fig_path: Path) -> list[Path]:
         """The numbers behind the dots, one row per gene and cell type."""
         adata = self._adata()
-        mean, pct, owner = self._summary(adata, self._column(),
+        mean, pct, owner, _label = self._summary(adata, self._column(),
                                          self._controls.source.currentText(),
                                          self._controls.source.markers())
         long = (mean.stack().rename('mean_expression').to_frame()
@@ -298,7 +308,8 @@ class MarkerScoreUMAPPage(_ScRNAPage):
                 n = adata.n_obs
                 idx = (np.arange(n) if n <= n_cells else
                        np.sort(np.random.default_rng(0).choice(n, n_cells, replace=False)))
-                self._cache = {ck: (idx, panel_scores(adata[idx], markers))}
+                cells = self._study_source().scrna_cells(idx)
+                self._cache = {ck: (idx, panel_scores(cells, markers))}
             idx, scores = self._cache[ck]
             if not scores:
                 return None

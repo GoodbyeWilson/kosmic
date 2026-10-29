@@ -1,10 +1,15 @@
 # Gene heatmap page (per-pathway sample x gene heatmap).
 #
-# Reads from 'workspace.de_ws' (current_adata + pathway_gene_sets +
-# sample_col + condition_col + min_cells + disease/control_label).
+# Reads the study's DE run (FigurePage._de: pathway_gene_sets, sample_col,
+# condition_col, min_cells, counts_source, disease/control_label) and the
+# counts of the gene sets' genes (StudySource.de_counts). Preparing the
+# per-sample table reads those counts, from the study's file when the DE
+# workspace does not hold it, so it runs on the render thread; the pathway
+# selector is filled once the first preparation is drawn.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -119,96 +124,101 @@ class GeneHeatmapPage(FigurePage):
     )
 
     def __init__(self, workspace):
-        # Lazy cache, keyed on data_version + heatmap params.
-        self._sample_df = None
-        self._available_pathways: dict = {}
-        self._prep_version: int = -1
-        self._prep_signature: tuple = ()
+        # (signature, sample_df, available_pathways) of the last preparation.
+        # Written on the render thread, read on the GUI thread.
+        self._prepared: Optional[tuple] = None
+        self._prep_lock = threading.Lock()
         super().__init__(workspace)
 
     def _build_controls(self) -> _HeatmapControls:
         return _HeatmapControls()
 
     def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        return (getattr(de, 'current_adata', None) is not None
-                and bool(getattr(de, 'pathway_gene_sets', None))
-                and bool(getattr(de, 'sample_col', None))
-                and bool(getattr(de, 'condition_col', None)))
+        de = self._de()
+        return (de is not None and de.available('pathway_gene_sets')
+                and de.available('sample_col') and de.available('condition_col')
+                and (de.current_adata is not None or de.h5ad_path is not None))
 
-    def _prep_inputs(self):
-        de = self.workspace.de_ws
-        return (
-            de.current_adata,
-            de.pathway_gene_sets,
-            de.sample_col,
-            de.condition_col,
-            getattr(de, 'min_cells', 3),
-        )
-
-    def _ensure_prepared(self):
-        """Recompute sample_df + available_pathways if upstream changed."""
+    def _inputs(self) -> Optional[dict]:
+        """What the preparation needs, taken on the GUI thread; None when the
+        figure is not available."""
         if not self.dependencies_met():
-            self._sample_df = None
-            self._available_pathways = {}
-            return
-        adata, gs, sample_col, cond_col, min_cells = self._prep_inputs()
-        de = self.workspace.de_ws
-        allowed = tested_gene_set(getattr(de, 'de_results', None))
-        signature = (id(adata), sample_col, cond_col, min_cells, len(gs),
-                     id(getattr(de, 'de_results', None)),
-                     len(allowed) if allowed is not None else -1)
-        version = self.workspace.data_version()
-        if (self._sample_df is not None
-                and self._prep_version == version
-                and self._prep_signature == signature):
-            return
-        try:
-            from kosmic.visualisation.de.gene_heatmap import prepare_heatmap_data
-            # Restrict to the DE-tested gene set (shared with the in-app heatmap)
-            # so genes filtered out of DE, e.g. one-donor genes, never show.
-            sd, avail = prepare_heatmap_data(
-                adata, gs, sample_col, cond_col, min_cells=min_cells,
-                allowed_genes=allowed)
-            self._sample_df = sd
-            self._available_pathways = avail
-            self._prep_version = version
-            self._prep_signature = signature
-        except Exception as e:
-            self.log_message.emit(f"Heatmap prep failed: {e}")
-            self._sample_df = None
-            self._available_pathways = {}
+            return None
+        de = self._de()
+        gs = de.pathway_gene_sets
+        if not gs:
+            return None
+        # Restrict to the DE-tested gene set (shared with the in-app heatmap)
+        # so genes filtered out of DE, e.g. one-donor genes, never show.
+        allowed = tested_gene_set(de.de_results)
+        counts_source = de.counts_source or 'raw'
+        inputs = dict(gene_sets=dict(gs), sample_col=de.sample_col,
+                      condition_col=de.condition_col, min_cells=de.min_cells,
+                      allowed=allowed, counts_source=counts_source)
+        inputs['signature'] = (self.workspace.data_version(), inputs['sample_col'],
+                               inputs['condition_col'], inputs['min_cells'],
+                               tuple(sorted(gs)), counts_source,
+                               len(allowed) if allowed is not None else -1)
+        return inputs
 
-    def on_activated(self):
-        self._ensure_prepared()
-        if self._available_pathways:
-            self._controls.populate_pathways(list(self._available_pathways.keys()))
-        super().on_activated()
+    def _prepare(self, inputs: dict):
+        """(sample_df, available_pathways) for 'inputs', computed once per
+        signature. Reads the counts of the gene sets' genes: the DE
+        workspace's dataset when it holds the study with the run's counts,
+        else those genes from the study's file. Call from a render thread."""
+        with self._prep_lock:
+            if self._prepared is not None and self._prepared[0] == inputs['signature']:
+                return self._prepared[1], self._prepared[2]
+        from kosmic.scrna.inspect.detection import detect_species, format_gene_for_species
+        from kosmic.visualisation.de.gene_heatmap import prepare_heatmap_data
+        src = self._study_source()
+        names = src.var_names() or []
+        species = detect_species(names) if names else None
+        present = set(names)
+        genes = list(dict.fromkeys(
+            g for gene_list in inputs['gene_sets'].values()
+            for g in (format_gene_for_species(x, species or 'human') for x in gene_list)
+            if g in present))
+        adata = src.de_counts(genes, inputs['counts_source'])
+        if adata is None:
+            return None, {}
+        sd, avail = prepare_heatmap_data(
+            adata, inputs['gene_sets'], inputs['sample_col'], inputs['condition_col'],
+            min_cells=inputs['min_cells'], allowed_genes=inputs['allowed'],
+            species=species)
+        with self._prep_lock:
+            self._prepared = (inputs['signature'], sd, avail)
+        return sd, avail
+
+    def _sync_pathways(self):
+        """List the pathways of the last preparation in the selector, without
+        drawing again (the render already drew the one selected)."""
+        with self._prep_lock:
+            avail = self._prepared[2] if self._prepared is not None else {}
+        combo = self._controls.pathway_combo
+        names = list(avail)
+        if names == [combo.itemText(i) for i in range(combo.count())]:
+            return
+        self._controls.blockSignals(True)
+        self._controls.populate_pathways(names)
+        self._controls.blockSignals(False)
+
+    def _on_render_finished(self, png_bytes: bytes):
+        super()._on_render_finished(png_bytes)
+        self._sync_pathways()
 
     def invalidate(self):
         super().invalidate()
-        self._sample_df = None
-        self._available_pathways = {}
-        self._prep_version = -1
-        self._prep_signature = ()
+        with self._prep_lock:
+            self._prepared = None
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        inputs = self._inputs()
+        if inputs is None:
             return None
-        if self._sample_df is None or not self._available_pathways:
-            return None
+        de = self._de()
         ctrl = self._controls
         pw_name = ctrl.pathway_combo.currentText()
-        if not pw_name:
-            return None
-        genes = self._available_pathways.get(pw_name)
-        if not genes:
-            return None
-
-        de = self.workspace.de_ws
-        sd = self._sample_df
         d = de.disease_label
         c = de.control_label
         cmap = ctrl.cmap.currentText()
@@ -217,22 +227,24 @@ class GeneHeatmapPage(FigurePage):
         font_sizes = self._font_sizes()
         figsize = ctrl.figsize.get_figsize()
 
-        def _render(sd=sd, genes=genes, pn=pw_name, c=c, d=d, cmap=cmap,
+        def _render(inputs=inputs, pn=pw_name, c=c, d=d, cmap=cmap,
                     vmin=vmin, vmax=vmax, f=font_sizes, sz=figsize):
             from kosmic.visualisation.de.gene_heatmap import create_gene_heatmap
+            sd, avail = self._prepare(inputs)
+            # The pathway selected, else the first, before the selector is
+            # filled (it is filled from this preparation once drawn).
+            name = pn if pn in avail else next(iter(avail), None)
+            if sd is None or name is None:
+                return None
             return create_gene_heatmap(
-                sd, genes, pn, c, d, cmap=cmap,
+                sd, avail[name], name, c, d, cmap=cmap,
                 vmin_pct=vmin, vmax_pct=vmax,
                 font_sizes=f, figsize=sz,
             )
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()
 
     def _default_export_basename(self) -> str:
         pw = self._controls.pathway_combo.currentText() if self._controls else ""
