@@ -18,7 +18,7 @@
 # other methods only.
 #
 # 'vote_levels' groups genes by the number of studies agreeing (0/k ...
-# k/k, and 'conflict'), for the Results filter, the Votes plot and its
+# k/k, and 'conflict'), for the Results filter and the Study Agreement
 # figure.
 #
 # Vote counting ignores effect sizes and standard errors and gives no
@@ -88,6 +88,7 @@ def vote_count_fast(datasets, min_studies=MIN_STUDIES, min_votes: Optional[int] 
     -------
     DataFrame
         Standard meta-analysis columns plus 'n_tested', 'votes',
+        'vote_level' ('v/k' or 'conflict', as in 'vote_levels'),
         'vote_fraction', 'vote_conflict', 'vote_pass' and 'min_votes'.
         'pvals_pooled' is 1e-300 where the gene passes and 1 where it does
         not;
@@ -128,6 +129,8 @@ def vote_count_fast(datasets, min_studies=MIN_STUDIES, min_votes: Optional[int] 
         sign = np.where(res['n_up'][rows] >= res['n_down'][rows], 1.0, -1.0)
         result['n_tested'] = res['n_tested'][rows]
         result['votes'] = res['votes'][rows]
+        result['vote_level'] = vote_level(
+            res['n_up'][rows], res['n_down'][rows], len(datasets)).to_numpy()
         result['vote_fraction'] = res['votes'][rows] / np.maximum(res['n_tested'][rows], 1)
         result['vote_conflict'] = res['conflict'][rows]
         result['vote_pass'] = passes[rows]
@@ -142,6 +145,32 @@ def vote_count_fast(datasets, min_studies=MIN_STUDIES, min_votes: Optional[int] 
     return result
 
 
+def describe_selection(method_keys, meta_df: pd.DataFrame,
+                       n_studies: int, fdr: float = DEFAULT_FDR) -> tuple:
+    """How a run picks its genes, in words: (noun, criterion).
+
+    A run of one method calls genes significant; several methods give
+    consensus genes; vote counting alone is a rule that genes pass, with
+    no FDR. Used for the counts on the Gene Meta-Analysis page.
+
+    Returns
+    -------
+    tuple of (str, str)
+        For example ('consensus genes', 'FDR < 0.05') or
+        ('genes pass', 'at least 5 of 5 studies agreeing').
+    """
+    keys = list(method_keys or [])
+    others = [k for k in keys if k != 'vote_count']
+    rule = None
+    if 'vote_count' in keys and 'min_votes' in meta_df.columns and len(meta_df):
+        n = int(meta_df['min_votes'].iloc[0])
+        rule = f"at least {n} of {n_studies} studies agreeing"
+    if rule and not others:
+        return 'genes pass', rule
+    criterion = f"FDR < {fdr:g}" + (f" and {rule}" if rule else "")
+    return ('consensus genes' if len(keys) > 1 else 'significant genes'), criterion
+
+
 def vote_level(n_up, n_down, n_studies: int) -> pd.Series:
     """'v/k' per gene (v = votes in the agreeing direction), or 'conflict'."""
     up = np.asarray(n_up, dtype=int)
@@ -150,36 +179,8 @@ def vote_level(n_up, n_down, n_studies: int) -> pd.Series:
     return pd.Series(np.where((up > 0) & (down > 0), CONFLICT, levels))
 
 
-def run_vote_levels(meta_df: pd.DataFrame, method_keys, n_studies: int,
-                    fdr: float = DEFAULT_FDR) -> tuple:
-    """Levels for a pooling run, with the other method's significant genes.
-
-    The overlay is the first method of the run that is not vote counting
-    (FDR < 'fdr' in its 'fdr_<key>' column); without one there is none.
-
-    Returns
-    -------
-    tuple of (DataFrame, str or None)
-        The 'vote_levels' table and the overlay's label.
-    """
-    other = next((k for k in (method_keys or []) if k != 'vote_count'
-                  and f'fdr_{k}' in meta_df.columns), None)
-    if other is None:
-        return vote_levels(meta_df, n_studies), None
-    sig = pd.to_numeric(meta_df[f'fdr_{other}'], errors='coerce') < fdr
-    name = _DISPLAY_NAMES.get(other, other)
-    return (vote_levels(meta_df, n_studies, significant=sig.to_numpy()),
-            f'{name} FDR < {fdr:g}')
-
-
-# How the Meta-Analysis page names each method, for figure legends.
-_DISPLAY_NAMES = {'dl': 'DL', 'reml': 'REML', 'stouffer': 'Stouffer',
-                  'stouffer_weighted': 'Weighted Stouffer', 'fisher': 'Fisher',
-                  'sumrank': 'SumRank', 'gwop': 'gwOP'}
-
-
 def vote_levels(meta_df: pd.DataFrame, n_studies: int,
-                significant: Optional[pd.Series] = None) -> pd.DataFrame:
+                significant=None) -> pd.DataFrame:
     """Genes per agreement level, split by direction.
 
     Parameters
@@ -189,9 +190,9 @@ def vote_levels(meta_df: pd.DataFrame, n_studies: int,
         'annotate_direction' adds.
     n_studies : int
         Studies in the run (k).
-    significant : Series of bool, optional
-        Genes another method calls significant (aligned with 'meta_df'),
-        to count how many of each level it supports.
+    significant : array of bool, optional
+        Genes a pooling method calls significant (aligned with
+        'meta_df'), counted per level in a 'significant' column.
 
     Returns
     -------

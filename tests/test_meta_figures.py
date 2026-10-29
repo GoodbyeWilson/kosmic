@@ -132,7 +132,7 @@ def test_meta_volcano_gates_on_fdr_unless_lfc_set(qapp):
     assert n_coloured() == 1                 # FDR and |log2FC| > 0.25
 
 
-def test_vote_levels_page_draws_and_exports_the_counts(qapp, tmp_path):
+def test_vote_levels_page_hatches_a_chosen_method_and_exports_the_counts(qapp, tmp_path):
     from kosmic.gui.figure_export.pages.meta_figures import VoteLevelsPage
     results = pd.DataFrame({'names': list('ABCD'), 'n_up': [3, 1, 0, 1],
                             'n_down': [0, 0, 0, 1], 'fdr_reml': [0.01, 0.5, 0.5, 0.5],
@@ -142,8 +142,14 @@ def test_vote_levels_page_draws_and_exports_the_counts(qapp, tmp_path):
               'selection': 'Cardiomyocyte', 'project_folder': None}
     page = VoteLevelsPage(SimpleNamespace(
         meta_ws=SimpleNamespace(figure_inputs=lambda: inputs), data_version=lambda: 0))
+    assert page.dependencies_met()                # any run: levels need only Up / Down
     page._controls.populate_methods(page._methods())
-    assert page.dependencies_met() and page._controls.overlay.currentText() == 'reml'
+    overlay = page._controls.overlay
+    assert overlay.currentText() == 'None'        # off until chosen
+    assert page._levels()[1] is None
+
+    overlay.setCurrentIndex(overlay.findData('reml'))
+    assert page._levels()[1] == 'REML FDR < 0.05'
     plt.close(page._make_render_func()())
     (csv,) = page._export_companions(tmp_path / 'votes.png')
     counts = pd.read_csv(csv, index_col='level')

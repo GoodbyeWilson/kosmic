@@ -51,6 +51,9 @@ def test_a_gene_passes_with_n_votes_and_no_conflict(studies):
     assert not _row(res, 'MIX')['vote_pass']              # 2 up but 1 down: a conflict
     assert bool(_row(res, 'MIX')['vote_conflict'])
     assert not _row(res, 'NONE')['vote_pass']
+    # Every gene keeps its level, as the Study Agreement figure counts it.
+    assert [_row(res, g)['vote_level'] for g in ('UP', 'MIX', 'NONE')] == [
+        '3/4', 'conflict', '0/4']
     assert not _row(vote_count_fast(studies, min_studies=2), 'UP')['vote_pass']  # default: all 4
 
 
@@ -63,6 +66,7 @@ def test_the_rule_is_an_fdr_of_0_or_1_in_the_consensus(studies):
     assert merged.loc['MIX', 'fdr_vote_count'] == 1.0
     assert merged.loc['MIX', 'fdr'] == 1.0                # fails the rule, fails consensus
     assert merged.loc['UP', 'votes'] == 3                 # carried for the Results table
+    assert merged.loc['UP', 'vote_level'] == '3/4'
 
 
 def test_a_study_without_adjusted_p_values_cannot_vote(studies):
@@ -100,3 +104,13 @@ def test_a_saved_method_selection_does_not_hide_vote_counting(tmp_path):
     assert load_enabled_methods(settings) == {'dl', 'fisher', 'vote_count'}
     save_enabled_methods(settings, {'dl'})            # now unticked on purpose
     assert load_enabled_methods(settings) == {'dl'}
+
+
+def test_the_selection_is_worded_by_the_methods_run(studies):
+    from kosmic.meta_analysis.pooling.vote_count import describe_selection
+    vote = get_analytical_pool_fn('vote_count', 2, min_votes=3)(studies)
+    assert describe_selection(['vote_count'], vote, 4) == (
+        'genes pass', 'at least 3 of 4 studies agreeing')
+    assert describe_selection(['reml'], vote, 4) == ('significant genes', 'FDR < 0.05')
+    assert describe_selection(['reml', 'vote_count'], vote, 4) == (
+        'consensus genes', 'FDR < 0.05 and at least 3 of 4 studies agreeing')

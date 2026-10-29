@@ -658,7 +658,25 @@ def test_vote_counting_is_a_family_and_its_table_shows_votes_not_a_ci(app):
     page._results_tab.populate(data["meta_df"], ["vote_count"])
     table = page._results_tab.table
     headers = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
-    assert "Votes" in headers and "CI lo" not in headers and "I²" not in headers
+    assert "Level" in headers and "CI lo" not in headers and "I²" not in headers
+    # A rule, not a test: no FDR columns, and the count says genes pass.
+    assert "≥ 4 of 4 agree" in headers               # the threshold, in the header
+    assert "FDR(vote_count)" not in headers and "Consensus FDR" not in headers
+    assert "genes pass" in page._results_tab.sig_label.text()
+    assert "FDR" not in page._results_tab.sig_label.text()
+
+    # On its own it draws the study-agreement chart in place of the volcano.
+    page._meta_df, page._method_keys = data["meta_df"], ["vote_count"]
+    page._last_consensus_labels = [d["name"] for d in studies]
+    page._populate_volcano()
+    assert page._top_plot_stack.currentWidget() is page._vote_chart
+    assert page._vote_canvas is not None and page._yaxis_combo.isHidden()
+    assert page._forest_plot.isHidden()
+    page._meta_df, page._method_keys = data["meta_df"], ["reml"]
+    page._populate_volcano()
+    assert page._top_plot_stack.currentWidget() is page._volcano_plot
+    assert page._vote_canvas is None and not page._yaxis_combo.isHidden()
+    assert not page._forest_plot.isHidden()
 
 
 def test_the_vote_threshold_reaches_the_run_and_levels_filter_the_table(app, tmp_path):
@@ -670,6 +688,9 @@ def test_the_vote_threshold_reaches_the_run_and_levels_filter_the_table(app, tmp
     labels = [d["name"] for d in studies]
     page.set_datasets(studies, labels, str(tmp_path))
     spin = page._min_votes_spin
+    assert spin.isHidden()                         # shown only with vote counting ticked
+    page._family_checks["vote"].setChecked(True)
+    assert not spin.isHidden()
     assert (spin.maximum(), spin.value(), spin.suffix()) == (4, 4, " of 4")
     spin.setValue(2)
     assert page._vote_params(["reml", "vote_count"]) == {"min_votes": 2}
@@ -690,4 +711,59 @@ def test_the_vote_threshold_reaches_the_run_and_levels_filter_the_table(app, tmp
     for level, cb in tab.level_checks.items():
         cb.setChecked(level == "4/4")
     assert tab.table.rowCount() == 1 and tab.table.item(0, 0).text() == "G0"
-    assert page._votes_tab.levels.loc["4/4", "total"] == 1
+
+    # A run without vote counting has no level row and no Votes tab.
+    tab.populate(data["meta_df"], ["reml"], n_studies=4)
+    assert tab.level_checks == {}
+    assert "Votes" not in [page._tabs.tabText(i) for i in range(page._tabs.count())]
+
+
+def test_consensus_mode_leaves_vote_counting_unticked(app):
+    """Vote counting is opt-in: as a rule in a consensus it removes every
+    gene too few studies call, so switching to Consensus does not tick it."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+
+    page = GeneMAPage()
+    page._consensus_radio.setChecked(True)
+    checks = page._family_checks
+    assert not checks["vote"].isChecked()
+    assert all(cb.isChecked() for key, cb in checks.items()
+               if key != "vote" and cb.isEnabled())
+    assert "vote_count" not in page._get_method_keys()
+
+    checks["vote"].setChecked(True)
+    assert "vote_count" in page._get_method_keys()
+
+
+def test_the_studies_card_names_every_study(app, tmp_path):
+    """Five long study names clipped the card; it now shows the names
+    without their shared suffix, and Details lists them in full."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage, _short_study_names
+
+    assert _short_study_names(["Chaffin_Ventricular_Cardiomyocyte",
+                               "Guo_Ventricular_Cardiomyocyte"]) == ["Chaffin", "Guo"]
+    assert _short_study_names(["A_x", "B_y"]) == ["A_x", "B_y"]
+    page = GeneMAPage()
+    studies = _tiny_studies("Endo", n=6)
+    page.set_datasets(studies, [d["name"] for d in studies], str(tmp_path))
+    assert page._studies_list_label.text().split("\n") == [d["name"] for d in studies]
+    assert page._dataset_card._edit_btn.text().startswith("Details")
+
+
+def test_the_settings_card_follows_min_studies_and_the_de_method(app, tmp_path):
+    """The card read 'a gene needs 3 of 5 studies' with Min studies at 5."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+
+    page = GeneMAPage()
+    studies = _tiny_studies("Endo", n=5)
+    page.set_datasets(studies, [d["name"] for d in studies], str(tmp_path))
+
+    def summary():
+        from kosmic.gui.shared.widgets.semantic import SecondaryLabel
+        return [w.text() for w in page._settings_card.findChildren(SecondaryLabel)
+                if w.isVisibleTo(page._settings_card) or not w.isHidden()]
+
+    page._min_studies_spin.setValue(5)
+    page._de_combo.setCurrentText("Welch CPM")
+    lines = " | ".join(summary())
+    assert "a gene needs 5 of 5 studies" in lines and "DE input: Welch CPM" in lines

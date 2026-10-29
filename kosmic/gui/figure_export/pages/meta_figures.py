@@ -11,8 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox, QSpinBox
 
+from kosmic import DEFAULT_FDR
 from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
@@ -286,29 +288,45 @@ class LeaveOneOutPage(_ItemPage):
 
 _NO_OVERLAY = "None"
 
+# Method names as the Meta-Analysis page shows them, for the legend.
+_METHOD_LABELS = {'dl': 'DL', 'reml': 'REML', 'stouffer': 'Stouffer',
+                  'stouffer_weighted': 'Weighted Stouffer', 'fisher': 'Fisher',
+                  'sumrank': 'SumRank', 'gwop': 'gwOP'}
+
+
+def _method_label(key: str) -> str:
+    """'reml_top50_hksj' -> 'REML (top 50%, HKSJ)'."""
+    base = key.removesuffix('_hksj').removesuffix('_top50')
+    mods = ((['top 50%'] if '_top50' in key else [])
+            + (['HKSJ'] if key.endswith('_hksj') else []))
+    name = _METHOD_LABELS.get(base, base)
+    return f"{name} ({', '.join(mods)})" if mods else name
+
 
 class _VoteLevelsControls(FigureControls):
     def __init__(self):
         super().__init__(7, 5)
         self.overlay = QComboBox()
         self.overlay.setToolTip(
-            "Hatch, at each level, the genes this method of the run calls "
+            "Hatch, in each bar, the genes this method of the run calls "
             "significant (FDR < 0.05).")
         self.overlay.currentIndexChanged.connect(self.changed)
-        self.add_row("Overlay:", self.overlay)
+        self.add_row("Significant by:", self.overlay)
 
     def populate_methods(self, keys: list[str]):
-        prev = self.overlay.currentText()
+        prev = self.overlay.currentData()
         self.overlay.blockSignals(True)
         self.overlay.clear()
-        self.overlay.addItems(keys + [_NO_OVERLAY])
-        idx = self.overlay.findText(prev)
-        self.overlay.setCurrentIndex(idx if idx >= 0 else 0)
+        self.overlay.addItem(_NO_OVERLAY, None)
+        for key in keys:
+            self.overlay.addItem(_method_label(key), key)
+        self.overlay.setCurrentIndex(max(self.overlay.findData(prev), 0))
         self.overlay.blockSignals(False)
 
 
 class VoteLevelsPage(MetaFigurePage):
-    """Genes by the number of studies agreeing (0/k ... k/k, conflict)."""
+    """Genes by the number of studies agreeing (0/k ... k/k, conflict),
+    optionally with a pooling method's significant genes hatched."""
 
     TITLE = "Study Agreement (Vote Levels)"
 
@@ -320,7 +338,8 @@ class VoteLevelsPage(MetaFigurePage):
         return df is not None and {'n_up', 'n_down'} <= set(df.columns)
 
     def _methods(self) -> list[str]:
-        """The run's methods with an FDR column, other than vote counting."""
+        """The run's pooling methods with an FDR, other than vote counting
+        (a rule: the genes it passes are whole levels, not an overlay)."""
         df = self._results()
         if df is None:
             return []
@@ -332,11 +351,16 @@ class VoteLevelsPage(MetaFigurePage):
         super().on_activated()
 
     def _levels(self):
-        from kosmic.meta_analysis.pooling.vote_count import run_vote_levels
+        """The counts per level, and the overlay's legend label or None."""
+        from kosmic.meta_analysis.pooling.vote_count import vote_levels
         df = self._results()
-        method = self._controls.overlay.currentText()
-        keys = [] if method in ('', _NO_OVERLAY) else [method]
-        return run_vote_levels(df, keys, len(self._studies()))
+        k = len(self._studies())
+        key = self._controls.overlay.currentData()
+        if key is None or f'fdr_{key}' not in df.columns:
+            return vote_levels(df, k), None
+        sig = pd.to_numeric(df[f'fdr_{key}'], errors='coerce') < DEFAULT_FDR
+        return (vote_levels(df, k, significant=sig.to_numpy()),
+                f"{_method_label(key)} FDR < {DEFAULT_FDR:g}")
 
     def _make_render_func(self):
         if not self.dependencies_met():

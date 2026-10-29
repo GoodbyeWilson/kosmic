@@ -1007,8 +1007,10 @@ class MetaAnalysisWorkspace(QWidget):
             if meta_df is not None and len(meta_df) > 0:
                 fdr = meta_df['fdr'].values.astype(float)
                 n_sig = int((fdr < DEFAULT_FDR).sum())
+                keys = getattr(self._gene_ma_page, '_method_keys', None) or []
+                word = 'pass' if keys == ['vote_count'] else 'significant'
                 self.data_status.emit(
-                    f"Done: {n_sig}/{len(meta_df)} significant.",
+                    f"Done: {n_sig}/{len(meta_df)} {word}.",
                     '#4CAF50')
             else:
                 self.data_status.emit(

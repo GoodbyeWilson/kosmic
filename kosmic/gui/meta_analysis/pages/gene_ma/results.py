@@ -1,9 +1,10 @@
 # Results tab: per-gene consensus table, sig-count label, panel summary.
 # A checkbox limits the table to genes whose studies disagree in
-# direction ('direction_conflict', see kosmic.meta_analysis.direction),
-# and a row of level checkboxes (0/k ... k/k, conflict: the studies that
-# call a gene significant in the same direction, see
-# kosmic.meta_analysis.pooling.vote_count) limits it to chosen levels.
+# direction ('direction_conflict', see kosmic.meta_analysis.direction).
+# In a run that includes vote counting, a row of level checkboxes (0/k
+# ... k/k, conflict: the studies that call a gene significant in the
+# same direction, see kosmic.meta_analysis.pooling.vote_count) limits it
+# to chosen levels.
 #
 # Parent drives via 'populate'; 'gene_selected' fires on row click.
 from __future__ import annotations
@@ -143,19 +144,35 @@ class ResultsTab(QWidget):
         if 'heterogeneity_i2' in df.columns and not vote_only:
             cols.append(Column('I²', 'heterogeneity_i2', '.1%'))
 
-        # Per-method FDR (precomputed in worker).
-        if method_keys:
-            for key in method_keys:
-                fcol = f'fdr_{key}'
-                if fcol in df.columns:
-                    cols.append(Column(f'FDR({key})', fcol, '.2e'))
+        # Per-method FDR (precomputed in worker). Vote counting is a rule
+        # with no FDR: its column says whether the gene passes. The
+        # consensus FDR repeats a single method's, so it needs several.
+        keys = list(method_keys or [])
+        for key in keys:
+            fcol = f'fdr_{key}'
+            if key == 'vote_count' and 'vote_pass' in df.columns:
+                k = int(n_studies or df['n_studies'].max())
+                n = int(df['min_votes'].iloc[0]) if 'min_votes' in df.columns and len(df) else k
+                cols.append(Column(f'≥ {n} of {k} agree', 'vote_pass', 'bool',
+                                   tooltip=f'At least {n} of the {k} studies call '
+                                           'the gene significant (study FDR < '
+                                           '0.05) in the same direction, and '
+                                           'none in the opposite direction'))
+            elif fcol in df.columns:
+                cols.append(Column(f'FDR({key})', fcol, '.2e'))
 
-        cols.append(Column('Consensus FDR', 'fdr', '.2e'))
+        if len(keys) != 1:
+            cols.append(Column('Consensus FDR', 'fdr', '.2e'))
         cols.append(Column('k', 'n_studies', 'd'))
         if votes:                       # vote counting was one of the methods
-            cols.append(Column('Votes', 'votes', 'd',
+            level = 'vote_level' in df.columns   # absent from runs saved before it
+            cols.append(Column('Level' if level else 'Votes',
+                               'vote_level' if level else 'votes',
+                               's' if level else 'd',
                                tooltip='Studies with study FDR < 0.05 in the '
-                                       'more frequent direction'))
+                                       'same direction, of the studies in the '
+                                       'run; conflict: significant up in one '
+                                       'study and down in another'))
 
         has_direction = 'direction_conflict' in df.columns
         if has_direction:
@@ -179,19 +196,24 @@ class ResultsTab(QWidget):
         self.conflict_only_cb.setEnabled(has_direction)
         if not has_direction:
             self.conflict_only_cb.setChecked(False)
-        self._build_levels(df, n_studies)
+        self._build_levels(df, n_studies, 'vote_count' in (method_keys or []))
         self._apply_filter()
 
         sig_count, n_conflict = count_significant_conflicts(
             df, fdr=DEFAULT_FDR)
-        text = f"{sig_count} consensus genes / {len(df)} total (FDR < 0.05)"
+        from kosmic.meta_analysis.pooling.vote_count import describe_selection
+        noun, criterion = describe_selection(
+            method_keys, df, int(n_studies or df['n_studies'].max()))
+        text = f"{sig_count} {noun} / {len(df)} total ({criterion})"
         if n_conflict:
             text += (f"; {n_conflict} with opposite-direction effects "
                      f"across studies")
         self.sig_label.setText(text)
 
-    def _build_levels(self, df: pd.DataFrame, n_studies: Optional[int]) -> None:
-        """One checkbox per agreement level, labelled with its gene count."""
+    def _build_levels(self, df: pd.DataFrame, n_studies: Optional[int],
+                      voted: bool) -> None:
+        """One checkbox per agreement level, labelled with its gene count,
+        for a run that includes vote counting ('voted')."""
         from kosmic.meta_analysis.pooling.vote_count import vote_levels, vote_level
 
         while self._level_row.count():
@@ -200,7 +222,7 @@ class ResultsTab(QWidget):
                 item.widget().deleteLater()
         self.level_checks = {}
         self._levels = None
-        if not {'n_up', 'n_down'} <= set(df.columns) or df.empty:
+        if not voted or not {'n_up', 'n_down'} <= set(df.columns) or df.empty:
             return
         k = int(n_studies or df['n_studies'].max())
         self._levels = pd.Series(
