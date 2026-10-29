@@ -320,3 +320,47 @@ def test_combine_conditions_saves_the_column_only(app, tmp_path):
     ws.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+def test_de_keeps_its_results_when_the_same_file_is_loaded_again(app, tmp_path, monkeypatch):
+    """Returning from scRNA (which released DE's copy) reloads the same file:
+    the DE results made from it stay. Other counts, another file, or data
+    handed over by scRNA clear them (ADR-014)."""
+    from PyQt6.QtCore import QEvent
+    from kosmic.gui.de_analysis.pages import setup_page
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    a, b = tmp_path / 'a.h5ad', tmp_path / 'b.h5ad'
+    _study(a)
+    _with_decontx(a)
+    _study(b)
+
+    def run_now(worker, *, on_finished, on_failed=None, **_kw):
+        on_finished(worker._run())
+        return worker
+
+    monkeypatch.setattr(setup_page, 'run_worker', run_now)
+    ws = DEWorkspace()
+    page = ws.setup_page
+    results = pd.DataFrame({'names': ['G0'], 'logfoldchanges': [1.0]})
+
+    page._start_load(str(a))
+    ws.de_results = results
+    ws.release_dataset()                                   # scRNA loaded a study
+    page._start_load(str(a))
+    assert ws.de_results is results
+
+    page._choose_counts('decontX_counts')                  # other counts
+    assert ws.de_results is None
+
+    ws.de_results = results
+    page._start_load(str(b))                               # another file
+    assert ws.de_results is None
+
+    ws.de_results = results
+    ws.set_adata(read_counts_adata(b))                     # scRNA's copy
+    page._start_load(str(b))
+    assert ws.de_results is None
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()

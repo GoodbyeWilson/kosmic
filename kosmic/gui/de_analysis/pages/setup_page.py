@@ -583,14 +583,21 @@ class SetupPage(SimplePage):
         self.ws._manual_load = True
         self.ws.dataset_loaded.emit(str(path))
 
-        # Reset stale state from previous dataset
-        self.ws.de_results = None
-        self.ws.significant_genes = None
-        self.ws.pathway_coverage = None
-        self.ws.sample_df = None
-        self.ws.pathway_de_results = None
-        self.ws.parent_stats_df = None
-        self.ws.enrichment_results = None
+        # The results belong to the file and counts they were made from:
+        # the same file loaded again with the same counts (returning from
+        # scRNA, which released this copy) keeps them; anything else
+        # clears them.
+        from kosmic.scrna.counts import loaded_count_source
+        loaded = (str(Path(path).resolve()), loaded_count_source(adata))
+        if loaded != self.ws.results_dataset:
+            self.ws.de_results = None
+            self.ws.significant_genes = None
+            self.ws.pathway_coverage = None
+            self.ws.sample_df = None
+            self.ws.pathway_de_results = None
+            self.ws.parent_stats_df = None
+            self.ws.enrichment_results = None
+        self.ws.results_dataset = loaded
 
         self.show_loaded_state(
             label=f"Data loaded: {adata.n_obs:,} cells x {adata.n_vars:,} genes",

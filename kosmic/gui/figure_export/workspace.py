@@ -9,8 +9,10 @@
 # the figures whose data is not available, naming the step to run in the
 # tooltip. main.py opens the section of the workspace the user came from.
 #
-# The scRNA and DE figures show one study, through 'self.source' (ADR-014):
-# a workspace's data when it holds the study, else the study's folder. When
+# The scRNA and DE figures show one study, named above the switch, through
+# 'self.source' (ADR-014): a workspace's data when it holds the study, else
+# the study's folder. main.py sets it to the active study, or to the study
+# of the Project page's 'Open in Figures'. When
 # the study has more than one DE run (one per cell type and method, say),
 # the DE section shows a Run selector above the list.
 from __future__ import annotations
@@ -28,6 +30,7 @@ from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.figure_export.shared.study_source import StudySource
 from kosmic.gui.shared import borderless
 from kosmic.gui.shared.theme import get_color
+from kosmic.gui.shared.widgets import SecondaryLabel
 from kosmic.gui.figure_export.pages.cell_types import (
     CompositionPage, MarkerDotPlotPage, MarkerScoreUMAPPage,
 )
@@ -148,6 +151,7 @@ class FigureExportWorkspace(QWidget):
         # objects must not be reused (a new object can reuse an old id).
         self.bump_data_version()
         if hasattr(self, '_list'):
+            self._show_study()
             self._rebuild_list()
             page = self._stack.currentWidget()
             if self.isVisible() and isinstance(page, FigurePage):
@@ -173,6 +177,11 @@ class FigureExportWorkspace(QWidget):
         nav_lay = QVBoxLayout(nav)
         nav_lay.setContentsMargins(8, 8, 8, 0)
         nav_lay.setSpacing(6)
+
+        self._study_label = SecondaryLabel("")
+        self._study_label.setWordWrap(True)
+        nav_lay.addWidget(self._study_label)
+        self._show_study()
 
         switch = QHBoxLayout()
         switch.setSpacing(6)
@@ -244,6 +253,12 @@ class FigureExportWorkspace(QWidget):
 
     def current_section(self) -> str:
         return self._section
+
+    def _show_study(self) -> None:
+        """Name the study the scRNA and DE figures show."""
+        study = self.source.study()
+        self._study_label.setText(f"Study: {study.name}" if study else "No study selected")
+        self._study_label.setToolTip(str(study) if study else "")
 
     def _sync_runs(self) -> None:
         """Fill the Run selector with the study's DE runs: the DE
