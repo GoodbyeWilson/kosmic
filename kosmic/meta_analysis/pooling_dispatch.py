@@ -206,8 +206,8 @@ def merge_consensus_methods(method_keys: List[str],
                 consensus.index, fill_value=False).astype(bool).values
             consensus[f'pvals_{key}'] = np.where(passes, 1e-300, 1.0)
             consensus[f'fdr_{key}'] = np.where(passes, 0.0, 1.0)
-            for col in ('votes', 'vote_fraction', 'vote_conflict', 'vote_pass',
-                        'min_votes', 'n_tested'):
+            for col in ('votes', 'vote_level', 'vote_fraction', 'vote_conflict',
+                        'vote_pass', 'min_votes', 'n_tested'):
                 if col in mdf.columns and col not in consensus.columns:
                     consensus[col] = mdf[col].reindex(consensus.index).values
             continue

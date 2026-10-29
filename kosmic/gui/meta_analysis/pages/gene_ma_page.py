@@ -5,13 +5,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSplitter, QGridLayout, QSpinBox, QComboBox,
     QCheckBox, QLineEdit,
-    QRadioButton, QButtonGroup,
+    QRadioButton, QButtonGroup, QStackedWidget,
 )
 from PyQt6.QtCore import QSettings, Qt, pyqtSignal
 
@@ -56,6 +57,25 @@ _METHODS = [
 ]
 
 _METHOD_KEYS_BASE = {name: key for key, name in _METHODS}
+
+def _short_study_names(names: list[str]) -> list[str]:
+    """Study names without the suffix they all share, such as
+    '_Ventricular_Cardiomyocyte' (the selection pooled), so a list of
+    them fits on one line."""
+    if len(names) < 2:
+        return list(names)
+    suffix = os.path.commonprefix([n[::-1] for n in names])[::-1]
+    cut = suffix.find('_')
+    if cut < 0:
+        return list(names)
+    suffix = suffix[cut:]
+    short = [n[:-len(suffix)] for n in names]
+    return short if all(short) else list(names)
+
+
+# Families Consensus mode leaves unticked: vote counting is a rule, and
+# in a consensus it removes every gene too few studies call on their own.
+_OPT_IN_FAMILIES = {'vote'}
 _METHOD_KEYS_TOP50 = {
     'dl': 'dl_top50',
     'reml': 'reml_top50',
@@ -339,8 +359,13 @@ class GeneMAPage(SidebarTabbedPage):
             " above that would silently discard every gene.")
         grid.addWidget(self._min_studies_spin, r, 1)
         r += 1
+        # The Settings card summarises both; it showed the default 3
+        # after Min studies was changed.
+        self._de_combo.currentIndexChanged.connect(self._refresh_ma_cards)
+        self._min_studies_spin.valueChanged.connect(self._refresh_ma_cards)
 
-        grid.addWidget(QLabel("Vote threshold:"), r, 0)
+        self._min_votes_label = QLabel("Vote threshold:")
+        grid.addWidget(self._min_votes_label, r, 0)
         self._min_votes_spin = QSpinBox()
         self._min_votes_spin.setRange(1, 20)
         self._min_votes_spin.setValue(20)      # lowered to the studies loaded
@@ -349,10 +374,11 @@ class GeneMAPage(SidebarTabbedPage):
             "call it significant (study FDR < 0.05) in the same direction, "
             "and none in the opposite direction.")
         grid.addWidget(self._min_votes_spin, r, 1)
+        # Shown only while vote counting is ticked.
         vote_cb = self._family_checks.get('vote')
-        self._min_votes_spin.setEnabled(bool(vote_cb and vote_cb.isChecked()))
+        self._show_vote_threshold(bool(vote_cb and vote_cb.isChecked()))
         if vote_cb is not None:
-            vote_cb.toggled.connect(self._min_votes_spin.setEnabled)
+            vote_cb.toggled.connect(self._show_vote_threshold)
 
         sg.addLayout(grid)
 
@@ -472,7 +498,19 @@ class GeneMAPage(SidebarTabbedPage):
         self._dataset_card = StageSummaryCard("Studies", icon="dataset")
         self._dataset_card.set_read_only(True)
         self._dataset_card.set_summary(["No studies loaded yet", ""])
+        # The card has room for one line of names; Details lists them all.
+        studies_page = QWidget()
+        studies_lay = QVBoxLayout(studies_page)
+        studies_lay.setContentsMargins(0, 4, 0, 0)
+        self._studies_list_label = SecondaryLabel("")
+        self._studies_list_label.setWordWrap(True)
+        self._studies_list_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        studies_lay.addWidget(self._studies_list_label)
+        studies_lay.addStretch()
+        self._dataset_card.set_settings_widget(studies_page)
         lay.addWidget(self._dataset_card)
+        self._accordion.add_card('studies', self._dataset_card)
 
         for key, title, icon in (
                 ('method', "Pooling method", "bar-chart-2"),
@@ -546,7 +584,17 @@ class GeneMAPage(SidebarTabbedPage):
 
         self._volcano_plot.installEventFilter(self)  # for resize repositioning
 
-        plot_splitter.addWidget(self._volcano_plot)
+        # Vote counting run on its own has no p-value or pooled effect to
+        # draw a volcano from; the top plot is then the genes per level of
+        # study agreement (kosmic.visualisation.meta.vote_levels).
+        self._top_plot_stack = QStackedWidget()
+        self._top_plot_stack.addWidget(self._volcano_plot)
+        self._vote_chart = QWidget()
+        self._vote_chart_lay = QVBoxLayout(self._vote_chart)
+        self._vote_chart_lay.setContentsMargins(0, 0, 0, 0)
+        self._vote_canvas = None
+        self._top_plot_stack.addWidget(self._vote_chart)
+        plot_splitter.addWidget(self._top_plot_stack)
 
         from kosmic.gui.shared.plots import InteractivePlot
         self._forest_plot = InteractivePlot(
@@ -570,12 +618,14 @@ class GeneMAPage(SidebarTabbedPage):
         plot_controls.setSpacing(8)
         plot_controls.addWidget(self._search_strip, 1)
         plot_controls.addSpacing(12)
-        plot_controls.addWidget(QLabel("Y-axis:"))
-        plot_controls.addWidget(self._yaxis_combo)
-        plot_controls.addSpacing(8)
-        plot_controls.addWidget(QLabel("Mark:"))
-        plot_controls.addWidget(self._olink_cvd_check)
-        plot_controls.addWidget(self._olink_explore_check)
+        # Volcano controls, hidden while the vote chart is shown.
+        self._volcano_controls = [QLabel("Y-axis:"), self._yaxis_combo,
+                                  QLabel("Mark:"), self._olink_cvd_check,
+                                  self._olink_explore_check]
+        for i, w in enumerate(self._volcano_controls):
+            if i == 2:
+                plot_controls.addSpacing(8)
+            plot_controls.addWidget(w)
         plots_layout.addLayout(plot_controls)
         self._plot_controls = plot_controls
 
@@ -598,11 +648,6 @@ class GeneMAPage(SidebarTabbedPage):
         self._venn_tab = VennTab()
         self._venn_tab.log_message.connect(self.log_message)
         self._tabs.addTab(self._venn_tab, "Venn")
-
-        # -- Tab 3: Votes (studies agreeing per gene) --
-        from kosmic.gui.meta_analysis.pages.gene_ma.votes import VotesTab
-        self._votes_tab = VotesTab()
-        self._tabs.addTab(self._votes_tab, "Votes")
 
         self._tabs.currentChanged.connect(self._place_search_strip)
 
@@ -679,10 +724,35 @@ class GeneMAPage(SidebarTabbedPage):
                 self._loo_result = cached_loo
 
     def _populate_result_tabs(self):
-        """Fill the Results table and the Votes chart from the current run."""
+        """Fill the Results table from the current run."""
         n = len(self._run_study_names())
         self._results_tab.populate(self._meta_df, self._method_keys, n_studies=n)
-        self._votes_tab.populate(self._meta_df, self._method_keys, n)
+
+    def _show_vote_chart(self, shown: bool) -> None:
+        """Show the study-agreement chart in place of the volcano (for a
+        vote-counting run on its own), or the volcano."""
+        if self._vote_canvas is not None:
+            import matplotlib.pyplot as plt
+            plt.close(self._vote_canvas.figure)
+            self._vote_chart_lay.removeWidget(self._vote_canvas)
+            self._vote_canvas.deleteLater()
+            self._vote_canvas = None
+        fig = None
+        if shown and self._meta_df is not None and 'votes' in self._meta_df.columns:
+            from kosmic.meta_analysis.pooling.vote_count import vote_levels
+            from kosmic.visualisation.meta.vote_levels import create_vote_levels_plot
+            levels = vote_levels(self._meta_df, len(self._run_study_names()))
+            fig = create_vote_levels_plot(levels, title='Study agreement')
+        if fig is not None:
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+            self._vote_canvas = FigureCanvasQTAgg(fig)
+            self._vote_chart_lay.addWidget(self._vote_canvas)
+        self._top_plot_stack.setCurrentWidget(
+            self._vote_chart if fig is not None else self._volcano_plot)
+        # The per-study forest is the volcano's companion; the chart has
+        # no gene to show it for.
+        for w in self._volcano_controls + [self._forest_plot]:
+            w.setVisible(fig is None)
 
     def _clear_results(self):
         """Clear all result widgets and cached state."""
@@ -694,6 +764,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._forest_xlim = None
 
         self._volcano_plot.clear_data()
+        self._show_vote_chart(False)
         self._forest_plot.clear_plot_items()
         self._forest_plot.show_unavailable_message()
         style_pg_plot(self._volcano_plot, title='Volcano',
@@ -705,7 +776,6 @@ class GeneMAPage(SidebarTabbedPage):
         self._set_gene_legend("")
 
         self._venn_tab.clear()
-        self._votes_tab.clear()
 
         if hasattr(self, '_pathway_forest_tab'):
             self._pathway_forest_tab.clear()
@@ -812,8 +882,11 @@ class GeneMAPage(SidebarTabbedPage):
         if n:
             names = [str(d.get('name', '?')) for d in self._datasets]
             first = f"{n} studies pooled"
-            second = ", ".join(names[:2]) + (" ..." if n > 2 else "")
+            short = _short_study_names(names)
+            second = ", ".join(short[:4]) + (f" and {n - 4} more" if n > 4 else "")
+            self._studies_list_label.setText("\n".join(names))
         else:
+            self._studies_list_label.setText("")
             first, second = "No studies loaded yet", "Select them on Select Studies"
         self._dataset_card.set_summary([first, second])
 
@@ -848,8 +921,8 @@ class GeneMAPage(SidebarTabbedPage):
                     self._last_single_family = fam_key
                     break
             self._family_btn_group.setExclusive(False)
-            for cb in self._family_checks.values():
-                cb.setChecked(True)
+            for fam_key, cb in self._family_checks.items():
+                cb.setChecked(fam_key not in _OPT_IN_FAMILIES)
         else:
             self._family_btn_group.setExclusive(False)
             restore = self._last_single_family
@@ -1022,6 +1095,10 @@ class GeneMAPage(SidebarTabbedPage):
         # Different DE method may live in a different analysis folder.
         clear_pb_path_cache()
         return (len(new_datasets), len(de_entries), fallback)
+
+    def _show_vote_threshold(self, shown: bool) -> None:
+        self._min_votes_label.setVisible(shown)
+        self._min_votes_spin.setVisible(shown)
 
     def _vote_params(self, method_keys) -> dict:
         """'min_votes' for a run that includes vote counting, else nothing."""
@@ -1326,9 +1403,17 @@ class GeneMAPage(SidebarTabbedPage):
             self._meta_df, fdr=DEFAULT_FDR)
         if n_conflict is None:
             return
+        noun, criterion = self._selection_words()
         self.log_message.emit(
-            f"{n_sig:,} significant (FDR < {DEFAULT_FDR:g}), {n_conflict:,} "
+            f"{n_sig:,} {noun} ({criterion}), {n_conflict:,} "
             f"with opposite-direction effects across studies")
+
+    def _selection_words(self) -> tuple:
+        """('consensus genes', 'FDR < 0.05'), ('genes pass', 'at least 5
+        of 5 studies agreeing'), ... for the current run."""
+        from kosmic.meta_analysis.pooling.vote_count import describe_selection
+        return describe_selection(self._method_keys, self._meta_df,
+                                  len(self._run_study_names()))
 
     # Below this many studies the HKSJ t-test cannot reach genome-wide FDR.
     _HKSJ_FEW_STUDIES = 10
@@ -1421,12 +1506,12 @@ class GeneMAPage(SidebarTabbedPage):
             return
 
         n_consensus = summ['n_consensus']
+        noun, criterion = self._selection_words()
         if n_consensus == 0:
-            self._results_tab.set_panel_summary(
-                "No significant consensus genes (FDR < 0.05).")
+            self._results_tab.set_panel_summary(f"No {noun} ({criterion}).")
             return
 
-        parts = [f"Consensus: {n_consensus} genes (FDR < 0.05)"]
+        parts = [f"{n_consensus} {noun} ({criterion})"]
         for key in DEFAULT_PANELS:
             info = summ['panels'].get(key)
             if info is None:
@@ -1497,12 +1582,7 @@ class GeneMAPage(SidebarTabbedPage):
 
         use_z = (self._yaxis_combo.currentIndex() == 1
                  and 'z_stat' in meta_df.columns)
-        # Vote counting on its own has no p-value (its FDR is 0 or 1): the
-        # y axis is the number of studies agreeing, whichever axis is set.
-        votes_axis = base_key == 'vote_count' and 'votes' in meta_df.columns
-        if votes_axis:
-            y = meta_df['votes'].to_numpy(float)
-        elif use_z:
+        if use_z:
             y = np.abs(meta_df['z_stat'].values.astype(float))
         else:
             y = neg_log10(base_fdr)
@@ -1535,8 +1615,7 @@ class GeneMAPage(SidebarTabbedPage):
                 else:
                     brushes.append(_shade(50, 50, 220, frac))
 
-        y_label = ('Studies agreeing' if votes_axis
-                   else '|Z-statistic|' if use_z else f'-Log10 FDR ({base_key})')
+        y_label = '|Z-statistic|' if use_z else f'-Log10 FDR ({base_key})'
         n_sig = int((n_sig_per_gene >= 1).sum())
         if n_methods == 1:
             method_name = (self._method_keys[0] if self._method_keys
@@ -1575,10 +1654,11 @@ class GeneMAPage(SidebarTabbedPage):
             self._volcano_plot.add_overlay_ring(
                 mask, color=(0, 200, 255, 160), size=10, pen_width=1)
 
-        if not use_z and not votes_axis:
+        if not use_z:
             self._volcano_plot.add_threshold_line(y=-np.log10(DEFAULT_FDR))
 
         self._volcano_plot.set_symmetric_x()
+        self._show_vote_chart(keys == ['vote_count'])
 
         # Pre-compute shared forest x-limits from BOTH pooled CIs AND
         # per-study CIs (logFC +/- 1.96*SE). Per-study CIs are typically

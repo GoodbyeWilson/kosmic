@@ -4,9 +4,8 @@ Study Agreement (Vote Levels)
 Genes by the number of studies that call them significant in the same
 direction (0/k ... k/k), split into up- and down-regulated, with genes
 called up in one study and down in another as a separate 'conflict' bar.
-Optionally overlays how many genes at each level another method calls
-significant, to show what that method adds to, or confirms in, the
-studies' own calls.
+Optionally hatches, in each bar, the genes a pooling method calls
+significant.
 """
 
 import numpy as np
@@ -25,8 +24,8 @@ def create_vote_levels_plot(levels, title='Study agreement', significant_label=N
         per level with 'up', 'down', 'total' and optionally 'significant'.
     title : str
     significant_label : str, optional
-        Legend label for the 'significant' overlay (e.g. 'REML FDR < 0.05');
-        the overlay is drawn only when given and the column is present.
+        Legend label for the hatched 'significant' bars (e.g. 'REML FDR <
+        0.05'); drawn only when given and the column is present.
     figsize : tuple, optional
     font_sizes : dict, optional
 
@@ -66,11 +65,9 @@ def create_vote_levels_plot(levels, title='Study agreement', significant_label=N
     handles = [Patch(facecolor=UP_COLOR, edgecolor=FG, label='Up'),
                Patch(facecolor=DOWN_COLOR, edgecolor=FG, label='Down'),
                Patch(facecolor=NS_COLOR, edgecolor=FG, label='None / conflict')]
-    show_sig = significant_label and 'significant' in levels.columns
-    if show_sig:
-        sig = levels['significant'].to_numpy(float)
-        ax.bar(x, sig, width * 0.45, facecolor='none', edgecolor='black',
-               hatch='///', linewidth=0.9)
+    if significant_label and 'significant' in levels.columns:
+        ax.bar(x, levels['significant'].to_numpy(float), width * 0.45,
+               facecolor='none', edgecolor='black', hatch='///', linewidth=0.9)
         handles.append(Patch(facecolor='none', edgecolor='black', hatch='///',
                              label=significant_label))
 

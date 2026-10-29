@@ -132,7 +132,7 @@ def test_meta_volcano_gates_on_fdr_unless_lfc_set(qapp):
     assert n_coloured() == 1                 # FDR and |log2FC| > 0.25
 
 
-def test_vote_levels_page_draws_and_exports_the_counts(qapp, tmp_path):
+def test_vote_levels_page_hatches_a_chosen_method_and_exports_the_counts(qapp, tmp_path):
     from kosmic.gui.figure_export.pages.meta_figures import VoteLevelsPage
     results = pd.DataFrame({'names': list('ABCD'), 'n_up': [3, 1, 0, 1],
                             'n_down': [0, 0, 0, 1], 'fdr_reml': [0.01, 0.5, 0.5, 0.5],
@@ -142,10 +142,44 @@ def test_vote_levels_page_draws_and_exports_the_counts(qapp, tmp_path):
               'selection': 'Cardiomyocyte', 'project_folder': None}
     page = VoteLevelsPage(SimpleNamespace(
         meta_ws=SimpleNamespace(figure_inputs=lambda: inputs), data_version=lambda: 0))
+    assert page.dependencies_met()                # any run: levels need only Up / Down
     page._controls.populate_methods(page._methods())
-    assert page.dependencies_met() and page._controls.overlay.currentText() == 'reml'
+    overlay = page._controls.overlay
+    assert overlay.currentText() == 'None'        # off until chosen
+    assert page._levels()[1] is None
+
+    overlay.blockSignals(True)       # no background re-render alongside the test's
+    overlay.setCurrentIndex(overlay.findData('reml'))
+    assert page._levels()[1] == 'REML FDR < 0.05'
     plt.close(page._make_render_func()())
     (csv,) = page._export_companions(tmp_path / 'votes.png')
     counts = pd.read_csv(csv, index_col='level')
     assert counts.loc['3/3', ['up', 'total', 'significant']].tolist() == [1, 1, 1]
     assert counts.loc['conflict', 'total'] == 1
+
+
+def test_a_page_discarded_while_its_preview_renders_does_not_abort(qapp):
+    """The render thread was a Qt child of the page, so discarding the page
+    mid-render (a test ending, a window closing) destroyed the running
+    thread and Qt aborted the process; CI crashed this way."""
+    import gc
+    import time
+
+    from kosmic.gui.figure_export.pages import _base
+    from kosmic.gui.figure_export.pages.meta_figures import VoteLevelsPage
+    results = pd.DataFrame({'names': ['A'], 'n_up': [1], 'n_down': [0], 'fdr': [0.01]})
+    inputs = {'gene_results': results, 'gene_studies': [('S1', None)],
+              'selection': 'x', 'project_folder': None}
+
+    def open_and_discard():
+        page = VoteLevelsPage(SimpleNamespace(
+            meta_ws=SimpleNamespace(figure_inputs=lambda: inputs), data_version=lambda: 0))
+        page._make_render_func = lambda: (lambda: time.sleep(0.5))   # a slow render
+        page._controls.changed.emit()
+        assert any(w.isRunning() for w in _base._LIVE_RENDERS)
+
+    open_and_discard()
+    gc.collect()
+    _base.wait_for_renders()
+    qapp.processEvents()             # the finished render reports to a page that is gone
+    assert not _base._LIVE_RENDERS

@@ -10,23 +10,36 @@ Pool per-study gene-level DE results with one or more methods. Single mode = one
 
 The **Vote counting** family passes a gene when at least *N* studies
 call it significant (study FDR < 0.05) in the same direction and none
-calls it significant in the opposite direction. Set *N* with **Vote
-threshold** (*N* of *k*, all studies by default); it is active when the
-family is ticked. Run with REML in Consensus mode, the consensus genes
-are those with a pooled effect that at least *N* studies also call on
-their own. It ignores effect sizes and gives no pooled estimate, so use
-it beside DL or REML, not in place of them. Run on its own, the volcano
-shows the number of studies agreeing on its vertical axis.
+calls it significant in the opposite direction. **Vote threshold** (*N*
+of *k*, all studies by default) appears when the family is ticked.
+Switching to Consensus mode ticks every family except vote counting;
+tick it to add the rule. Run with REML in Consensus mode, the consensus
+genes are those with a pooled effect that at least *N* studies also
+call on their own. It ignores effect sizes and gives no pooled
+estimate, so use it beside DL or REML, not in place of them. Run on its
+own, the page counts the genes that pass the rule rather than
+significant genes. It has no p-value to draw a volcano from, so the
+**Plots** tab shows the genes at each level of study agreement, split
+up and down: the figure that Figure Export's
+[Study Agreement](../figures/meta_vote_levels.md) page exports.
 
-The **Results** tab shows **Votes** beside **k** (the studies in which
-the gene was tested) when vote counting is one of the methods, and
-**Up** and **Down** for every run. The **Studies agreeing** row has one
-box per level, 0/*k* to *k*/*k* and *conflict*, each with its number of
-genes; untick levels to hide their genes from the table. The **Votes**
-tab draws the genes at each level, split up and down, with the genes
-the run's other method calls significant hatched; Figure Export's
-[Study Agreement](../figures/meta_vote_levels.md) page draws the same
-figure for export. See
+**Vote threshold** decides which genes the run calls significant: the
+significant-gene count, the Venn diagram and the gene set the later
+steps use. Every gene's level is kept whatever the threshold: the
+results file has a `vote_level` column (for example `3/5` or
+`conflict`), with `n_up`, `n_down` and `votes`.
+
+In a run that includes vote counting, the **Results** tab shows, in
+place of an FDR for vote counting, a column named after the threshold
+(for example **≥ 5 of 5 agree**) that is ticked for the genes that
+pass; the gene's
+**Level** beside **k** (the studies in which the gene was tested) and a
+**Studies agreeing** row with one box per level, 0/*k* to *k*/*k* and
+*conflict*, each with its number of genes; untick levels to hide their
+genes from the table. Figure Export's
+[Study Agreement](../figures/meta_vote_levels.md) page draws the genes
+at each level, split up and down, and can hatch the genes REML or
+another method of the run calls significant. See
 [Statistical approach](statistics.md#vote-counting).
 
 Vote counting is new in the method list; it is enabled by default and

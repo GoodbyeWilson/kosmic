@@ -72,8 +72,9 @@ class VennTab(QWidget):
         if n_methods == 1 and sig_sets:
             key = method_keys[0]
             n = len(sig_sets[key])
-            lines = [f"{key}: {n} significant genes"]
-            self.log_message.emit(f"{key}: {n} significant genes")
+            noun = 'genes pass' if key == 'vote_count' else 'significant genes'
+            lines = [f"{key}: {n} {noun}"]
+            self.log_message.emit(f"{key}: {n} {noun}")
         else:
             consensus = (set.intersection(*sig_sets.values())
                          if sig_sets else set())

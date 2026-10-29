@@ -56,7 +56,7 @@ def test_gene_results_columns_label_and_filter(app, results_df):
 
     assert {"Up", "Down", "Conflict"} <= set(_headers(tab.table))
     # A is a conflict but not significant; B is both.
-    assert "3 consensus genes" in tab.sig_label.text()
+    assert "3 significant genes" in tab.sig_label.text()   # one method: not a consensus
     assert "1 with opposite-direction effects" in tab.sig_label.text()
     assert tab.conflict_only_cb.isEnabled()
 
