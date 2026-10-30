@@ -1,5 +1,6 @@
-"""Enrichment figure pages read the DE workspace or the Meta-Analysis
-workspace's Enrichment step (ADR-010), defaulting to the meta-analysis."""
+"""Enrichment figure pages draw the study's run in Figure Export's DE
+section and the Meta-Analysis Enrichment step's run (ADR-010) in its Meta
+section."""
 from __future__ import annotations
 
 import os
@@ -11,8 +12,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
-
-from kosmic.gui.figure_export.pages._enrichment import SOURCE_META, SOURCE_STUDY
 
 
 @pytest.fixture
@@ -62,8 +61,8 @@ def _workspace(study=True, meta=True):
         inputs.update(enrichment_results=_ora('meta term'), enrichment_ranking=_ranking(2),
                       gsea_library_results=res, gsea_library_details=det,
                       gsea_library_name='Hallmark')
-    return SimpleNamespace(de_ws=de, scrna_ws=None, data_version=lambda: 0,
-                           meta_ws=SimpleNamespace(figure_inputs=lambda: inputs))
+    from tests.study_folder import figure_workspace
+    return figure_workspace(de=de, meta=SimpleNamespace(figure_inputs=lambda: inputs))
 
 
 def _pages():
@@ -74,40 +73,40 @@ def _pages():
     return [EnrichedTermsPage, TermLinksPage, LibraryGseaPage, LibraryGseaMountainPage]
 
 
-def _ready(page):
-    """Fill the Source (and gene-set) selectors as on_activated does, without
-    starting the background preview render."""
+def _ready(page, section='de'):
+    """A page in Figure Export's 'section', with its gene-set selector filled
+    as on_activated does, without starting the background preview render."""
+    page.study_section = section
     page._controls.blockSignals(True)
-    page._sync_sources()
     if hasattr(page, '_sync_terms'):
         page._sync_terms()
 
 
 @pytest.mark.parametrize('cls_index', range(4))
-def test_both_sources_default_to_meta_and_switch(qapp, cls_index):
-    page = _pages()[cls_index](_workspace())
-    _ready(page)
-    combo = page._controls.source
-    assert [combo.itemText(i) for i in range(combo.count())] == [SOURCE_META, SOURCE_STUDY]
-    assert not combo.isHidden()
-    assert page._is_meta()
-    plt.close(page._make_render_func()())
+def test_the_section_decides_the_run(qapp, cls_index):
+    ws = _workspace()
+    meta = _pages()[cls_index](ws)
+    _ready(meta, 'meta')
+    assert meta._is_meta() and meta._source().contrast.endswith('(pooled)')
+    plt.close(meta._make_render_func()())
 
-    combo.setCurrentText(SOURCE_STUDY)
-    if hasattr(page, '_sync_terms'):
-        page._sync_terms()
-    assert not page._is_meta()
-    plt.close(page._make_render_func()())
+    study = _pages()[cls_index](ws)
+    _ready(study, 'de')
+    assert not study._is_meta() and study._source() is not None
+    assert not (getattr(study._source(), 'contrast', None) or '').endswith('(pooled)')
+    plt.close(study._make_render_func()())
 
 
 @pytest.mark.parametrize('study,meta', [(True, False), (False, True)])
-def test_one_source_hides_the_selector(qapp, study, meta):
+def test_a_section_without_its_run_is_unavailable(qapp, study, meta):
+    """The study's run is not drawn in the Meta section, nor the pooled run
+    in the DE section."""
     for cls in _pages():
-        page = cls(_workspace(study=study, meta=meta))
-        _ready(page)
-        assert page.dependencies_met()
-        assert page._controls.source.isHidden()
-        assert page._is_meta() == meta
+        for section in ('de', 'meta'):
+            page = cls(_workspace(study=study, meta=meta))
+            _ready(page, section)
+            assert page.dependencies_met() == ((section == 'meta') == meta), (
+                cls.TITLE, section)
 
 
 def test_no_runs_means_unavailable(qapp):
@@ -121,7 +120,7 @@ def test_no_runs_means_unavailable(qapp):
 def test_meta_source_uses_pooled_fold_changes_and_titles(qapp):
     from kosmic.gui.figure_export.pages.term_links import TermLinksPage
     page = TermLinksPage(_workspace())
-    _ready(page)
+    _ready(page, 'meta')
     src = page._source()
     assert src.de_results['logfoldchanges'].tolist() == _ranking(2)['logfoldchanges'].tolist()
     assert page._contrast(src) == 'Ventricular Cardiomyocyte (pooled)'

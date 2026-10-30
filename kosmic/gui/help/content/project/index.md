@@ -73,6 +73,12 @@ workspace's actions apply to it: *Add Data* imports into it, and
 Analysis or Differential Expression in the left-hand rail while this
 page is showing. No separate step is needed to make a study active.
 
+*Open in Figures* opens the Figures workspace on the selected study's
+figures, drawn from its saved dataset and results. It does not make the
+study active and loads nothing, so you can export the figures of any
+study, the shared atlas included, while another study stays open in
+scRNA or DE.
+
 The **Active** chip marks the study the scRNA and DE workspaces are
 currently holding. It follows your selection when you open one of them.
 

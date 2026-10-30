@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QMenu, QSizePolicy,
 )
 from PyQt6.QtCore import QSettings, Qt, pyqtSignal
-import os
 from pathlib import Path
 from typing import Optional
 import numpy as np
@@ -34,6 +33,7 @@ from kosmic.scrna.annotate.cluster_qc import flag_clusters, prediction_agreement
 from kosmic.scrna.annotate.labels import cluster_column, cluster_label_summary, set_cell_type
 from kosmic.scrna.cluster.subcluster import EARLIER_EDITS_KEY, SUBCLUSTER_COLUMN
 from kosmic.scrna.cluster.workset import apply_annotations, working_subset
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 _FOCUS_PRESET_QSETTING_KEY = 'annotate/last_focus_preset'
@@ -104,9 +104,7 @@ class ReferenceAnnotationWorker(BaseWorker):
             self.progress.emit("Saving...")
             self.progress_pct.emit(95)
             Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-            tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
-            self.adata.write_h5ad(str(tmp))
-            os.replace(tmp, self.output_path)
+            save_h5ad(self.adata, self.output_path, atomic=True)
 
         n_assigned = sum(1 for v in cluster_types.values() if v != 'Unknown')
         n_types = len(set(cluster_types.values()) - {'Unknown'})
@@ -307,9 +305,7 @@ class MarkerScoringWorker(BaseWorker):
             self.progress.emit("Saving...")
             self.progress_pct.emit(95)
             Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-            tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
-            self.adata.write_h5ad(str(tmp))
-            os.replace(tmp, self.output_path)
+            save_h5ad(self.adata, self.output_path, atomic=True)
 
         self.progress_pct.emit(100)
         cell_types = list(self.marker_dict.keys())
@@ -418,9 +414,7 @@ class CellTypistWorker(BaseWorker):
             self.progress.emit("Saving...")
             self.progress_pct.emit(95)
             Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-            tmp = Path(self.output_path).with_name(Path(self.output_path).name + '.tmp')
-            self.adata.write_h5ad(str(tmp))
-            os.replace(tmp, self.output_path)
+            save_h5ad(self.adata, self.output_path, atomic=True)
 
         n_types = self.adata.obs['cell_type'].nunique()
         self.progress_pct.emit(100)
@@ -1744,9 +1738,7 @@ class AnnotateTab(QWidget):
         try:
             target = Path(str(path))
             target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(target.name + '.tmp')
-            current.write_h5ad(str(tmp))
-            os.replace(tmp, target)
+            save_h5ad(current, target, atomic=True)
             self._record_manual_relabels()
             self._on_status(f"Annotations saved to {target}")
             dialogs.info(self, "Saved", f"Annotations saved to:\n{target}")

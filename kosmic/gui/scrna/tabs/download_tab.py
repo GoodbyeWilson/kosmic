@@ -9,6 +9,7 @@ from PyQt6.QtGui import QCursor
 from pathlib import Path
 from typing import TYPE_CHECKING
 import shutil
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 if TYPE_CHECKING:
     pass
@@ -1091,7 +1092,7 @@ class DownloadTab(TabbedPage):
                     merged.obs_names_make_unique()
 
                     output_path = processed_dir / "merged_samples.h5ad"
-                    merged.write_h5ad(output_path)
+                    save_h5ad(merged, output_path)
                     self._log(f"Saved merged: {output_path.name} ({merged.n_obs:,} cells x {merged.n_vars:,} genes)")
                     self._load_and_set_adata(str(output_path))
                 else:
@@ -1099,7 +1100,7 @@ class DownloadTab(TabbedPage):
                     for name, adata in adatas_list:
                         safe_name = name.replace("/", "_").replace("\\", "_")
                         output_path = processed_dir / f"{safe_name}.h5ad"
-                        adata.write_h5ad(output_path)
+                        save_h5ad(adata, output_path)
                         self._log(f"Saved: {output_path.name}")
                         last_path = output_path
                     if last_path:
@@ -1108,7 +1109,7 @@ class DownloadTab(TabbedPage):
                 name, adata = adatas_list[0]
                 safe_name = name.replace("/", "_").replace("\\", "_")
                 output_path = processed_dir / f"{safe_name}.h5ad"
-                adata.write_h5ad(output_path)
+                save_h5ad(adata, output_path)
                 self._log(f"Saved: {output_path.name} ({adata.n_obs:,} cells x {adata.n_vars:,} genes)")
                 self._load_and_set_adata(str(output_path))
 
@@ -1178,9 +1179,14 @@ class DownloadTab(TabbedPage):
                 self._loaded_frame.show()
                 self._import_section.hide()
             elif self.main_window.isVisible():
-                # Load the most recent h5ad; _on_h5ad_loaded finishes the UI
-                most_recent = max(detected['files'], key=lambda f: f.stat().st_mtime)
-                self._load_and_set_adata(str(most_recent))
+                # Load the study's registered h5ad -- the manifest's file,
+                # else the newest -- the file DE and Figure Export open too,
+                # so a backup saved later is not loaded in its place.
+                # _on_h5ad_loaded finishes the UI.
+                from kosmic.scrna.load.h5ad_meta import registered_h5ad
+                path = registered_h5ad(self.project_dir) or max(
+                    detected['files'], key=lambda f: f.stat().st_mtime)
+                self._load_and_set_adata(str(path))
             else:
                 # The workspace is not on screen (a study was activated
                 # from the Project page or from DE). Loading now would put

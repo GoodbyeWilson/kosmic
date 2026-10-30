@@ -2,9 +2,11 @@
 #
 # Draws the running-enrichment curve for one gene set from the last library
 # GSEA run on the DE Enrichment tab or the Meta-Analysis Enrichment step (see
-# _enrichment.py). The curves are held in memory by that run
-# ('gsea_library_details'), so this figure is generated in the same session
-# as the GSEA -- it is not reloaded from disk.
+# _enrichment.py). The curves ('gsea_library_details') are held in memory by
+# that run and, for a study, saved next to its library GSEA table, so the
+# figure can be drawn from the study's folder; a run saved before the curves
+# were kept has none, and the figure stays unavailable until GSEA is run
+# again.
 
 from __future__ import annotations
 
@@ -34,15 +36,23 @@ class LibraryGseaMountainPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        ctrl = self._add_source_row(_MountainControls())
-        # Each source has its own gene sets.
-        ctrl.source.currentIndexChanged.connect(self._sync_terms)
-        return ctrl
+        return _MountainControls()
 
     # -- data access ----------------------------------------------------
 
+    DE_NEEDS = ('gsea_library_details',)
+
     def _has_run(self, src, is_meta: bool) -> bool:
         return bool(getattr(src, 'gsea_library_details', None))
+
+    def unavailable_reason(self) -> str:
+        de = self._de()
+        if (de is not None and de.available('gsea_library_results')
+                and not de.available('gsea_library_details')):
+            return ("This study's library GSEA was saved before its running-"
+                    "enrichment curves were kept. Run GSEA again to draw this "
+                    "figure.")
+        return super().unavailable_reason()
 
     def _details(self):
         src = self._source()
@@ -60,7 +70,6 @@ class LibraryGseaMountainPage(EnrichmentFigurePage):
     # -- lifecycle ------------------------------------------------------
 
     def on_activated(self):
-        self._sync_sources()
         self._sync_terms()
         self.invalidate()  # curves live in memory and may have changed
         super().on_activated()

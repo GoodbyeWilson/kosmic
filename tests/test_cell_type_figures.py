@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-from types import SimpleNamespace
 from unittest import mock
 
 import matplotlib
@@ -122,8 +121,8 @@ def _open(page, qapp):
 
 
 def _workspace(a):
-    return SimpleNamespace(scrna_ws=SimpleNamespace(current_adata=a, current_project_dir=None),
-                           de_ws=None, meta_ws=None, data_version=lambda: 0)
+    from tests.study_folder import figure_workspace
+    return figure_workspace(scrna_adata=a)
 
 
 def _export(page, path):

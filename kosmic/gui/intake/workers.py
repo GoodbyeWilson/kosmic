@@ -7,6 +7,7 @@ import urllib.request
 from PyQt6.QtCore import pyqtSignal
 
 from kosmic.gui.shared.widgets import BaseWorker
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 if TYPE_CHECKING:
     import anndata
@@ -223,7 +224,7 @@ class H5adImportWorker(BaseWorker):
         self.progress.emit(f"Writing {out.name}...")
         self.progress_pct.emit(75)
         out.parent.mkdir(parents=True, exist_ok=True)
-        adata.write_h5ad(out, compression="gzip")
+        save_h5ad(adata, out, compression="gzip")
         _record_import(out, adata, self.candidates)
 
         self.progress_pct.emit(100)

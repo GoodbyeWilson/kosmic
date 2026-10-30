@@ -1,13 +1,16 @@
 # Base for figure pages drawn from an enrichment run, which can come from
-# the DE workspace (one study's DE) or the Meta-Analysis workspace's
-# Enrichment step (the pooled gene list, via figure_inputs(); ADR-010).
+# one study's DE (the DE workspace or the study's folder, through
+# FigurePage._de; ADR-014) or the Meta-Analysis Enrichment step (the pooled
+# gene list, via figure_inputs(); ADR-010).
 #
-# Each source is presented with the attribute names the DE workspace uses
-# ('enrichment_results', 'gsea_library_results', 'gsea_library_details',
-# 'gsea_library_name', 'de_results', 'disease_label', 'control_label'), so
-# a page reads 'self._source()' where it used to read 'workspace.de_ws'.
-# A Source selector appears when both workspaces hold a run; Meta-analysis
-# is the default.
+# Each enrichment figure is listed in both the DE and the Meta section of
+# Figure Export, and the section decides the run: the study's in DE, the
+# pooled one in Meta ('study_section'). Either is presented with the
+# attribute names the DE workspace uses ('enrichment_results',
+# 'gsea_library_results', 'gsea_library_details', 'gsea_library_name',
+# 'de_results', 'disease_label', 'control_label'), so a page reads
+# 'self._source()'. Whether the study holds a run is checked without
+# reading its tables ('DE_NEEDS').
 
 from __future__ import annotations
 
@@ -15,12 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
-from PyQt6.QtWidgets import QComboBox
-
 from kosmic.gui.figure_export.pages._base import FigurePage
-
-SOURCE_META, SOURCE_STUDY = "Meta-analysis", "Study DE"
-
 
 class EnrichmentFigurePage(FigurePage):
     """A figure page whose data is one enrichment run."""
@@ -29,27 +27,23 @@ class EnrichmentFigurePage(FigurePage):
     #: over-representation) or 'gsea' (preranked GSEA of a library).
     KIND = 'ora'
 
-    def _add_source_row(self, ctrl):
-        """Add the Source selector to *ctrl*; hidden until both sources hold
-        a run."""
-        ctrl.source = QComboBox()
-        ctrl.source.currentIndexChanged.connect(ctrl.changed)
-        ctrl.add_row("Source:", ctrl.source)
-        self._set_source_row_visible(ctrl, False)
-        return ctrl
+    #: The study DE results a run of this page needs; empty for the one
+    #: KIND implies ('enrichment_results' or 'gsea_library_results').
+    DE_NEEDS: tuple = ()
 
-    @staticmethod
-    def _set_source_row_visible(ctrl, visible):
-        ctrl.source.setVisible(visible)
-        label = ctrl._form.labelForField(ctrl.source)
-        if label is not None:
-            label.setVisible(visible)
+    @property
+    def STALENESS_ATTR(self):
+        return self._de_needs()[0]
+
+    def _de_needs(self) -> tuple:
+        if self.DE_NEEDS:
+            return self.DE_NEEDS
+        return ('gsea_library_results',) if self.KIND == 'gsea' else ('enrichment_results',)
 
     # -- sources ------------------------------------------------------------
 
     def _meta_source(self):
-        meta = getattr(self.workspace, 'meta_ws', None)
-        inputs = meta.figure_inputs() if meta is not None else None
+        inputs = self._meta_inputs()
         if not inputs:
             return None
         sel = str(inputs.get('selection') or '').replace('_', ' ')
@@ -66,7 +60,8 @@ class EnrichmentFigurePage(FigurePage):
         )
 
     def _has_run(self, src, is_meta: bool) -> bool:
-        """Whether *src* holds a run of this page's KIND."""
+        """Whether *src* (the Meta-analysis source) holds a run of this
+        page's KIND."""
         if src is None:
             return False
         if self.KIND == 'gsea':
@@ -75,31 +70,19 @@ class EnrichmentFigurePage(FigurePage):
             res = getattr(src, 'enrichment_results', None)
         return res is not None and len(res) > 0
 
-    def _sources(self) -> dict:
-        """{name: source} for the sources holding a run, Meta-analysis first."""
-        out = {}
-        meta = self._meta_source()
-        if self._has_run(meta, True):
-            out[SOURCE_META] = meta
-        de = self.workspace.de_ws
-        if self._has_run(de, False):
-            out[SOURCE_STUDY] = de
-        return out
-
-    def _source_name(self) -> Optional[str]:
-        sources = self._sources()
-        chosen = self._controls.source.currentText()
-        if chosen in sources:
-            return chosen
-        return next(iter(sources), None)
-
     def _source(self):
-        """The selected source, or None when neither holds a run."""
-        name = self._source_name()
-        return self._sources().get(name) if name else None
+        """The section's run: the pooled one in the Meta section, else the
+        study's; None when it holds no run."""
+        if self._is_meta():
+            meta = self._meta_source()
+            return meta if self._has_run(meta, True) else None
+        de = self._de()
+        if de is not None and all(de.available(n) for n in self._de_needs()):
+            return de
+        return None
 
     def _is_meta(self) -> bool:
-        return self._source_name() == SOURCE_META
+        return self.study_section == 'meta'
 
     def _contrast(self, src) -> Optional[str]:
         """'DCM vs NF' for a study, '<selection> (pooled)' for the
@@ -109,25 +92,7 @@ class EnrichmentFigurePage(FigurePage):
         d, c = getattr(src, 'disease_label', None), getattr(src, 'control_label', None)
         return f"{d} vs {c}" if d and c else None
 
-    def _sync_sources(self):
-        """Refill the Source selector, keeping the choice while it is
-        available, and show it only when there is a choice to make."""
-        combo = self._controls.source
-        names = list(self._sources())
-        current = combo.currentText()
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItems(names)
-        if current in names:
-            combo.setCurrentText(current)
-        combo.blockSignals(False)
-        self._set_source_row_visible(self._controls, len(names) > 1)
-
     # -- lifecycle -----------------------------------------------------------
-
-    def on_activated(self):
-        self._sync_sources()
-        super().on_activated()
 
     def dependencies_met(self) -> bool:
         return self._source() is not None
@@ -147,7 +112,4 @@ class EnrichmentFigurePage(FigurePage):
                 return None
             from kosmic.paths import meta_output_dir
             return meta_output_dir(src.project_folder, src.selection)
-        if src is None or not getattr(src, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(src.project_dir)
+        return self._de_export_dir()

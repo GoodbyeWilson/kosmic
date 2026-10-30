@@ -1,6 +1,11 @@
 # Base class for Figure Export pages. Subclasses override
 # 'dependencies_met()' (does the workspace have what this figure needs?)
 # and '_make_render_func()' (closure returning a Figure or None).
+#
+# The scRNA and DE pages read their study's data through the workspace's
+# StudySource (ADR-014): '_adata()' for the scRNA dataset, '_de()' for the
+# DE workspace's attribute names, '_study_dir()' for the study folder. They
+# do not know whether a workspace or the study's folder served them.
 
 from __future__ import annotations
 
@@ -120,9 +125,17 @@ class FigurePage(SidebarPage):
     TITLE = "Figure"
     UNAVAILABLE_MESSAGE = "This figure is not available in the current state."
 
-    # DE-driven pages set this True to show a banner when the loaded DE / pathway
-    # results predate the current data (provenance upstream-token mismatch).
+    # DE-driven pages set this True to show a banner when the DE / pathway
+    # results predate the current data: a provenance token mismatch for the
+    # DE workspace's run, or a results file older than the study's dataset
+    # for one read from the folder. 'STALENESS_ATTR' names the results the
+    # figure draws.
     CHECKS_DE_STALENESS = False
+    STALENESS_ATTR = 'de_results'
+
+    #: The figure list's section ('scrna', 'de' or 'meta'), set by the
+    #: workspace; it decides which study data 'unavailable_reason' explains.
+    study_section: Optional[str] = None
 
     log_message = pyqtSignal(str)
 
@@ -201,7 +214,7 @@ class FigurePage(SidebarPage):
         self._sync_format()
         if not self.dependencies_met():
             self._staleness_banner.setVisible(False)
-            self._preview.set_message(self.UNAVAILABLE_MESSAGE)
+            self._preview.set_message(self.unavailable_reason())
             self._export_btn.setEnabled(False)
             return
         self._update_staleness()
@@ -229,11 +242,14 @@ class FigurePage(SidebarPage):
     def _update_staleness(self):
         """Show/hide the 'results out of date' banner for DE-driven pages."""
         note = None
-        if self.CHECKS_DE_STALENESS:
+        de = self._de() if self.CHECKS_DE_STALENESS else None
+        if de is not None:
             from kosmic.gui.figure_export.shared.staleness import (
-                de_results_stale_note,
+                de_results_stale_note, saved_results_stale_note,
             )
-            note = de_results_stale_note(getattr(self.workspace, 'de_ws', None))
+            note = (de_results_stale_note(de)
+                    or saved_results_stale_note(de.saved_path(self.STALENESS_ATTR),
+                                                de.h5ad_path))
         self._staleness_banner.setText(note or "")
         self._staleness_banner.setVisible(bool(note))
 
@@ -371,9 +387,72 @@ class FigurePage(SidebarPage):
         """Override: return True iff the workspace state can drive a render."""
         return False
 
+    def unavailable_reason(self) -> str:
+        """Why the figure is not available, for its tooltip and preview: a
+        study folder that cannot be found, the scRNA dataset being read or
+        unreadable, else 'UNAVAILABLE_MESSAGE' (the step to run)."""
+        src = self._study_source()
+        if src is not None and self.study_section in ('scrna', 'de'):
+            study = src.study()
+            if study is not None and not study.is_dir():
+                return f"The study folder {study} cannot be found."
+            if self.study_section == 'scrna':
+                status = src.scrna_status()
+                if status:
+                    return status
+        return self.UNAVAILABLE_MESSAGE
+
     def _make_render_func(self) -> Optional[Callable]:
         """Override: return a closure that renders a Figure, or None."""
         return None
+
+    # -- The study's data (ADR-014) ---------------------------------------
+
+    def _study_source(self):
+        return getattr(self.workspace, 'source', None)
+
+    def _study_dir(self) -> Optional[Path]:
+        """The folder of the study the scRNA and DE figures show."""
+        src = self._study_source()
+        return src.study() if src is not None else None
+
+    def _adata(self):
+        """The study's scRNA dataset (obs, var, uns, embeddings), or None
+        while it is not available (see 'StudySource.scrna_adata')."""
+        src = self._study_source()
+        return src.scrna_adata() if src is not None else None
+
+    def _de(self):
+        """The study's DE results under the DE workspace's attribute names
+        ('StudySource.de_state'), or None with no study."""
+        src = self._study_source()
+        if src is None or src.study() is None:
+            return None
+        return src.de_state()
+
+    def _meta_inputs(self):
+        """The Meta figures' inputs (the keys of the Meta-Analysis
+        workspace's figure_inputs(), ADR-010): the workspace's run, or a
+        saved run read from the project folder (ADR-014)."""
+        inputs = getattr(self.workspace, 'meta_inputs', None)
+        if inputs is not None:
+            return inputs()
+        meta = getattr(self.workspace, 'meta_ws', None)
+        return meta.figure_inputs() if meta is not None else None
+
+    def _scrna_export_dir(self) -> Optional[Path]:
+        study = self._study_dir()
+        if study is None:
+            return None
+        from kosmic.paths import scrna_figures_dir
+        return scrna_figures_dir(study)
+
+    def _de_export_dir(self) -> Optional[Path]:
+        study = self._study_dir()
+        if study is None:
+            return None
+        from kosmic.paths import de_figures_dir
+        return de_figures_dir(study)
 
     # -- Helpers --------------------------------------------------------
 

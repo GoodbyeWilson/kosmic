@@ -1,7 +1,7 @@
 # Dataset summary multi-panel figure page.
 #
-# Reads from 'workspace.de_ws' (DE results + pathway_gene_sets +
-# pathway_coverage + h5ad_path + geneset_label).
+# Reads the study's DE results (FigurePage._de): the DE results,
+# pathway_gene_sets, pathway_coverage, h5ad_path and geneset_label.
 
 from __future__ import annotations
 
@@ -25,17 +25,16 @@ class DatasetSummaryPage(FigurePage):
         return ctrl
 
     def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        return (getattr(de, 'de_results', None) is not None
-                and bool(getattr(de, 'pathway_gene_sets', None))
-                and bool(getattr(de, 'pathway_coverage', None)))
+        de = self._de()
+        return (de is not None and de.available('de_results')
+                and de.available('pathway_gene_sets')
+                and de.available('pathway_coverage'))
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        de = self._de()
+        if (de is None or de.de_results is None or not de.pathway_gene_sets
+                or not de.pathway_coverage):
             return None
-        de = self.workspace.de_ws
         dr = de.de_results.copy()
         gs = dict(de.pathway_gene_sets)
         pc = de.pathway_coverage
@@ -60,14 +59,10 @@ class DatasetSummaryPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()
 
     def _default_export_basename(self) -> str:
-        de = self.workspace.de_ws
+        de = self._de()
         h5ad = getattr(de, 'h5ad_path', None) if de else None
         stem = Path(h5ad).stem if h5ad else "dataset"
         return f"dataset_summary_{stem}"

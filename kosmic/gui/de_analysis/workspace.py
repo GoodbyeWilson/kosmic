@@ -89,6 +89,10 @@ class DEWorkspace(QWidget):
         self.current_adata = None
         self.h5ad_path = None
         self.project_dir = None
+        # (resolved file path, count source) of the file the DE results were
+        # made from, or None. Releasing the dataset keeps it, so reloading
+        # the same file with the same counts keeps the results (ADR-014).
+        self.results_dataset = None
         # Which counts a study is loaded with: None for the original
         # counts, or a layer ('decontX_counts'). Chosen on the Dataset
         # page; kept for the session, so each study loaded next uses it.
@@ -300,6 +304,9 @@ class DEWorkspace(QWidget):
             adata = self._isolate_from_scrna(adata)
             self._coerce_condition_columns_to_string(adata)
         self.current_adata = adata
+        # scRNA's copy can differ from the file (unsaved steps), so results
+        # made from it are not kept when the file is loaded later.
+        self.results_dataset = None
         if adata is not None:
             self.mark_step_complete(0)  # Step 0 = Load Data
             self.status_message.emit(
@@ -349,6 +356,7 @@ class DEWorkspace(QWidget):
         ):
             self.current_adata = None
             self.h5ad_path = None
+            self.results_dataset = None
             self._last_scrna_adata_version = None
             self._manual_load = False
             self.de_results = None

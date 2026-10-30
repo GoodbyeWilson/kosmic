@@ -15,6 +15,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 # R executable finder
@@ -776,7 +777,7 @@ def load_rds(
 
     # Save
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    adata.write_h5ad(output_path)
+    save_h5ad(adata, output_path)
 
     summary = build_adata_summary(adata, output_path)
     return adata, summary

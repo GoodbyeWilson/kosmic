@@ -1,6 +1,7 @@
 # Highly Variable Genes page: mean against normalised variance per gene.
 #
-# Reads from 'workspace.scrna_ws.current_adata' after HVG selection has run.
+# Reads the study's scRNA dataset (FigurePage._adata) after HVG selection
+# has run.
 
 from __future__ import annotations
 
@@ -19,12 +20,6 @@ class VariableGenesPage(FigurePage):
 
     def _build_controls(self) -> FigureControls:
         return FigureControls(default_w=7, default_h=5)
-
-    def _adata(self):
-        scrna = self.workspace.scrna_ws
-        if scrna is None:
-            return None
-        return getattr(scrna, 'current_adata', None)
 
     def dependencies_met(self) -> bool:
         adata = self._adata()
@@ -48,11 +43,7 @@ class VariableGenesPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        scrna = self.workspace.scrna_ws
-        if scrna is None or not getattr(scrna, 'current_project_dir', None):
-            return None
-        from kosmic.paths import scrna_figures_dir
-        return scrna_figures_dir(scrna.current_project_dir)
+        return self._scrna_export_dir()
 
     def _default_export_basename(self) -> str:
         return "variable_genes"

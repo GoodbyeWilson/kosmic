@@ -507,7 +507,9 @@ class AppWindow(QMainWindow):
             self._nav_rail.set_active("project")
             self._on_mode_selected("project")
             return
-        if mode in self._REQUIRES_ACTIVE_STUDY:
+        figures_on_study = (mode == "figures"
+                            and getattr(self, '_figures_study_request', None) is not None)
+        if mode in self._REQUIRES_ACTIVE_STUDY and not figures_on_study:
             # The study highlighted in the Project table is the one
             # per-study workspaces open on; nobody has to 'set' it.
             # Leaving the Project page adopts the selection (same as
@@ -536,6 +538,8 @@ class AppWindow(QMainWindow):
 
         # All workspaces are built eagerly during startup, so this is
         # now just a stack-page swap + the workspace's own activation.
+        # Figure Export opens on the figures of the page left behind.
+        self._page_before_switch = self._stack.currentIndex()
         self._stack.setCurrentIndex(page_index)
         getattr(self, activator)()
         self._output_panel.log(label)
@@ -595,6 +599,19 @@ class AppWindow(QMainWindow):
         ws.set_scrna_workspace(self._scrna_workspace)
         ws.set_de_workspace(self._de_workspace)
         ws.set_meta_workspace(self._meta_workspace)
+        # The scRNA and DE figures show the active study, or the study
+        # 'Open in Figures' named, read from the workspace that holds it or
+        # else from its folder (ADR-014).
+        requested = getattr(self, '_figures_study_request', None)
+        self._figures_study_request = None
+        ws.set_project(self.current_project_dir)
+        ws.set_study(requested or self.current_study_path)
+        # Coming from scRNA, DE or Meta opens that section of the figure
+        # list ('Open in Figures' the scRNA one); from elsewhere the last
+        # section shown stays.
+        ws.show_section("scrna" if requested else
+                        {PAGE_SCRNA: "scrna", PAGE_DE: "de", PAGE_META: "meta"}
+                        .get(getattr(self, '_page_before_switch', None)))
         ws.on_activated()
 
     def _activate_meta(self):
@@ -1279,11 +1296,22 @@ class AppWindow(QMainWindow):
             f"Importing {raw_path.name} into {study_name}...")
 
     def _on_open_study_in(self, accession: str, mode: str) -> None:
-        """Project details panel: activate a study and open it in a workspace."""
+        """Project details panel: activate a study and open it in a workspace.
+
+        'figures' opens Figure Export on the study without making it the
+        active study: its figures are read from the study's folder unless a
+        workspace already holds it, so nothing is loaded or released
+        (ADR-014). Figure Export opened from the navigation rail later
+        shows the active study again.
+        """
         if not accession:
             return
         if mode in ("scrna", "de"):
             self.set_active_study(accession)
+        if mode == "figures":
+            if self.current_project_dir is None:
+                return
+            self._figures_study_request = self.current_project_dir / accession
         self._nav_rail.set_active(mode)
         self._on_mode_selected(mode)
 
@@ -1399,9 +1427,8 @@ class AppWindow(QMainWindow):
     def _sync_de_to_active_study(self, study_path):
         """Retarget the DE workspace whenever the active study changes.
 
-        Figure Export reads ``de.project_dir`` and ``scrna.current_project_dir``
-        in its page ``on_activated`` hooks, so syncing the upstream
-        workspaces keeps it in sync automatically.
+        Retargeting loads nothing while DE is not on screen; DE loads the
+        study's counts when it is opened (``_activate_de``).
         """
         if study_path is None or self._de_workspace is None:
             return

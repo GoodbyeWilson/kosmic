@@ -1,8 +1,8 @@
 # DE genes by pathway: up / down DE gene counts per gene set (optionally
 # significant genes only), with each gene set's coverage when known.
 #
-# Reads from 'workspace.de_ws' (DE results, pathway_gene_sets and
-# pathway_coverage).
+# Reads the study's DE results (FigurePage._de): the DE results,
+# pathway_gene_sets and pathway_coverage.
 
 from __future__ import annotations
 
@@ -38,17 +38,14 @@ class TopDESummaryPage(FigurePage):
         return _TopDEControls()
 
     def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        if getattr(de, 'de_results', None) is None:
-            return False
-        return bool(getattr(de, 'pathway_gene_sets', None))
+        de = self._de()
+        return (de is not None and de.available('de_results')
+                and de.available('pathway_gene_sets'))
 
     def _make_render_func(self):
-        if not self.dependencies_met():
+        de = self._de()
+        if de is None or de.de_results is None or not de.pathway_gene_sets:
             return None
-        de = self.workspace.de_ws
         dr = de.de_results.copy()
         gs = dict(de.pathway_gene_sets)
         cov = getattr(de, 'pathway_coverage', None) or None
@@ -76,11 +73,7 @@ class TopDESummaryPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()
 
     def _default_export_basename(self) -> str:
         suffix = "sig" if self._controls.sig_only.isChecked() else "all"

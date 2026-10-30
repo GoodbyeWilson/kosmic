@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from kosmic.scrna.load.converters import detect_file_format, load_10x_folder
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 # GEO query
@@ -379,6 +380,6 @@ def load_multi_sample_10x(
 
     # Save
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    adata_combined.write_h5ad(output_path)
+    save_h5ad(adata_combined, output_path)
 
     return adata_combined

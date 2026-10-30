@@ -266,6 +266,32 @@ def load_de_results(filepath: str,
     return df
 
 
+def load_study_de(filepath, de_method: Optional[str] = None) -> pd.DataFrame:
+    """One study's gene DE table as a meta-analysis pools it.
+
+    Loads it with :func:`load_de_results`, checks its standard errors
+    (:func:`require_se`) and, for the empirical-Bayes Welch methods, uses
+    the moderated SE where it is valid. The Meta-Analysis workspace and
+    Figure Export's saved runs (:mod:`kosmic.meta_analysis.saved`) both
+    load study tables through this, so a forest plot shows the same
+    numbers either way.
+
+    Parameters
+    ----------
+    filepath : path
+        The study's ``{accession}_DE_{method}.csv``.
+    de_method : str, optional
+        The method token of the file ('deseq2', 'welch_cpm_eb', ...).
+    """
+    df = load_de_results(str(filepath))
+    require_se(df, str(filepath))
+    if de_method in ('welch_ttest_eb', 'welch_cpm_eb') and 'se_moderated' in df.columns:
+        valid_mod = df['se_moderated'].notna() & (df['se_moderated'] > 0)
+        if valid_mod.any():
+            df.loc[valid_mod, 'se'] = df.loc[valid_mod, 'se_moderated']
+    return df
+
+
 def require_se(df: pd.DataFrame, filepath: str = '<unknown>') -> None:
     """Validate that 'df' has a usable 'se' column for meta-analysis.
 

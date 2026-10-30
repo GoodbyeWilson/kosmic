@@ -101,21 +101,22 @@ def _workspace(study=True, meta=True):
               'gsea_library_results': _gsea() if meta else None,
               'gsea_library_details': None, 'gsea_library_name': 'KEGG',
               'enrichment_ranking': pooled if meta else None}
-    return SimpleNamespace(de_ws=de, scrna_ws=None, data_version=lambda: 0,
-                           meta_ws=SimpleNamespace(figure_inputs=lambda: inputs))
+    from tests.study_folder import figure_workspace
+    return figure_workspace(de=de, meta=SimpleNamespace(figure_inputs=lambda: inputs),
+                            name='GSE174574')
 
 
-def _page(ws):
+def _page(ws, section='de'):
     from kosmic.gui.figure_export.pages.leading_edge import LeadingEdgeHeatmapPage
     page = LeadingEdgeHeatmapPage(ws)
+    page.study_section = section
     page._controls.blockSignals(True)
-    page._sync_sources()
     page._sync_sets()
     return page
 
 
 def test_meta_source_has_a_column_per_study_and_pooled(qapp):
-    page = _page(_workspace(study=False))
+    page = _page(_workspace(study=False), 'meta')
     assert page._controls.ticked() == ['ER_PROCESSING', 'WNT']    # top two, by FDR
     blocks = page._blocks()
     assert list(blocks[0]['lfc'].columns) == ['S1', 'S2', 'Pooled']
@@ -123,6 +124,38 @@ def test_meta_source_has_a_column_per_study_and_pooled(qapp):
     assert list(blocks[1]['lfc'].index) == ['Axin2', 'Tcf3', 'Lifr']
     assert np.isnan(blocks[1]['lfc'].loc['Tcf3', 'S2'])             # S2 did not test Tcf3
     plt.close(page._make_render_func()())
+
+
+def test_a_zero_fdr_is_shown_as_the_permutation_bound(qapp):
+    """GSEA reports FDR 0 when no permutation reached the score; the list and
+    the block titles show it as below 1 / PERMUTATIONS."""
+    ws = _workspace(study=False)
+    ws.meta_ws.figure_inputs()['gsea_library_results'].loc[0, 'pvals_adj'] = 0.0
+    page = _page(ws, 'meta')
+    assert page._controls.sets.item(0).text() == 'ER PROCESSING'
+    assert page._controls.sets.item(0).toolTip().endswith('NES +2.10, FDR < 0.001')
+    assert page._blocks()[0]['title'].endswith('(NES +2.10, FDR < 0.001)')
+    assert page._blocks()[1]['title'].endswith('FDR = 0.08)')
+
+
+def test_the_figure_names_studies_and_wraps_titles_whole(qapp):
+    """Study columns lose the selection's cell type, the library name its
+    underscores, and a set's NES and FDR wrap as one piece."""
+    from kosmic.visualisation.de.leading_edge import _wrap_title, auto_vmax
+    page = _page(_workspace(study=False), 'meta')
+    blocks = page._display_columns(page._blocks(), 'Endothelial_Cell')
+    assert list(blocks[0]['lfc'].columns) == ['S1', 'S2', 'Pooled']
+    renamed = page._display_columns(
+        [{'lfc': pd.DataFrame(columns=['Chaffin_Endothelial_Cell', 'Pooled']),
+          'padj': pd.DataFrame(columns=['Chaffin_Endothelial_Cell', 'Pooled'])}],
+        'Endothelial_Cell')
+    assert list(renamed[0]['lfc'].columns) == ['Chaffin', 'Pooled']
+    assert _wrap_title('OXIDATIVE PHOSPHORYLATION  (NES -2.91, FDR < 0.001)', 36) == (
+        'OXIDATIVE PHOSPHORYLATION\n(NES -2.91, FDR < 0.001)')
+    assert auto_vmax(blocks) == np.ceil(np.nanmax(np.abs(np.concatenate(
+        [b['lfc'].to_numpy(dtype=float).ravel() for b in blocks]))) * 2) / 2
+    from kosmic.reference.pathways.libraries import library_label
+    assert library_label('MSigDB_Hallmark_2026.2_Hs') == 'MSigDB Hallmark 2026.2 Hs'
 
 
 def test_study_source_has_one_column(qapp):
@@ -134,7 +167,7 @@ def test_study_source_has_one_column(qapp):
 
 
 def test_export_writes_the_numbers(qapp, tmp_path):
-    page = _page(_workspace(study=False))
+    page = _page(_workspace(study=False), 'meta')
     out = page._export_companions(tmp_path / 'fig.png')
     table = pd.read_csv(out[0])
     assert set(table.columns) == {'gene_set', 'gene', 'column', 'log2fc', 'padj'}
@@ -142,6 +175,6 @@ def test_export_writes_the_numbers(qapp, tmp_path):
 
 
 def test_no_gsea_run_means_unavailable(qapp):
-    page = _page(_workspace(study=False, meta=False))
+    page = _page(_workspace(study=False, meta=False), 'meta')
     assert not page.dependencies_met()
     assert page._make_render_func() is None

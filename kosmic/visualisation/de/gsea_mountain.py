@@ -7,13 +7,8 @@ import textwrap
 
 import numpy as np
 
-from kosmic.de.fgsea import PERMUTATIONS
+from kosmic.de.fgsea import format_fdr
 from kosmic.visualisation.style import DOWN_COLOR, FG, UP_COLOR
-
-
-def _format_fdr(fdr):
-    # 0 is a permutation floor, not a value: no permutation beat the score.
-    return f'FDR < {1 / PERMUTATIONS:g}' if fdr == 0 else f'FDR = {fdr:.2g}'
 
 
 def create_gsea_mountain_plot(res_curve, hits, term, nes=None, fdr=None,
@@ -67,7 +62,7 @@ def create_gsea_mountain_plot(res_curve, hits, term, nes=None, fdr=None,
     if nes is not None and np.isfinite(nes):
         stats.append(f'NES = {nes:+.2f}')
     if fdr is not None and np.isfinite(fdr):
-        stats.append(_format_fdr(fdr))
+        stats.append(format_fdr(fdr))
     if stats:
         # A falling curve leaves the lower left empty, a rising one the
         # upper right.

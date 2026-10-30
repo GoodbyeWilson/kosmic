@@ -131,7 +131,8 @@ class ProjectWorkspace(QWidget):
     # 'remove', 'propagate_labels'.
     combine_requested = pyqtSignal()        # open the Combine modal
     open_in_requested = pyqtSignal(str, str)  # (accession, mode) mode in
-    # 'scrna' | 'de' | 'meta'; AppWindow activates the study + workspace.
+    # 'scrna' | 'de' | 'meta' | 'figures'; AppWindow activates the study +
+    # workspace ('figures' shows the study's figures without activating it).
     import_requested = pyqtSignal(str, str)  # (accession, route) for the
     # study selected in the table; route in 'h5ad' | 'rds' | 'csv' | 'geo'
     # | 'assemble'. AppWindow makes that study active, copies the file into
@@ -544,8 +545,13 @@ class ProjectWorkspace(QWidget):
         head.addWidget(folder_btn)
         for label, mode in (("Open in scRNA", "scrna"),
                             ("Open in DE", "de"),
-                            ("Open in Meta", "meta")):
+                            ("Open in Meta", "meta"),
+                            ("Open in Figures", "figures")):
             btn = SecondaryButton(label)
+            if mode == "figures":
+                btn.setToolTip(
+                    "Export this study's figures from its saved results. "
+                    "Nothing is loaded and the active study does not change.")
             btn.clicked.connect(
                 lambda _c=False, m=mode:
                 self.open_in_requested.emit(self._details_accession or "", m))

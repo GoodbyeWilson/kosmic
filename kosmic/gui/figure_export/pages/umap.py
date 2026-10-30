@@ -1,7 +1,8 @@
 # UMAP / t-SNE embedding plot page.
 #
 # One embedding plot coloured by the 'Color by' column, optionally with a
-# single category highlighted. Reads from 'workspace.scrna_ws'.
+# single category highlighted. Reads the study's scRNA dataset
+# (FigurePage._adata).
 
 from __future__ import annotations
 
@@ -154,11 +155,6 @@ class UMAPPage(FigurePage):
             return 'X_tsne'
         return 'X_umap'
 
-    def _adata(self):
-        scrna = self.workspace.scrna_ws
-        if scrna is None:
-            return None
-        return getattr(scrna, 'current_adata', None)
 
     def dependencies_met(self) -> bool:
         adata = self._adata()
@@ -230,11 +226,7 @@ class UMAPPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        scrna = self.workspace.scrna_ws
-        if scrna is None or not getattr(scrna, 'current_project_dir', None):
-            return None
-        from kosmic.paths import scrna_figures_dir
-        return scrna_figures_dir(scrna.current_project_dir)
+        return self._scrna_export_dir()
 
     def _default_export_basename(self) -> str:
         choice = self._controls.color_by.currentText()

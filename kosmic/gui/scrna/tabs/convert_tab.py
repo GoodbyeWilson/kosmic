@@ -24,6 +24,7 @@ from kosmic.gui.shared.widgets import (
     PrimaryButton, SectionHeader, StatBlock,
 )
 from kosmic.gui.shared import dialogs, run_worker
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 class _H5adSaveWorker(BaseWorker):
@@ -36,7 +37,7 @@ class _H5adSaveWorker(BaseWorker):
 
     def _run(self):
         self.progress.emit(f"Saving to {Path(self.output_path).name}...")
-        self.adata.write_h5ad(self.output_path)
+        save_h5ad(self.adata, self.output_path)
         return self.output_path
 
 
@@ -1068,7 +1069,7 @@ class ConvertTab(SidebarTabbedPage):
         self.adata = self.adata[mask].copy()
 
         if self.h5ad_path:
-            self.adata.write_h5ad(self.h5ad_path)
+            save_h5ad(self.adata, self.h5ad_path)
             self.log_message.emit(f"Subsetted data saved: {new_cells:,} cells")
 
         self.summary['n_cells'] = self.adata.n_obs
@@ -1819,7 +1820,7 @@ class ConvertTab(SidebarTabbedPage):
         self._update_display()
         self._refresh_mapping_editor()
         self._populate_samples_table()
-        self.adata.write_h5ad(self.h5ad_path)
+        save_h5ad(self.adata, self.h5ad_path)
         if hasattr(self.main_window, 'record_provenance'):
             self.main_window.record_provenance('donor_metadata', {
                 'table': Path(self._last_donor_table_path(dlg)).name,
@@ -2219,7 +2220,7 @@ class ConvertTab(SidebarTabbedPage):
         self.adata.obs['condition'] = sample_values.map(sample_to_condition)
         self.adata.obs['condition'] = self.adata.obs['condition'].fillna('')
 
-        self.adata.write_h5ad(self.h5ad_path)
+        save_h5ad(self.adata, self.h5ad_path)
         self._populate_role_rows()
         self._update_sample_assign_visibility()
 

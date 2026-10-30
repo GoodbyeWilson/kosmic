@@ -33,7 +33,9 @@ def test_per_cell_type_files_are_loaded(tmp_path):
 
     runs = GeneDEPage._load_cell_type_runs(page, tmp_path, 'GSE1', 'deseq2')
 
-    assert [r.cell_type for r in runs] == ['Fibroblast', 'Ventricular_Cardiomyocyte']
+    # Named as a batch run names them (and as Figure Export lists them).
+    assert [r.cell_type for r in runs] == ['Fibroblast', 'Ventricular Cardiomyocyte']
+    assert [r.slug for r in runs] == ['Fibroblast', 'Ventricular_Cardiomyocyte']
     assert [r.n_significant for r in runs] == [2, 1]
     assert all(r.n_samples == 9 and r.n_genes_tested == 3 for r in runs)
     assert all(r.de_results is not None for r in runs)

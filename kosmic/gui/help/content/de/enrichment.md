@@ -28,6 +28,10 @@ Each run is recorded in the provenance, so the methods state which gene sets wer
 
 An enrichment run describes the DE result or pooled gene list it was run on. When Gene DE, or the gene meta-analysis, is run again, the enrichment runs made before it no longer describe the current result: the methods leave them out and say how many were left out. They remain in the provenance file. Run the enrichment again to include it.
 
+## What is saved
+
+The results of each run are saved for the Figures workspace, which can then draw them without the run in memory: an over-representation run as `enrichment_results.csv`, and a library GSEA run as its results table with the running-enrichment curves beside it. A DE-workspace run is saved in the study's `results/de_analysis/pathway_scoring/` folder, a meta-analysis run in the selection's folder under `meta_analysis/`. Each run replaces the previous one of its kind, except that a meta-analysis library GSEA run is saved per library.
+
 ## Gene symbol matching
 
 Gene symbols are matched without regard to case, because the libraries use human upper-case symbols. Mouse genes therefore match their human counterparts when the two symbols are spelled the same (for example, Col4a1 and COL4A1). Mouse genes whose human ortholog has a different symbol are not matched. The Genes column lists the genes as they are named in your data.

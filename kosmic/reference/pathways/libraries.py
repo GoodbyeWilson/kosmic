@@ -70,6 +70,12 @@ def term_label(name) -> str:
     return s.replace('_', ' ')
 
 
+def library_label(library_id) -> str:
+    """How a library's name is shown in figures: underscores become spaces
+    ('MSigDB_Hallmark_2026.2_Hs' is shown as 'MSigDB Hallmark 2026.2 Hs')."""
+    return str(library_id).replace('_', ' ')
+
+
 def _parse_gmt_text(text: str) -> dict:
     pathways = {}
     for line in text.splitlines():

@@ -13,11 +13,14 @@ from pathlib import Path
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDoubleSpinBox, QListWidget, QListWidgetItem, QSpinBox
+from PyQt6.QtWidgets import (
+    QDoubleSpinBox, QLabel, QListWidget, QListWidgetItem, QSpinBox,
+)
 
+from kosmic.de.fgsea import format_fdr
 from kosmic.gui.figure_export.pages._enrichment import EnrichmentFigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
-from kosmic.reference.pathways.libraries import term_label
+from kosmic.reference.pathways.libraries import library_label, term_label
 
 #: Gene sets ticked when the page first shows a run.
 _DEFAULT_TICKED = 2
@@ -32,8 +35,12 @@ class _LeadingEdgeControls(FigureControls):
         self.sets.setMinimumHeight(140)
         self.sets.setToolTip("Gene sets from the GSEA run, most significant "
                              "first. Each ticked set is one block of rows.")
+        self.sets.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.sets.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sets.itemChanged.connect(self.changed)
-        self.add_row("Gene sets:", self.sets)
+        # Set names are long: the list takes the panel's full width.
+        self._form.addRow(QLabel("Gene sets:"))
+        self._form.addRow(self.sets)
 
         self.n_genes = QSpinBox()
         self.n_genes.setRange(3, 50)
@@ -41,13 +48,21 @@ class _LeadingEdgeControls(FigureControls):
         self.n_genes.valueChanged.connect(self.changed)
         self.add_row("Genes per set:", self.n_genes)
 
+        # 0 is Auto: the largest change shown, rounded up to the next 0.5.
         self.vmax = QDoubleSpinBox()
-        self.vmax.setRange(0.5, 10.0)
+        self.vmax.setRange(0.0, 10.0)
         self.vmax.setSingleStep(0.5)
         self.vmax.setDecimals(1)
-        self.vmax.setValue(2.0)
+        self.vmax.setSpecialValueText("Auto")
+        self.vmax.setValue(0.0)
+        self.vmax.setPrefix("± ")
+        self.vmax.setSuffix(" log2FC")
+        self.vmax.setToolTip("The colour scale runs from minus to plus this log2 "
+                             "fold change; larger changes take the end colour.\n"
+                             "Auto: the largest change shown, rounded up to the "
+                             "next 0.5.")
         self.vmax.valueChanged.connect(self.changed)
-        self.add_row("Colour range (+/- log2FC):", self.vmax)
+        self.add_row("Colour range:", self.vmax)
 
     def ticked(self) -> list[str]:
         return [self.sets.item(i).data(Qt.ItemDataRole.UserRole)
@@ -66,16 +81,14 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        ctrl = self._add_source_row(_LeadingEdgeControls())
-        ctrl.source.currentIndexChanged.connect(self._sync_sets)
-        return ctrl
+        return _LeadingEdgeControls()
 
     # -- data -------------------------------------------------------------
 
     def _meta_source(self):
         src = super()._meta_source()
         if src is not None:
-            inputs = self.workspace.meta_ws.figure_inputs()
+            inputs = self._meta_inputs()
             src.gene_results = inputs.get('gene_results')
             src.gene_studies = inputs.get('gene_studies') or []
         return src
@@ -122,7 +135,6 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
     # -- lifecycle --------------------------------------------------------
 
     def on_activated(self):
-        self._sync_sources()
         self._sync_sets()
         self.invalidate()        # the run lives in memory and may have changed
         super().on_activated()
@@ -139,7 +151,8 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
                                _n=-pd.to_numeric(res['nes'], errors='coerce').abs()
                                ).sort_values(['_p', '_n'])
             for k, (name, nes, fdr) in enumerate(zip(order['names'], order['nes'], order['_p'])):
-                item = QListWidgetItem(f"{term_label(name)}  (NES {nes:+.2f}, FDR {fdr:.2g})")
+                item = QListWidgetItem(term_label(name))
+                item.setToolTip(f"{term_label(name)}\nNES {nes:+.2f}, {format_fdr(fdr)}")
                 item.setData(Qt.ItemDataRole.UserRole, str(name))
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 tick = (str(name) in kept) if kept else k < _DEFAULT_TICKED
@@ -173,7 +186,7 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
             blocks.append({
                 'name': name,
                 'title': f"{term_label(name)}  (NES {nes:+.2f}, "
-                         f"FDR {float(row['pvals_adj']):.2g})",
+                         f"{format_fdr(float(row['pvals_adj']))})",
                 'lfc': lfc, 'padj': padj})
         return blocks or None
 
@@ -183,10 +196,13 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
             return None
         src = self._source()
         lib = getattr(src, 'gsea_library_name', None)
+        lib = library_label(lib) if lib else None
         contrast = self._contrast(src)
         title = f"{lib}: {contrast}" if lib and contrast else lib
         gap = 'Pooled' if self._is_meta() else None
-        vmax = self._controls.vmax.value()
+        if self._is_meta():
+            blocks = self._display_columns(blocks, getattr(src, 'selection', None))
+        vmax = self._controls.vmax.value() or None
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
 
@@ -197,6 +213,21 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
                 blocks, vmax=vmax, gap_before=gap, title=title,
                 figsize=sz, font_sizes=f)
         return _render
+
+    @staticmethod
+    def _display_columns(blocks, selection) -> list[dict]:
+        """*blocks* with each study column named by its study alone: the
+        selection's cell type is in the figure title ('Chaffin_Endothelial_Cell'
+        is shown as 'Chaffin'). The export table keeps the full names."""
+        suffix = f"_{selection}".lower() if selection else None
+
+        def label(col):
+            s = str(col)
+            if suffix and s.lower().endswith(suffix) and len(s) > len(suffix):
+                s = s[:-len(suffix)]
+            return s.replace('_', ' ')
+        return [{**b, 'lfc': b['lfc'].rename(columns=label),
+                 'padj': b['padj'].rename(columns=label)} for b in blocks]
 
     def _export_companions(self, fig_path: Path) -> list[Path]:
         """The numbers behind the cells, one row per gene set, gene and column."""

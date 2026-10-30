@@ -32,3 +32,22 @@ def de_results_stale_note(de_ws) -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def saved_results_stale_note(results_path, h5ad_path) -> Optional[str]:
+    """Note for results read from a study's folder (ADR-014) when their file
+    is older than the study's dataset file, which a later step (relabelling
+    cell types, say) may have changed; else None. The figure still draws."""
+    if not results_path or not h5ad_path:
+        return None
+    try:
+        made = Path(results_path).stat().st_mtime
+        saved = Path(h5ad_path).stat().st_mtime
+    except OSError:
+        return None
+    if made >= saved:
+        return None
+    from datetime import datetime
+    when = datetime.fromtimestamp(saved).strftime('%Y-%m-%d %H:%M')
+    return ("These results were made before the study's file was last saved "
+            f"({when}).")

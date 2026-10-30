@@ -2,9 +2,12 @@
 # leave-one-out sensitivity, for gene- or pathway-level results, and the
 # study agreement (vote levels) of a gene-level run.
 #
-# Read the Meta-Analysis workspace through 'workspace.meta_ws.figure_inputs()'
-# (ADR-010): the pooled tables of the latest runs and the studies' own DE
-# tables for the current selection.
+# Read the Meta figures' inputs (FigurePage._meta_inputs): the Meta-Analysis
+# workspace's figure_inputs() (ADR-010) -- the pooled tables of the latest
+# runs and the studies' own DE tables for the current selection -- or the
+# same keys for a run saved in the project folder (ADR-014). The forest
+# and leave-one-out figures are unavailable when a study the run pooled
+# has no DE table in the project.
 
 from __future__ import annotations
 
@@ -35,8 +38,7 @@ class MetaFigurePage(FigurePage):
         return self.LEVEL
 
     def _inputs(self) -> Optional[dict]:
-        meta = getattr(self.workspace, 'meta_ws', None)
-        return meta.figure_inputs() if meta is not None else None
+        return self._meta_inputs()
 
     def _results(self):
         inputs = self._inputs()
@@ -54,6 +56,9 @@ class MetaFigurePage(FigurePage):
         return f"{sel} ({n} studies)" if sel else f"{n} studies"
 
     def dependencies_met(self) -> bool:
+        inputs = self._inputs()
+        if hasattr(inputs, 'available'):          # a saved run: no table read
+            return inputs.available(f'{self._level()}_results')
         return self._results() is not None
 
     def _default_export_dir(self) -> Optional[Path]:
@@ -167,6 +172,21 @@ class _ItemControls(FigureControls):
 
 class _ItemPage(MetaFigurePage):
     """Shared item handling for the forest and leave-one-out pages."""
+
+    def _missing_studies(self) -> list:
+        """Studies a saved run pooled whose DE table is not in the project."""
+        inputs = self._inputs() or {}
+        return list(inputs.get(f'missing_{self._level()}_studies') or [])
+
+    def dependencies_met(self) -> bool:
+        return super().dependencies_met() and not self._missing_studies()
+
+    def unavailable_reason(self) -> str:
+        missing = self._missing_studies()
+        if missing:
+            return ("The DE tables of studies this run pooled are not in the "
+                    f"project: {', '.join(missing)}.")
+        return super().unavailable_reason()
 
     def on_activated(self):
         df = self._results()

@@ -30,6 +30,9 @@ UP_COLOR = '#E06666'
 DOWN_COLOR = '#6D9EEB'
 NS_COLOR = '#B0B0B0'
 FG = '#333333'
+# Secondary text (footnotes, keys), and cells or marks with no value.
+FG_SECONDARY = '#666666'
+MISSING_COLOR = '#E6E6E6'
 # Condition groups: the disease group takes the up colour, control the down.
 DISEASE_COLOR = UP_COLOR
 CONTROL_COLOR = DOWN_COLOR

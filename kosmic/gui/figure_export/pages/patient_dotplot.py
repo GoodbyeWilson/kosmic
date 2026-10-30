@@ -1,10 +1,10 @@
 # Patient pathway dotplot page.
 #
 # A matplotlib mirror of the DE window's per-donor pathway score plot. It never
-# recomputes scores: it renders the in-memory scores from the last scoring run
-# ('de_ws.pathway_score_data') and falls back to the per-donor scores saved to
-# disk by that run, so the figure always reflects the latest actual computation
-# (whatever scoring method was used) rather than a recomputed approximation.
+# recomputes scores: it renders the per-donor scores of the last scoring run,
+# from the DE workspace or as saved in the study's folder (FigurePage._de),
+# so the figure always reflects the latest actual computation (whatever
+# scoring method was used) rather than a recomputed approximation.
 
 from __future__ import annotations
 
@@ -43,43 +43,25 @@ class PatientDotplotPage(FigurePage):
     def _build_controls(self) -> FigureControls:
         return _PatientDotplotControls()
 
-    def _scores_path(self) -> Optional[Path]:
-        """On-disk per-donor scores saved by the last scoring run, or None."""
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_pathway_scoring_dir
-        from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE
-        return de_pathway_scoring_dir(de.project_dir) / PER_DONOR_SCORES_FILE
+    STALENESS_ATTR = 'pathway_score_data'
 
     def _score_data(self):
-        """Per-donor scores to render: the in-memory scores from this session's
-        scoring run, else the ones saved to disk by the last run. None if
-        neither exists (scoring never run)."""
-        de = self.workspace.de_ws
-        if de is None:
-            return None
-        cache = getattr(de, 'pathway_score_data', None)
-        if cache and cache.get('names'):
-            return cache
-        from kosmic.de.pathway_scoring import load_per_donor_scores
-        path = self._scores_path()
-        return load_per_donor_scores(path) if path else None
+        """Per-donor scores to render, or None if scoring was never run."""
+        de = self._de()
+        data = de.pathway_score_data if de is not None else None
+        return data if data and data.get('names') else None
 
     def dependencies_met(self) -> bool:
-        de = self.workspace.de_ws
-        if de is None:
-            return False
-        if not (getattr(de, 'disease_label', None)
-                and getattr(de, 'control_label', None)):
-            return False
-        return self._score_data() is not None
+        de = self._de()
+        return (de is not None and de.available('disease_label')
+                and de.available('control_label')
+                and de.available('pathway_score_data'))
 
     def _make_render_func(self):
         data = self._score_data()
         if data is None:
             return None
-        de = self.workspace.de_ws
+        de = self._de()
         d, c = de.disease_label, de.control_label
         standardize = self._controls.standardize.isChecked()
         font_sizes = self._font_sizes()
@@ -104,11 +86,7 @@ class PatientDotplotPage(FigurePage):
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:
-        de = self.workspace.de_ws
-        if de is None or not getattr(de, 'project_dir', None):
-            return None
-        from kosmic.paths import de_figures_dir
-        return de_figures_dir(de.project_dir)
+        return self._de_export_dir()
 
     def _default_export_basename(self) -> str:
         return "patient_dotplot"

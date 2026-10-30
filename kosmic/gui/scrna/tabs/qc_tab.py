@@ -21,6 +21,7 @@ from kosmic.gui.shared.widgets import (
 )
 from kosmic.gui.shared import borderless, dialogs, run_worker
 from kosmic.reference.contamination import builtin_panels
+from kosmic.scrna.load.h5ad_meta import save_h5ad
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +366,7 @@ class QCFilterWorker(BaseWorker):
         adata, stats = run_qc_pipeline(self.adata, self.params)
 
         self.progress.emit(f"Saving to {Path(self.output_path).name}...")
-        adata.write_h5ad(self.output_path)
+        save_h5ad(adata, self.output_path)
         return (adata, stats)
 
 
@@ -395,7 +396,7 @@ class NormalizeWorker(BaseWorker):
         )
 
         self.progress.emit("Saving...")
-        self.adata.write_h5ad(self.output_path)
+        save_h5ad(self.adata, self.output_path)
         return self.adata
 
 
@@ -433,7 +434,7 @@ class ScrubletWorker(BaseWorker):
 
         self.progress.emit("Saving results...")
         self.progress_pct.emit(90)
-        self.adata.write_h5ad(self.output_path)
+        save_h5ad(self.adata, self.output_path)
 
         self.progress_pct.emit(100)
         n_doublets = results['n_doublets']
@@ -470,7 +471,7 @@ class FilterDoubletsWorker(BaseWorker):
 
         self.progress.emit(f"Saving {n_after:,} cells to disk...")
         self.progress_pct.emit(70)
-        adata.write_h5ad(self.output_path)
+        save_h5ad(adata, self.output_path)
         self.progress_pct.emit(100)
 
         return (adata, n_removed)
@@ -528,7 +529,7 @@ class SoupXWorker(BaseWorker):
 
         self.progress.emit("Saving...")
         self.progress_pct.emit(90)
-        self.adata.write_h5ad(self.output_path)
+        save_h5ad(self.adata, self.output_path)
         self.progress_pct.emit(100)
         return (self.adata, info['message'], info)
 
