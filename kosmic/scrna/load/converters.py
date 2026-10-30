@@ -354,7 +354,7 @@ def mtx_to_h5ad(mtx_path, output_path=None, genes_path=None, barcodes_path=None,
 
 # 10X folder → AnnData
 
-def load_10x_folder(folder):
+def load_10x_folder(folder, cells_only=False, progress=None):
     """Load 10X Genomics data from a Cell Ranger output folder.
 
     Handles both gzipped (v3+) and uncompressed (v2) formats, including
@@ -365,6 +365,13 @@ def load_10x_folder(folder):
     folder : str or Path
         Folder containing 'matrix.mtx[.gz]', 'features/genes.tsv[.gz]',
         'barcodes.tsv[.gz]'.
+    cells_only : bool
+        Import mode: a matrix with more than large_10x.LARGE_BARCODES
+        barcodes is read in chunks, and if it holds every whitelist barcode
+        only the cells are kept (see large_10x). Off for callers that need
+        the empty droplets, such as SoupX.
+    progress : callable(str), optional
+        Messages from the chunked reader.
 
     Returns
     -------
@@ -386,6 +393,19 @@ def load_10x_folder(folder):
             folder = subdirs[0]
             has_gzipped = (folder / "matrix.mtx.gz").exists()
             has_uncompressed = (folder / "matrix.mtx").exists()
+
+    if cells_only and (has_gzipped or has_uncompressed):
+        from kosmic.scrna.load import large_10x
+        ext = ".gz" if has_gzipped else ""
+        matrix_file = folder / f"matrix.mtx{ext}"
+        if large_10x.is_large(matrix_file):
+            features_file = next((p for p in (folder / f"features.tsv{ext}",
+                                              folder / f"genes.tsv{ext}") if p.exists()), None)
+            if features_file is None:
+                raise FileNotFoundError(f"No features.tsv or genes.tsv in {folder}")
+            return large_10x.load_large_10x(
+                matrix_file, features_file, folder / f"barcodes.tsv{ext}",
+                progress=progress)
 
     if has_gzipped:
         return sc.read_10x_mtx(str(folder), var_names='gene_symbols', cache=False)
@@ -746,13 +766,15 @@ def find_10x_files(folder) -> List[dict]:
     return samples
 
 
-def load_prefixed_10x(sample_info: dict):
+def load_prefixed_10x(sample_info: dict, cells_only=False, progress=None):
     """Load 10X data from prefixed files (e.g. 'GSM123_matrix.mtx.gz').
 
     Parameters
     ----------
     sample_info : dict
         Must contain 'matrix', 'features', 'barcodes' Path objects.
+    cells_only, progress
+        As for load_10x_folder.
 
     Returns
     -------
@@ -765,6 +787,12 @@ def load_prefixed_10x(sample_info: dict):
     matrix_path = Path(sample_info['matrix'])
     features_path = Path(sample_info['features'])
     barcodes_path = Path(sample_info['barcodes'])
+
+    if cells_only:
+        from kosmic.scrna.load import large_10x
+        if large_10x.is_large(matrix_path):
+            return large_10x.load_large_10x(
+                matrix_path, features_path, barcodes_path, progress=progress)
 
     # Read matrix
     if str(matrix_path).endswith('.gz'):
@@ -855,13 +883,11 @@ def load_10x_multi_sample(
 
         try:
             if sample_info.get('prefix'):
-                adata = load_prefixed_10x(sample_info)
+                adata = load_prefixed_10x(sample_info, cells_only=True,
+                                          progress=progress_callback)
             else:
-                adata = sc.read_10x_mtx(
-                    str(sample_info['folder']),
-                    var_names='gene_symbols',
-                    cache=False,
-                )
+                adata = load_10x_folder(sample_info['folder'], cells_only=True,
+                                        progress=progress_callback)
             adata.obs['sample'] = sample_name
             adata_list.append(adata)
             sample_names.append(sample_name)

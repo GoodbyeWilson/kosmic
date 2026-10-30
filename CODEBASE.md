@@ -192,7 +192,11 @@ that passes two tests in `kosmic/scrna/load/matrices.py`: integer
 values, and row sums that are consistent with the per-cell totals the
 depositor recorded in `obs` (equal, or at or below for every cell; a
 rescaled matrix such as SCT corrected counts is refused). The Seurat
-route exports the `RNA` assay, never the default assay. Quality control
+route exports the `RNA` assay, never the default assay. A 10x matrix
+that holds every whitelist barcode is the one exception to keeping
+every barcode: `kosmic/scrna/load/large_10x.py` reads it in chunks and
+keeps the barcodes that pass a UMI and gene threshold, recording the
+rule in the 'load' provenance stage (ADR-013). Quality control
 then stores the original counts in `adata.layers['counts']` before
 normalising. That layer is the one copy of the counts a study keeps;
 every reader resolves the counts through `kosmic/scrna/counts.py`
