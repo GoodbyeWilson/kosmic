@@ -10,7 +10,6 @@ import pandas as pd
 import pytest
 
 from kosmic.visualisation.de.enrichment import create_enrichment_bar_plot
-from kosmic.visualisation.de.gsea_mountain import _format_fdr
 from kosmic.visualisation.scrna.hvg_plot import create_hvg_plot
 
 
@@ -33,8 +32,9 @@ def test_enrichment_says_when_nothing_passes():
 
 
 def test_zero_fdr_is_reported_as_a_bound():
-    assert _format_fdr(0.0) == 'FDR < 0.001'
-    assert _format_fdr(0.0123) == 'FDR = 0.012'
+    from kosmic.de.fgsea import format_fdr
+    assert format_fdr(0.0) == 'FDR < 0.001'
+    assert format_fdr(0.0123) == 'FDR = 0.012'
 
 
 @pytest.mark.parametrize('flavor, col', [('seurat_v3', 'variances_norm'),

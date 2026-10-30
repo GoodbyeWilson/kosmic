@@ -97,15 +97,21 @@ _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     ("Meta-Analysis", PathwayForestPage),
     ("Meta-Analysis", LeaveOneOutPage),
     ("Meta-Analysis", VoteLevelsPage),
+    # The same enrichment figures, drawing the pooled run
+    ("Pooled Enrichment", EnrichedTermsPage),
+    ("Pooled Enrichment", TermLinksPage),
+    ("Pooled Enrichment", LibraryGseaPage),
+    ("Pooled Enrichment", LibraryGseaMountainPage),
+    ("Pooled Enrichment", LeadingEdgeHeatmapPage),
 ]
 
-# Sections of the figure list: (key, switch label, groups). Each group, and
-# so each figure, is in one section. Enrichment sits with DE, where most
-# enrichment runs are made; its figures also draw a Meta-Analysis run.
+# Sections of the figure list: (key, switch label, groups). Each group is
+# in one section. The enrichment figures are listed in both DE (a study's
+# run) and Meta (the pooled run); the section decides which they draw.
 _SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("scrna", "scRNA", ("Embeddings", "Cell Types", "Single-cell QC", "Clustering")),
     ("de", "DE", ("Differential Expression", "Pathway Activity", "Enrichment")),
-    ("meta", "Meta", ("Meta-Analysis",)),
+    ("meta", "Meta", ("Meta-Analysis", "Pooled Enrichment")),
 ]
 _SECTION_OF_GROUP = {g: key for key, _label, groups in _SECTIONS for g in groups}
 

@@ -19,10 +19,10 @@ import textwrap
 import numpy as np
 import pandas as pd
 
-from kosmic.visualisation.style import FG, diverging_cmap
+from kosmic.visualisation.style import FG, FG_SECONDARY, MISSING_COLOR, diverging_cmap
 
 #: Colour for genes a column did not test.
-UNTESTED_COLOR = '#E6E6E6'
+UNTESTED_COLOR = MISSING_COLOR
 
 
 def leading_edge_genes(leading_edge, ranking: pd.Series, nes: float,
@@ -85,7 +85,27 @@ def leading_edge_table(genes: list[str], columns: list[tuple]):
     return (pd.DataFrame(lfc, index=genes), pd.DataFrame(padj, index=genes))
 
 
-def create_leading_edge_heatmap(blocks, *, vmax: float = 2.0, alpha: float = 0.05,
+def auto_vmax(blocks) -> float:
+    """The largest absolute log2 fold change in *blocks*, rounded up to the
+    next 0.5 (at least 0.5), so the strongest cells take the end colour."""
+    values = np.concatenate([b['lfc'].to_numpy(dtype=float).ravel() for b in blocks])
+    values = np.abs(values[np.isfinite(values)])
+    if not len(values):
+        return 2.0
+    return max(0.5, float(np.ceil(values.max() * 2) / 2))
+
+
+def _wrap_title(text: str, width: int) -> str:
+    """Wrap a set's title to *width* characters without breaking its
+    closing bracket ('(NES -2.91, FDR < 0.001)'), which moves to the next
+    line whole when it does not fit."""
+    head, sep, tail = text.rpartition('(')
+    if not sep:
+        return textwrap.fill(text, width)
+    return textwrap.fill(head + sep + tail.replace(' ', '\u00a0'), width).replace('\u00a0', ' ')
+
+
+def create_leading_edge_heatmap(blocks, *, vmax: float | None = None, alpha: float = 0.05,
                                 gap_before=None, title=None,
                                 colour_label='Log$_2$ fold change',
                                 figsize=None, font_sizes=None):
@@ -97,9 +117,9 @@ def create_leading_edge_heatmap(blocks, *, vmax: float = 2.0, alpha: float = 0.0
         One per gene set, drawn top to bottom: 'title' (the set and its
         NES / FDR), 'lfc' and 'padj' (genes x columns, from
         :func:`leading_edge_table`). All blocks share the same columns.
-    vmax : float
+    vmax : float, optional
         The colour scale runs from -vmax to +vmax; larger changes take the
-        end colour.
+        end colour. None: :func:`auto_vmax`.
     alpha : float
         A cell is marked '*' when its adjusted p-value is below this.
     gap_before : str, optional
@@ -118,6 +138,8 @@ def create_leading_edge_heatmap(blocks, *, vmax: float = 2.0, alpha: float = 0.0
     if not blocks:
         return None
 
+    if vmax is None:
+        vmax = auto_vmax(blocks)
     cols = list(blocks[0]['lfc'].columns)
     n_cols = len(cols)
     heights = [len(b['lfc']) for b in blocks]
@@ -155,7 +177,7 @@ def create_leading_edge_heatmap(blocks, *, vmax: float = 2.0, alpha: float = 0.0
                                ha='right' if n_cols > 3 else 'center')
             ax.set_xlabel(f"* adjusted p < {alpha:g} in that column. "
                           f"Grey: not tested.", loc='left',
-                          fontsize=font_sizes['annotation'], color='#666666')
+                          fontsize=font_sizes['annotation'], color=FG_SECONDARY)
         else:
             ax.set_xticklabels([])
         ax.tick_params(length=0)
@@ -164,7 +186,7 @@ def create_leading_edge_heatmap(blocks, *, vmax: float = 2.0, alpha: float = 0.0
         # Library set names run long ('SIGNALING PATHWAYS REGULATING
         # PLURIPOTENCY OF STEM CELLS'); wrap to the heatmap's width.
         width = max(30, int(figsize[0] * 72 / font_sizes['axis_label'] * 0.9))
-        ax.set_title(textwrap.fill(b['title'], width), loc='left',
+        ax.set_title(_wrap_title(b['title'], width), loc='left',
                      fontsize=font_sizes['axis_label'], fontweight='bold', color=FG)
 
     if title:

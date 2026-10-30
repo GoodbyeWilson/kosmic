@@ -62,7 +62,7 @@ class TermLinksPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> _TermLinksControls:
-        return self._add_source_row(_TermLinksControls())
+        return _TermLinksControls()
 
     # The ribbons need the genes' fold changes as well as the terms.
     DE_NEEDS = ('enrichment_results', 'de_results')

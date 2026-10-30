@@ -24,6 +24,10 @@ class FigureControls(QWidget):
         super().__init__()
         self._form = QFormLayout(self)
         self._form.setContentsMargins(0, 0, 0, 0)
+        # The sidebar has a fixed width: a field that does not fit beside
+        # the widest label goes below its own label instead of being
+        # squeezed below its minimum size.
+        self._form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
 
         self.figsize = FigsizeRow(default_w, default_h)
         self.figsize.changed.connect(self.changed)

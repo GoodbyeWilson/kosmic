@@ -38,7 +38,7 @@ class EnrichedTermsPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> _EnrichedTermsControls:
-        return self._add_source_row(_EnrichedTermsControls())
+        return _EnrichedTermsControls()
 
     def _make_render_func(self):
         src = self._source()

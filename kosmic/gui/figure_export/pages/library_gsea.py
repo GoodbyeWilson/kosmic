@@ -25,7 +25,7 @@ class LibraryGseaPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        return self._add_source_row(FigureControls())
+        return FigureControls(default_w=10, default_h=8)
 
     def _make_render_func(self):
         src = self._source()
@@ -35,6 +35,9 @@ class LibraryGseaPage(EnrichmentFigurePage):
         d = getattr(src, 'disease_label', None)
         c = getattr(src, 'control_label', None)
         lib = getattr(src, 'gsea_library_name', None)
+        if lib:
+            from kosmic.reference.pathways.libraries import library_label
+            lib = library_label(lib)
         contrast = self._contrast(src)
         title = f'{lib}: {contrast}' if lib and contrast else None
         font_sizes = self._font_sizes()

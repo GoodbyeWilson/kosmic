@@ -16,7 +16,7 @@ Some results are saved only by DE runs made with this version or later: the gene
 
 ## Available figures
 
-The switch above the figure list shows the figures of one workspace at a time: **scRNA**, **DE** or **Meta**. Figure Export opens on the section of the workspace you came from. Within a section the figures are grouped by the analysis they draw on, as in the table below; the Enrichment figures are in the DE section and also draw an enrichment run from the Meta-Analysis Enrichment step.
+The switch above the figure list shows the figures of one workspace at a time: **scRNA**, **DE** or **Meta**. Figure Export opens on the section of the workspace you came from. Within a section the figures are grouped by the analysis they draw on, as in the table below; the enrichment figures are listed in the DE section, where they draw the study's enrichment runs, and again in the Meta section under Pooled Enrichment, where they draw the runs of the Meta-Analysis Enrichment step.
 
 A figure whose results are not available is greyed in the list, and its tooltip names the step to run, or says why the saved results cannot be used; selecting it shows the same message. Tick **Show available only** to hide these figures.
 
@@ -28,10 +28,11 @@ A figure whose results are not available is greyed in the list, and its tooltip 
 | Clustering | [PCA Elbow](elbow.md) | The study's dataset, after PCA |
 | Differential Expression | [Volcano Plot](volcano.md), [Gene Heatmap](gene_heatmap.md), [DE Genes by Pathway](topde_summary.md), [Dataset Summary](dataset_summary.md) | A gene DE run of the study |
 | Pathway Activity | [Pathway Bubble](pathway_bubble.md), [Patient Dotplot](patient_dotplot.md) | The study's pathway DE (scoring) |
-| Enrichment | [Enriched Terms](enriched_terms.md), [Enriched Term Links](term_links.md) | An over-representation run (GO or an Enrichr library) from the DE workspace or the Meta-Analysis Enrichment step |
+| Enrichment | [Enriched Terms](enriched_terms.md), [Enriched Term Links](term_links.md) | An over-representation run (GO or an Enrichr library) of the study, from the DE workspace's Enrichment page |
 | Enrichment | Pathway Enrichment (GSEA) | Preranked GSEA on the Pathway DE page of the DE workspace |
-| Enrichment | Library Enrichment (GSEA), Library GSEA (running enrichment), [Leading-Edge Heatmap](leading_edge.md) | A preranked GSEA run against a library, from the DE workspace's Enrichment page or the Meta-Analysis Enrichment step |
+| Enrichment | Library Enrichment (GSEA), Library GSEA (running enrichment), [Leading-Edge Heatmap](leading_edge.md) | A preranked GSEA run of the study against a library, from the DE workspace's Enrichment page |
 | Meta-Analysis | [Gene and Pathway Meta-Analysis Volcano](meta_volcano.md), [Gene and Pathway Forest Plot](meta_forest.md), [Leave-One-Out Sensitivity](meta_loo.md), [Study Agreement (Vote Levels)](meta_vote_levels.md) | A gene or pathway meta-analysis, in the Meta-Analysis workspace or saved in the project |
+| Pooled Enrichment | Enriched Terms, Enriched Term Links, Library Enrichment (GSEA), Library GSEA (running enrichment), Leading-Edge Heatmap | An enrichment run of the Meta-Analysis Enrichment step on the pooled gene list, in the Meta-Analysis workspace or saved in the project |
 
 The forest and leave-one-out figures of a saved meta-analysis run read each pooled study's DE table from the project. When one of those tables is no longer in the project, these two figures are greyed and the tooltip names the study.
 

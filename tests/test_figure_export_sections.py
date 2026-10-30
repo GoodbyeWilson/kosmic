@@ -45,7 +45,7 @@ def test_sections_list_their_own_figures_greyed_without_data(qapp):
 
     ws.show_section('meta')
     meta = _rows(ws)
-    assert [t for t, _g, _tip in meta][-1] == VoteLevelsPage.TITLE
+    assert VoteLevelsPage.TITLE in [t for t, _g, _tip in meta]
     assert all(greyed for _t, greyed, _tip in meta)     # no meta-analysis run
     assert 'Run a gene-level meta-analysis' in meta[0][2]
 

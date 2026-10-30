@@ -36,10 +36,7 @@ class LibraryGseaMountainPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        ctrl = self._add_source_row(_MountainControls())
-        # Each source has its own gene sets.
-        ctrl.source.currentIndexChanged.connect(self._sync_terms)
-        return ctrl
+        return _MountainControls()
 
     # -- data access ----------------------------------------------------
 
@@ -73,7 +70,6 @@ class LibraryGseaMountainPage(EnrichmentFigurePage):
     # -- lifecycle ------------------------------------------------------
 
     def on_activated(self):
-        self._sync_sources()
         self._sync_terms()
         self.invalidate()  # curves live in memory and may have changed
         super().on_activated()

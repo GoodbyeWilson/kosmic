@@ -205,10 +205,10 @@ def test_every_meta_figure_draws_a_saved_run(app, project):
             continue
         assert ws._available(page), (page.TITLE, page.unavailable_reason())
         assert _draw(app, page), (page.TITLE, page._status_lbl.text())
-    # The enrichment figures offer the saved meta-analysis run as a source.
+    # The enrichment figures are listed there too, drawing the saved run.
     from kosmic.gui.figure_export.pages.library_gsea_mountain import LibraryGseaMountainPage
-    mountain = next(p for p in ws._pages if isinstance(p, LibraryGseaMountainPage))
-    assert 'Meta-analysis' in mountain._sources()
+    assert any(isinstance(p, LibraryGseaMountainPage)
+               for section, _g, p in ws._entries if section == 'meta')
 
 
 def test_the_run_picker_chooses_the_meta_run(app, project):
@@ -281,15 +281,8 @@ def test_a_new_study_redraws_although_an_id_is_reused(app, project):
 def test_a_study_folder_renamed_while_shown_greys_its_figures(app, project):
     ws = _workspace(app, project)
     (project / 'StudyA').rename(project / 'StudyA_old')
-    from kosmic.gui.figure_export.pages._enrichment import (
-        SOURCE_STUDY, EnrichmentFigurePage,
-    )
     for section, _group, page in ws._entries:
         if section == 'meta':
-            continue
-        if isinstance(page, EnrichmentFigurePage):
-            # Still drawn from the project's meta-analysis run, not the study.
-            assert SOURCE_STUDY not in page._sources(), page.TITLE
             continue
         assert not ws._available(page), page.TITLE
         assert page.unavailable_reason() == (

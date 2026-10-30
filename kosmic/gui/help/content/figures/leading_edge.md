@@ -11,19 +11,21 @@ a heatmap, one block of rows per gene set.
 
 ## Source
 
-The figure draws on the last library GSEA run, from either workspace:
+The figure draws on the last library GSEA run. It is listed in two
+sections of Figure Export, and the section decides the run:
 
-- **Meta-Analysis Enrichment step** — the leading edge comes from the
+- **Meta section** (Pooled Enrichment), from the Meta-Analysis
+  Enrichment step — the leading edge comes from the
   GSEA of the pooled gene ranking. There is one column per study of the
   meta-analysis, showing that study's own log2 fold change, and a
   **Pooled** column, separated by a gap, showing the pooled estimate.
-  This shows whether the studies agree on the genes behind the pooled
+  Each study column is labelled with the study's name; the cell type is
+  in the figure title, and the exported table keeps the full name. This
+  shows whether the studies agree on the genes behind the pooled
   result.
-- **DE workspace Enrichment page** — the leading edge comes from that
-  study's GSEA, and there is one column, the study's log2 fold change.
-
-When both workspaces hold a run, a **Source** selector chooses between
-them; the meta-analysis is the default.
+- **DE section**, from the DE workspace's Enrichment page — the leading
+  edge comes from that study's GSEA, and there is one column, the
+  study's log2 fold change.
 
 ## Reading the figure
 
@@ -48,9 +50,9 @@ it is drawn.
 
 | Control | Effect |
 |---|---|
-| **Gene sets** | The gene sets of the run, most significant first, with their NES and FDR. Each ticked set is one block of rows. The two most significant are ticked when a run is first shown. |
+| **Gene sets** | The gene sets of the run, most significant first; a set's tooltip gives its NES and FDR. GSEA estimates the FDR from 1,000 permutations, so an FDR of 0 (no permutation reached the observed score) is shown as FDR < 0.001, in the tooltip and in the block's title. Each ticked set is one block of rows. The two most significant are ticked when a run is first shown. |
 | **Genes per set** | How many leading-edge genes to show for each set (default 15). |
-| **Colour range** | The colour scale runs from minus to plus this log2 fold change (default 2). |
+| **Colour range** | The colour scale runs from minus to plus this log2 fold change. **Auto** (the default) uses the largest change shown, rounded up to the next 0.5. |
 
 Exporting also writes a CSV next to the figure with one row per gene set,
 gene and column: the log2 fold change and adjusted p-value behind each
