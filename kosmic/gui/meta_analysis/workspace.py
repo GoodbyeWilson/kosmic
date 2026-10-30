@@ -15,6 +15,7 @@ from PyQt6.QtCore import QSettings, Qt, pyqtSignal
 from kosmic.paths import meta_output_dir
 from kosmic.meta_analysis.io import (
     load_de_results,
+    load_study_de,
     require_se,
     discover_de_results,
     meta_selection_folder,
@@ -553,13 +554,8 @@ class MetaAnalysisWorkspace(QWidget):
         for entry in selected:
             filepath = str(entry["path"])
             try:
-                df = load_de_results(filepath)
-                require_se(df, filepath)
-                # For Welch EB files, use moderated SE if available
-                if entry.get('de_method') in ('welch_ttest_eb', 'welch_cpm_eb') and 'se_moderated' in df.columns:
-                    valid_mod = df['se_moderated'].notna() & (df['se_moderated'] > 0)
-                    if valid_mod.any():
-                        df.loc[valid_mod, 'se'] = df.loc[valid_mod, 'se_moderated']
+                # For Welch EB files, the moderated SE where available.
+                df = load_study_de(filepath, entry.get('de_method'))
                 name = entry["accession"]
                 self._all_gene_datasets.append({
                     'path': filepath, 'name': name, 'df': df,

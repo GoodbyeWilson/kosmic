@@ -109,7 +109,7 @@ def write_de_outputs(study: Path) -> Path:
     }).to_csv(stats / f'{name}_by_cell_type_summary.csv', index=False)
     pw = pd.DataFrame({'names': ['Glycolysis', 'OXPHOS'], 'logfoldchanges': [0.5, -0.4],
                        'pvals': [0.01, 0.2], 'pvals_adj': [0.02, 0.3],
-                       'Effect_Size': [0.8, -0.5]})
+                       'se': [0.2, 0.25], 'Effect_Size': [0.8, -0.5]})
     pw.to_csv(scoring / 'pathway_de_results.csv', index=False)
     pw.iloc[:1].to_csv(scoring / 'parent_pathway_de_results.csv', index=False)
     pd.DataFrame({'sample': ['s1', 's4'], 'condition': ['Control', 'Disease'],
@@ -168,3 +168,32 @@ def figure_workspace(*, scrna_adata=None, de=None, meta=None, study=None,
     src.set_study(study)
     return SimpleNamespace(scrna_ws=scrna, de_ws=de, meta_ws=meta, source=src,
                            data_version=lambda: 0)
+
+
+#: The gene sets 'complete_de_outputs' records for the first DE run.
+GENE_SETS = {'Immune': ['PTPRC', 'CD3E', 'CD14', 'LYZ'],
+             'Vascular': ['PECAM1', 'VWF', 'ACTA2', 'MYH11']}
+
+
+def complete_de_outputs(study, *, counts_source='raw', details=True):
+    """Add what the DE steps save since ADR-014: the first run's record
+    (with its gene sets), the ORA table and the GSEA curves."""
+    from kosmic.de import saved
+    from kosmic.paths import de_pathway_scoring_dir
+    run = saved.list_gene_de_runs(study)[0]
+    saved.save_run_record(run.path, {
+        'method': run.method, 'cell_type': run.cell_type, 'counts_source': counts_source,
+        'sample_column': 'sample', 'condition_column': 'condition',
+        'disease_label': 'Disease', 'control_label': 'Control', 'min_cells': 3,
+        'pathway_gene_sets': GENE_SETS, 'geneset_label': '2 gene sets'})
+    scoring = de_pathway_scoring_dir(study)
+    saved.save_enrichment(scoring, pd.DataFrame({
+        'Term': ['immune response', 'angiogenesis'], 'FDR': [0.001, 0.2],
+        'Fold_Enrichment': [3.0, 1.2], 'Gene_Count': [3, 2],
+        'Genes': ['PTPRC, CD3E, CD14', 'VWF, PECAM1']}))
+    if details:
+        saved.save_gsea_details(saved.gsea_library_path(study), {
+            t: {'es': e, 'nes': n, 'RES': np.linspace(0, e, 50).tolist(), 'hits': [3, 10, 20]}
+            for t, e, n in (('HALLMARK_A', 0.5, 1.8), ('HALLMARK_B', -0.3, -1.2))},
+            'Hallmark')
+    return run

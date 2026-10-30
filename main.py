@@ -604,6 +604,7 @@ class AppWindow(QMainWindow):
         # else from its folder (ADR-014).
         requested = getattr(self, '_figures_study_request', None)
         self._figures_study_request = None
+        ws.set_project(self.current_project_dir)
         ws.set_study(requested or self.current_study_path)
         # Coming from scRNA, DE or Meta opens that section of the figure
         # list ('Open in Figures' the scRNA one); from elsewhere the last

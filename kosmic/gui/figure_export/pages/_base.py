@@ -430,6 +430,16 @@ class FigurePage(SidebarPage):
             return None
         return src.de_state()
 
+    def _meta_inputs(self):
+        """The Meta figures' inputs (the keys of the Meta-Analysis
+        workspace's figure_inputs(), ADR-010): the workspace's run, or a
+        saved run read from the project folder (ADR-014)."""
+        inputs = getattr(self.workspace, 'meta_inputs', None)
+        if inputs is not None:
+            return inputs()
+        meta = getattr(self.workspace, 'meta_ws', None)
+        return meta.figure_inputs() if meta is not None else None
+
     def _scrna_export_dir(self) -> Optional[Path]:
         study = self._study_dir()
         if study is None:

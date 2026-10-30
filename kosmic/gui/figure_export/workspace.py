@@ -15,8 +15,14 @@
 # of the Project page's 'Open in Figures'. When
 # the study has more than one DE run (one per cell type and method, say),
 # the DE section shows a Run selector above the list.
+#
+# The Meta figures draw 'meta_inputs()': the Meta-Analysis workspace's run
+# when it holds one, else a run saved in the project's meta_analysis/
+# folder (kosmic.meta_analysis.saved), chosen with the same Run selector in
+# the Meta section.
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -125,6 +131,14 @@ class FigureExportWorkspace(QWidget):
         # comes from: a workspace that holds it, else its folder (ADR-014).
         self.source = StudySource(lambda: self.scrna_ws, lambda: self.de_ws, parent=self)
         self.source.changed.connect(self._on_source_changed)
+        # The project whose saved meta-analysis runs the Meta figures can
+        # draw, the saved run chosen (None: the Meta workspace's, else the
+        # first saved), the runs found when the list was last filled, and
+        # (run, files signature, inputs) of the saved run last read.
+        self._project: Optional[Path] = None
+        self._meta_run = None
+        self._meta_runs: Optional[list] = None
+        self._meta_saved: Optional[tuple] = None
 
         self._setup_ui()
 
@@ -145,6 +159,67 @@ class FigureExportWorkspace(QWidget):
     def set_study(self, study_dir) -> None:
         """Show the scRNA and DE figures of 'study_dir' (a study folder)."""
         self.source.set_study(study_dir)
+
+    def set_project(self, folder) -> None:
+        """The project whose saved meta-analysis runs the Meta figures can
+        draw."""
+        new = Path(folder) if folder else None
+        if new == self._project:
+            return
+        self._project = new
+        self._meta_run, self._meta_runs, self._meta_saved = None, None, None
+        self.bump_data_version()
+
+    # -- The Meta figures' run ----------------------------------------------
+
+    def _held_meta_inputs(self) -> Optional[dict]:
+        """The Meta-Analysis workspace's figure_inputs() when it holds a
+        pooling run, else None."""
+        inputs = self.meta_ws.figure_inputs() if self.meta_ws is not None else None
+        if inputs and (inputs.get('gene_results') is not None
+                       or inputs.get('pathway_results') is not None):
+            return inputs
+        return None
+
+    def _project_folder(self) -> Optional[Path]:
+        if self._project is not None:
+            return self._project
+        study = self.source.study()
+        return study.parent if study is not None else None
+
+    def meta_runs(self) -> list:
+        """The project's saved meta-analysis runs (kosmic.meta_analysis.saved)."""
+        if self._meta_runs is None:
+            from kosmic.meta_analysis.saved import list_meta_runs
+            project = self._project_folder()
+            self._meta_runs = list_meta_runs(project) if project is not None else []
+        return self._meta_runs
+
+    def meta_inputs(self):
+        """What the Meta figures draw: the Meta-Analysis workspace's run
+        unless a saved run was chosen, else the first saved run, read from
+        the project folder (a mapping with the same keys)."""
+        held = self._held_meta_inputs()
+        if self._meta_run is None and held is not None:
+            return held
+        runs = self.meta_runs()
+        run = self._meta_run if self._meta_run is not None else (runs[0] if runs else None)
+        if run is None:
+            return self.meta_ws.figure_inputs() if self.meta_ws is not None else None
+        try:
+            sig = tuple(sorted((p.name, p.stat().st_mtime_ns) for p in run.folder.iterdir()))
+        except OSError:
+            sig = None
+        if self._meta_saved is None or self._meta_saved[:2] != (run, sig):
+            from kosmic.meta_analysis.saved import figure_inputs
+            self._meta_saved = (run, sig, figure_inputs(run))
+        return self._meta_saved[2]
+
+    def _set_meta_run(self, run) -> None:
+        if run == self._meta_run:
+            return
+        self._meta_run = run
+        self._on_source_changed()
 
     def _on_source_changed(self):
         # New data for the same figures: previews cached against the old
@@ -200,15 +275,12 @@ class FigureExportWorkspace(QWidget):
         switch.addStretch(1)
         nav_lay.addLayout(switch)
 
-        # The DE run the DE figures draw (DE section, two runs or more).
+        # The run the DE or Meta figures draw (two runs or more).
         self._run_row = QWidget()
         run_lay = borderless(QHBoxLayout, self._run_row)
         run_lay.setSpacing(6)
         run_lay.addWidget(QLabel("Run:"))
         self._run_combo = QComboBox()
-        self._run_combo.setToolTip(
-            "The DE run the DE figures draw: the one in the DE workspace, or\n"
-            "one saved in the study's folder (one per cell type and method).")
         self._run_combo.currentIndexChanged.connect(self._on_run_chosen)
         run_lay.addWidget(self._run_combo, 1)
         self._run_row.setVisible(False)
@@ -261,15 +333,29 @@ class FigureExportWorkspace(QWidget):
         self._study_label.setToolTip(str(study) if study else "")
 
     def _sync_runs(self) -> None:
-        """Fill the Run selector with the study's DE runs: the DE
-        workspace's (when it holds one for this study), then each saved run.
-        Shown in the DE section when there is a choice."""
+        """Fill the Run selector for the section shown. DE: the DE
+        workspace's run (when it holds one for this study), then each run
+        saved in the study's folder. Meta: the Meta-Analysis workspace's
+        run (when it holds one), then each run saved in the project. Shown
+        when there is a choice."""
         choices: list[tuple[str, object]] = []
-        live = self.source._live_de()
-        if live is not None and getattr(live, 'de_results', None) is not None:
-            choices.append(("Run in the DE workspace", None))
-        choices += [(run.label, run) for run in self.source.de_runs()]
-        chosen = self.source.de_run()
+        if self._section == 'meta':
+            self._meta_runs = None                       # look again
+            if self._held_meta_inputs() is not None:
+                choices.append(("Run in the Meta-Analysis workspace", None))
+            choices += [(run.label, run) for run in self.meta_runs()]
+            chosen = self._meta_run
+            tip = ("The meta-analysis run the Meta figures draw: the one in the\n"
+                   "Meta-Analysis workspace, or one saved in the project.")
+        else:
+            live = self.source._live_de()
+            if live is not None and getattr(live, 'de_results', None) is not None:
+                choices.append(("Run in the DE workspace", None))
+            choices += [(run.label, run) for run in self.source.de_runs()]
+            chosen = self.source.de_run()
+            tip = ("The DE run the DE figures draw: the one in the DE workspace, or\n"
+                   "one saved in the study's folder (one per cell type and method).")
+        self._run_combo.setToolTip(tip)
         self._run_combo.blockSignals(True)
         self._run_combo.clear()
         for label, run in choices:
@@ -277,11 +363,16 @@ class FigureExportWorkspace(QWidget):
         index = next((i for i, (_l, run) in enumerate(choices) if run == chosen), 0)
         self._run_combo.setCurrentIndex(index)
         self._run_combo.blockSignals(False)
-        self._run_row.setVisible(self._section == 'de' and len(choices) > 1)
+        self._run_row.setVisible(self._section in ('de', 'meta') and len(choices) > 1)
 
     def _on_run_chosen(self, index: int) -> None:
-        if index >= 0:
-            self.source.set_de_run(self._run_combo.itemData(index))
+        if index < 0:
+            return
+        run = self._run_combo.itemData(index)
+        if self._section == 'meta':
+            self._set_meta_run(run)
+        else:
+            self.source.set_de_run(run)
 
     @staticmethod
     def _available(page: FigurePage) -> bool:

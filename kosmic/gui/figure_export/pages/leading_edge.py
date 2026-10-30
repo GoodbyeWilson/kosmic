@@ -75,7 +75,7 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
     def _meta_source(self):
         src = super()._meta_source()
         if src is not None:
-            inputs = self.workspace.meta_ws.figure_inputs()
+            inputs = self._meta_inputs()
             src.gene_results = inputs.get('gene_results')
             src.gene_studies = inputs.get('gene_studies') or []
         return src

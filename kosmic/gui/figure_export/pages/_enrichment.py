@@ -62,8 +62,7 @@ class EnrichmentFigurePage(FigurePage):
     # -- sources ------------------------------------------------------------
 
     def _meta_source(self):
-        meta = getattr(self.workspace, 'meta_ws', None)
-        inputs = meta.figure_inputs() if meta is not None else None
+        inputs = self._meta_inputs()
         if not inputs:
             return None
         sel = str(inputs.get('selection') or '').replace('_', ' ')

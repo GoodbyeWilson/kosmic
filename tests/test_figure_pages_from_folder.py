@@ -17,14 +17,11 @@ import matplotlib  # noqa: E402
 matplotlib.use('Agg')
 
 from kosmic.de import saved  # noqa: E402
-from kosmic.paths import de_figures_dir, de_pathway_scoring_dir, scrna_figures_dir  # noqa: E402
+from kosmic.paths import de_figures_dir, scrna_figures_dir  # noqa: E402
 from kosmic.scrna.load import h5ad_meta  # noqa: E402
 from tests.study_folder import (  # noqa: E402
-    figure_workspace, make_study_folder, write_de_outputs,
+    GENE_SETS, complete_de_outputs, figure_workspace, make_study_folder, write_de_outputs,
 )
-
-GENE_SETS = {'Immune': ['PTPRC', 'CD3E', 'CD14', 'LYZ'],
-             'Vascular': ['PECAM1', 'VWF', 'ACTA2', 'MYH11']}
 
 
 @pytest.fixture(scope='module')
@@ -33,32 +30,10 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def _complete(study, *, counts_source='raw', details=True):
-    """Add what the DE steps of this change save: the first run's record
-    (with its gene sets), the ORA table and the GSEA curves."""
-    run = saved.list_gene_de_runs(study)[0]
-    saved.save_run_record(run.path, {
-        'method': run.method, 'cell_type': run.cell_type, 'counts_source': counts_source,
-        'sample_column': 'sample', 'condition_column': 'condition',
-        'disease_label': 'Disease', 'control_label': 'Control', 'min_cells': 3,
-        'pathway_gene_sets': GENE_SETS, 'geneset_label': '2 gene sets'})
-    scoring = de_pathway_scoring_dir(study)
-    saved.save_enrichment(scoring, pd.DataFrame({
-        'Term': ['immune response', 'angiogenesis'], 'FDR': [0.001, 0.2],
-        'Fold_Enrichment': [3.0, 1.2], 'Gene_Count': [3, 2],
-        'Genes': ['PTPRC, CD3E, CD14', 'VWF, PECAM1']}))
-    if details:
-        saved.save_gsea_details(saved.gsea_library_path(study), {
-            t: {'es': e, 'nes': n, 'RES': np.linspace(0, e, 50).tolist(), 'hits': [3, 10, 20]}
-            for t, e, n in (('HALLMARK_A', 0.5, 1.8), ('HALLMARK_B', -0.3, -1.2))},
-            'Hallmark')
-    return run
-
-
 @pytest.fixture
 def study(tmp_path):
     s = write_de_outputs(make_study_folder(tmp_path, form='log'))
-    _complete(s)
+    complete_de_outputs(s)
     return s
 
 
@@ -109,7 +84,7 @@ def test_every_scrna_and_de_figure_draws_from_the_folder(app, study):
 
 def test_a_figure_whose_input_was_not_saved_says_what_to_run(app, tmp_path):
     study = write_de_outputs(make_study_folder(tmp_path))
-    _complete(study, details=False)                       # GSEA run before curves were kept
+    complete_de_outputs(study, details=False)                       # GSEA run before curves were kept
     ws = _workspace(app, study)
     from kosmic.gui.figure_export.pages.library_gsea_mountain import LibraryGseaMountainPage
     page = next(p for p in ws._pages if isinstance(p, LibraryGseaMountainPage))
@@ -190,7 +165,7 @@ def test_the_heatmap_table_is_the_same_held_or_from_the_file(app, study):
 
 def test_the_heatmap_from_the_file_uses_the_runs_counts(app, tmp_path):
     study = write_de_outputs(make_study_folder(tmp_path))
-    _complete(study, counts_source='decontX_counts')
+    complete_de_outputs(study, counts_source='decontX_counts')
     page = _heatmap_page(figure_workspace(study=study))
     sd, _avail = page._prepare(page._inputs())
     from kosmic.visualisation.de.gene_heatmap import prepare_heatmap_data
