@@ -492,6 +492,10 @@ class TenXFolderConvertWorker(BaseWorker):
     """
     Worker to convert 10X folder data (MTX + features + barcodes) to h5ad.
 
+    A matrix that holds every whitelist barcode keeps only its cells, and
+    an aggregated matrix is split into samples by barcode suffix (see
+    kosmic.scrna.load.large_10x).
+
     Emits 'finished_ok' with '(adatas_list, message)'.
     """
 
@@ -501,10 +505,19 @@ class TenXFolderConvertWorker(BaseWorker):
 
     def _run(self):
         from kosmic.scrna.load.converters import load_10x_folder, find_10x_files, load_prefixed_10x
+        from kosmic.scrna.load.large_10x import split_by_barcode_suffix
         import scanpy as sc
 
         total = len(self.folders)
         all_adatas = []
+
+        def loaded(adata, name):
+            split_by_barcode_suffix(adata, name)
+            n_samples = adata.obs['sample'].nunique()
+            self.progress.emit(
+                f"  Loaded: {adata.n_obs:,} cells x {adata.n_vars:,} genes"
+                + (f" ({n_samples} samples by barcode suffix)" if n_samples > 1 else ""))
+            return adata
 
         for i, folder_str in enumerate(self.folders):
             folder = Path(folder_str)
@@ -514,11 +527,9 @@ class TenXFolderConvertWorker(BaseWorker):
             # Standard 10X files
             mtx_files = list(folder.glob("matrix.mtx.gz")) + list(folder.glob("matrix.mtx"))
             if mtx_files:
-                adata = load_10x_folder(folder)
-                adata.obs['sample'] = folder.name
-                all_adatas.append((folder.name, adata))
-                self.progress.emit(
-                    f"  Loaded: {adata.n_obs:,} cells x {adata.n_vars:,} genes")
+                adata = load_10x_folder(folder, cells_only=True,
+                                        progress=self.progress.emit)
+                all_adatas.append((folder.name, loaded(adata, folder.name)))
             else:
                 # Prefixed files
                 samples = find_10x_files(folder)
@@ -527,19 +538,17 @@ class TenXFolderConvertWorker(BaseWorker):
                     sample_adatas = []
                     for s_info in prefixed:
                         self.progress.emit(f"  Loading sample: {s_info['sample']}")
-                        adata = load_prefixed_10x(s_info)
-                        adata.obs['sample'] = s_info['sample']
-                        sample_adatas.append(adata)
-                        self.progress.emit(
-                            f"    {adata.n_obs:,} cells x {adata.n_vars:,} genes")
+                        adata = load_prefixed_10x(s_info, cells_only=True,
+                                                  progress=self.progress.emit)
+                        sample_adatas.append(loaded(adata, s_info['sample']))
 
                     if len(sample_adatas) > 1:
-                        combined = sc.concat(sample_adatas, label='sample',
-                                             keys=[a.obs['sample'].iloc[0] for a in sample_adatas])
+                        # Each keeps its own obs['sample'].
+                        combined = sc.concat(sample_adatas)
                         combined.obs_names_make_unique()
                         all_adatas.append((folder.name, combined))
                     elif sample_adatas:
-                        all_adatas.append((sample_adatas[0].obs['sample'].iloc[0], sample_adatas[0]))
+                        all_adatas.append((prefixed[0]['sample'], sample_adatas[0]))
 
         self.progress_pct.emit(95)
         return (all_adatas, f"Converted {len(all_adatas)} 10X folder(s)")

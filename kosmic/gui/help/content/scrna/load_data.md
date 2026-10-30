@@ -44,6 +44,18 @@ have the wrong matrix or the wrong file.
   runs in the background and the result becomes the working dataset.
   Imports made from the Project page do this automatically; this
   button is for files that were dropped into `raw_data/` by hand.
+- **A 10x matrix with every barcode.** Some deposits contain every
+  barcode of the 10x whitelist, not only the cells: an unfiltered
+  Cell Ranger matrix, or several samples combined with `cellranger aggr`
+  (GSE234052 has 40.8 million barcodes and about 22,000 cells). Such a
+  matrix is read in chunks, and only the barcodes with at least 500 UMIs
+  and 200 detected genes are imported; the log and the methods state how
+  many barcodes were kept and dropped. If the barcodes end in more than
+  one suffix (`-1`, `-2`, …), each suffix is a sample, named after the
+  file with the suffix number (`GSE234052_1` … `GSE234052_6`). The
+  series' GEO page says which sample each number is; rename the samples
+  and set their conditions in the next steps. The empty droplets are not
+  imported, so ambient RNA cannot be estimated from them in KOSMIC.
 - **An h5ad in `raw_data/`.** Its matrix of raw counts is imported: `X`
   when it holds counts, otherwise `.raw` or a layer. When `raw_data/`
   holds more than one h5ad, you choose which to import. When the file
