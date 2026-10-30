@@ -406,11 +406,27 @@ class DEState:
         return ((read_manifest(study) or {}).get('semantics') or {})
 
     def _label(self, role: str) -> str:
+        """The run's label for 'role' ('disease' or 'control'): from its
+        record, else the manifest's role map, else the dataset's
+        uns['role_map'], else the role's own name when the dataset has a
+        '_role' column (a run saved before records were kept, on a study
+        without a manifest, such as an atlas). The last two read the
+        dataset's metadata only once it has been read, and are '' until
+        then."""
         rec = self._record().get(f'{role}_label')
         if rec:
             return rec
         roles = self._semantics().get('role_map') or {}
-        return next((cond for cond, r in roles.items() if r == role), '')
+        label = next((cond for cond, r in roles.items() if r == role), '')
+        if label:
+            return label
+        adata = self._source.scrna_adata()
+        if adata is None:
+            return ''
+        roles = adata.uns.get('role_map')
+        if isinstance(roles, dict) and roles:
+            return next((str(c) for c, r in sorted(roles.items()) if r == role), '')
+        return role.capitalize() if '_role' in adata.obs.columns else ''
 
     def _saved(self, name):
         from kosmic.de import saved

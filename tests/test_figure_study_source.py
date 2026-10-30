@@ -249,3 +249,28 @@ def test_changing_study_invalidates_previews_and_refills_the_list(app, study, tm
     ws.set_study(study)                                   # the same study: nothing
     assert ws.data_version() == v
     ws.source.wait()
+
+
+def test_labels_come_from_the_dataset_when_no_record_or_manifest_has_them(app, study):
+    """An atlas has no manifest and its runs may predate records: the
+    labels come from the dataset's role map, else its '_role' column."""
+    import anndata as ad
+    from kosmic.manifest import manifest_path
+    manifest_path(study).unlink()
+    path = h5ad_meta.registered_h5ad(study)
+    a = ad.read_h5ad(path)
+    a.uns['role_map'] = {'NF': 'control', 'DCM': 'disease'}
+    h5ad_meta.save_h5ad(a, path)
+    src = _source()
+    src.set_study(study)
+    st = src.de_state()
+    assert st.disease_label == ''                    # metadata not read yet: nothing waits
+    _settle(app, src)
+    assert (st.disease_label, st.control_label) == ('DCM', 'NF')
+    del a.uns['role_map']
+    h5ad_meta.save_h5ad(a, path)
+    _settle(app, src)
+    src.scrna_adata()
+    _settle(app, src)
+    st = src.de_state()
+    assert (st.disease_label, st.control_label) == ('Disease', 'Control')

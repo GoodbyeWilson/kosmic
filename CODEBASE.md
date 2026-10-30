@@ -48,8 +48,9 @@ determined from that record, not from its name.
 Analysis, Differential Expression, Meta-Analysis or Figures, plus the
 Home page. A workspace operates either on a single study (scRNA,
 Differential Expression) or on the project as a whole (Project,
-Meta-Analysis). Figures reads from the scRNA and Differential
-Expression workspaces.
+Meta-Analysis). Figures draws one study's figures, from the workspace
+that holds it or else from its folder, and the project's meta-analysis
+figures (ADR-014).
 
 **Step.** One stage within a workspace. Steps are listed in the
 Explorer pane, have completion state, and are what F1 resolves to a
@@ -158,13 +159,25 @@ subfolder holds that selection's result tables and its meta-analysis
 `provenance.json` and `methods.md`. It does not read anything from the
 per-study workspaces in memory.
 
-**Figures** renders figures from the datasets and results currently
-held by the scRNA, Differential Expression and Meta-Analysis workspaces.
-It reads the Meta-Analysis workspace only through
-`MetaAnalysisWorkspace.figure_inputs()`: the pooled gene and pathway
-tables of the latest runs, the studies' own DE tables for the current
-selection and the Enrichment step's last runs on the pooled gene list
-(ADR-010).
+**Figures** renders figures for one study, the active study or the one
+opened with the Project page's *Open in Figures*, and for the project's
+meta-analysis (ADR-014). Its pages read the study through one object,
+`StudySource` (`kosmic/gui/figure_export/shared/study_source.py`): the
+scRNA or DE workspace's data when that workspace holds the study,
+otherwise the study's folder. From the folder it reads the processed
+file in parts (below) and the DE outputs through `kosmic/de/saved.py`,
+which lists a study's saved gene DE runs and reads each run's table and
+its `.json` record (count source, gene sets, columns), the pathway
+scoring, fgsea, library GSEA and over-representation results. It
+reads the Meta-Analysis workspace only through
+`MetaAnalysisWorkspace.figure_inputs()` (ADR-010): the pooled gene and
+pathway tables of the latest runs, the studies' own DE tables for the
+current selection and the Enrichment step's last runs on the pooled gene
+list. When that workspace holds no run, `kosmic/meta_analysis/saved.py`
+builds the same keys from a run saved under `meta_analysis/`, loading
+each pooled study's table with the workspace's own loader
+(`load_study_de`). Figures loads no matrix whole and starts no load in
+another workspace, and it never writes a study's dataset file.
 
 **Combine** is a dialog opened from the Project workspace. It reads the
 selected studies' processed files, writes the shared atlas to
@@ -203,7 +216,15 @@ and loads every layer, so it costs the whole counts matrix. Code that
 needs only the cells, the shape or the gene names reads them through
 `kosmic/scrna/load/h5ad_meta.py` (`read_obs`, `read_shape`,
 `write_obs`) and `read_var_names` in `kosmic/scrna/load/gene_overlap.py`,
-which touch nothing else. The DE workspace loads a study from disk
+which touch nothing else. Figures reads a study in parts through the
+same module (ADR-014): `read_figure_meta` (obs, var, uns and the
+embeddings), `read_genes` (a few genes for every cell) and `read_cells`
+(every gene for some cells), a chunk of the matrix at a time, with the
+log-normalised values `kosmic/scrna/counts.py` gives on the loaded
+study. Every save of a study's file goes through `save_h5ad`, which
+shares a per-file readers-writer lock with these readers: on Windows a
+file open for reading can be neither overwritten nor replaced, and a
+reader that opened a file mid-save would read half of it. The DE workspace loads a study from disk
 through `read_counts_adata` in the same module: obs, var and the counts
 as `X`, never the normalised matrix, the embeddings or the graph, so a
 study costs half of a full load there.

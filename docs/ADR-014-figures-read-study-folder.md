@@ -1,6 +1,6 @@
 # ADR-014: Figures read a study's saved data when no workspace holds it
 
-- Status: Proposed (2026-10-29). Agreed by Kirk; awaiting Calum.
+- Status: Approved (2026-10-30). Proposed 2026-10-29.
   Extends ADR-009 (Figure Export) and ADR-010 (figures read the
   meta-analysis); keeps ADR-001 and ADR-003.
 
@@ -54,27 +54,57 @@ recomputed and no matrix is loaded whole.
    to run again.
 4. Figure Export has a study of its own: the application's active study
    by default, or the study chosen with **Open in Figures** on the Project
-   page, which loads and releases nothing.
+   page, which loads and releases nothing and does not change the active
+   study.
+5. When the study has several saved DE runs (one per cell type and
+   method), the user chooses one with a Run selector; the DE workspace's
+   run, when it holds one for the study, is listed first. The Meta
+   figures have their own selector over the runs saved under
+   `meta_analysis/`, after the Meta-Analysis workspace's run. A saved
+   meta-analysis run's forest plots load each pooled study's table with
+   the workspace's own loader (`load_study_de`), so the numbers are the
+   same as in the workspace.
+6. A value that a run made before this change did not record is taken
+   from the next record that holds it: the disease and control labels
+   from the run's record, else the manifest's role map, else the
+   dataset's `uns['role_map']`, else the role names when the dataset has
+   a `_role` column (an atlas has no manifest).
 
 The figures read through one source object in the Figure Export
-workspace; the figure pages do not know which source served them.
+workspace (`StudySource`); the figure pages do not know which source
+served them. Whether a figure is available is decided from which files
+exist, so filling the figure list reads no table.
 
 ## Why this keeps ADR-001 and ADR-003
 
 The file and the saved tables are the record the analysis already
 treats as authoritative (ADR-001); figures now read the same record.
 Figure Export holds obs, var, the embeddings and small tables, never a
-matrix, so the one-dataset rule (ADR-003) still holds. Measured on the
-DCM atlas (1.17 million cells, 15 GB file) with nothing else loaded:
+whole matrix, so the one-dataset rule (ADR-003) still holds. It keeps
+the last four reads of a few genes for every cell, so that changing a
+figure's controls does not read the file again; on the atlas the Gene
+Heatmap's read of 707 genes is the largest of these (about 1.2 GB). The
+sample of every gene that the Marker Score UMAPs read is not kept, only
+the scores computed from it.
 
-| Read | Time | Peak memory |
+Measured on the DCM atlas (`_master`: 1.17 million cells, 15 GB file)
+with nothing loaded in any workspace, every figure drawn as the
+application draws it, in one process limited to 16 GB of committed
+memory by a Windows job object (2026-10-30). Peak memory is the
+process's private memory, sampled every 20 ms; 1.6 GB of it is Python,
+Qt and the libraries before anything is read.
+
+| Step | Time | Peak memory |
 |---|---|---|
-| obs, var, uns, embeddings | 1.6 s | 0.64 GB |
-| 69 marker genes, every cell (256 MB chunks) | 9.6 s | 1.0 GB |
-| every gene, 150,000 sampled cells | 8.6 s | 3.8 GB |
+| obs, var, uns, embeddings | 1.7 s | 2.1 GB |
+| 69 marker genes, every cell (256 MB chunks) | 9.5 s | 2.7 GB |
+| Gene Heatmap counts: 707 genes of 5 Hallmark sets, every cell | 7.9 s | 3.9 GB |
+| Marker Score UMAPs: every gene of 150,000 sampled cells, scored and drawn | 28.1 s | 6.6 GB |
+| each other figure with data (UMAP, dot plot, composition, QC violins, variable genes, PCA elbow, volcano, library GSEA, leading edge, the gene meta-analysis figures) | 0.1-7 s | at most 3.8 GB |
 
-The last is the size of its result, the same object the Marker Score
-UMAPs page builds from a loaded study.
+Every figure for which the atlas has results drew within the limit. On
+Chaffin (339,609 cells, 12 GB file) the metadata read took 2.1 s, the
+marker genes 4.8 s, and the peak was 2.3 GB.
 
 ## Consequences
 
@@ -89,5 +119,13 @@ UMAPs page builds from a loaded study.
 - Reading a file can collide with a save of it on Windows, where a file
   open for reading cannot be replaced. Readers and the save path share a
   lock.
+- Runs made before this change have no record of their gene set
+  selection, over-representation results or GSEA curves; the figures
+  that need them say which step to run again.
+- A saved meta-analysis run's forest plots read each study's DE table as
+  it is now. A study whose DE was run again after the meta-analysis
+  shows its newer table, and nothing notes this.
+- Only the pathway level of pathway scoring is read from a study's
+  folder, not the pathway-group level.
 - Follow-ups not decided here: exporting figures from the command line
   (ADR-004), and two computers writing to one project folder at once.
