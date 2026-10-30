@@ -344,7 +344,8 @@ def load_multi_sample_10x(
         if progress_callback:
             progress_callback(f"Loading {sample_name}...")
         try:
-            adata = load_10x_folder(folder)
+            adata = load_10x_folder(folder, cells_only=True,
+                                    progress=progress_callback)
             adata.obs['sample'] = sample_name
             adata_list.append(adata)
             sample_names.append(sample_name)

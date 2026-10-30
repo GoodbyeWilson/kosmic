@@ -1078,9 +1078,14 @@ class DownloadTab(TabbedPage):
                             unique_name = name
                         sample_keys.append(unique_name)
 
+                    # A file that already holds several samples (an
+                    # aggregated 10x matrix split by barcode suffix) keeps
+                    # them; any other file is one sample.
+                    for (_, a), key in zip(adatas_list, sample_keys):
+                        if 'sample' not in a.obs.columns or a.obs['sample'].nunique() <= 1:
+                            a.obs['sample'] = key
                     merged = anndata.concat(
                         [a for _, a in adatas_list],
-                        label='sample', keys=sample_keys,
                         join='outer', fill_value=0
                     )
                     merged.obs_names_make_unique()
