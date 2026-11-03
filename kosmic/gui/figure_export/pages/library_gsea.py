@@ -25,7 +25,9 @@ class LibraryGseaPage(EnrichmentFigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        return FigureControls(default_w=10, default_h=8)
+        ctrl = FigureControls(default_w=10, default_h=8)
+        ctrl.add_x_limit("NES")
+        return ctrl
 
     def _make_render_func(self):
         src = self._source()
@@ -42,12 +44,13 @@ class LibraryGseaPage(EnrichmentFigurePage):
         title = f'{lib}: {contrast}' if lib and contrast else None
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
+        xlim = self._controls.x_limit.value() or None
 
-        def _render(res=res, d=d, c=c, t=title, f=font_sizes, sz=figsize):
+        def _render(res=res, d=d, c=c, t=title, f=font_sizes, sz=figsize, x=xlim):
             from kosmic.visualisation.de.fgsea_plot import create_fgsea_nes_plot
             return create_fgsea_nes_plot(
                 res, disease_label=d, control_label=c, title=t,
-                figsize=sz, font_sizes=f)
+                figsize=sz, font_sizes=f, x_limit=x)
         return _render
 
     def _default_export_basename(self) -> str:

@@ -24,7 +24,9 @@ class FgseaPage(FigurePage):
     )
 
     def _build_controls(self) -> FigureControls:
-        return FigureControls()
+        ctrl = FigureControls()
+        ctrl.add_x_limit("NES")
+        return ctrl
 
     STALENESS_ATTR = 'fgsea_results'
 
@@ -47,12 +49,13 @@ class FgseaPage(FigurePage):
         c = getattr(de, 'control_label', None)
         font_sizes = self._font_sizes()
         figsize = self._controls.figsize.get_figsize()
+        xlim = self._controls.x_limit.value() or None
 
-        def _render(res=res, d=d, c=c, f=font_sizes, sz=figsize):
+        def _render(res=res, d=d, c=c, f=font_sizes, sz=figsize, x=xlim):
             from kosmic.visualisation.de.fgsea_plot import create_fgsea_nes_plot
             return create_fgsea_nes_plot(
                 res, disease_label=d, control_label=c,
-                figsize=sz, font_sizes=f)
+                figsize=sz, font_sizes=f, x_limit=x)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

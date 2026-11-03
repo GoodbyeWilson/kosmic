@@ -42,3 +42,17 @@ def test_nes_plot_renders():
 
 def test_nes_plot_empty_returns_none():
     assert create_fgsea_nes_plot(pd.DataFrame(columns=['names', 'nes', 'pvals_adj'])) is None
+
+
+def test_nes_axis_is_even_and_boxed():
+    """The NES axis runs from minus to plus the same value: the largest |NES|
+    rounded up to 0.5, or the X limit given; all four sides are drawn."""
+    import matplotlib.pyplot as plt
+    fig = create_fgsea_nes_plot(_res())
+    ax = fig.axes[0]
+    assert ax.get_xlim() == (-2.5, 2.5)
+    assert all(sp.get_visible() for sp in ax.spines.values())
+    plt.close(fig)
+    fig = create_fgsea_nes_plot(_res(), x_limit=3.0)
+    assert fig.axes[0].get_xlim() == (-3.0, 3.0)
+    plt.close(fig)
