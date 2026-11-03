@@ -19,6 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6")
 
+from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from kosmic.gui.de_analysis.pages.enrichment_page import EnrichmentPage  # noqa: E402
@@ -221,6 +222,26 @@ def test_gsea_record_counts_significant_terms(app, meta_df, tmp_path):
     assert rec["n_terms_sig"] == 1
     assert rec["results_file"] == (
         "meta_analysis/Cardiomyocyte/gsea_library_results_KEGG_2026.csv")
+
+
+def test_a_zero_gsea_p_and_fdr_show_as_the_permutation_bound(app, meta_df, tmp_path):
+    """GSEA gives 0 when no permutation reaches the score; the table shows
+    '< 0.001' and still sorts by the value."""
+    p = MetaEnrichmentPage()
+    p.set_project_folder(tmp_path, selection="Cardiomyocyte")
+    p.set_meta_results(meta_df)
+    p._gsea_library_id = "KEGG_2026"
+    res = pd.DataFrame({"names": ["a", "b"], "nes": [-2.8, 1.7], "es": [-0.6, 0.4],
+                        "pvals": [0.0, 0.004], "pvals_adj": [0.0, 0.0172],
+                        "leading_edge": ["G1", "G2"]})
+    p._on_gsea_finished((res, {}, "done"))
+    t = p._table
+    heads = [t.horizontalHeaderItem(c).text() for c in range(t.columnCount())]
+    pc, fc = heads.index("P-value"), heads.index("FDR")
+    assert [t.item(0, pc).text(), t.item(0, fc).text()] == ["< 0.001", "< 0.001"]
+    assert [t.item(1, pc).text(), t.item(1, fc).text()] == ["4.00e-03", "1.72e-02"]
+    assert t.item(0, fc).data(Qt.ItemDataRole.UserRole) == 0.0
+    assert "permutations" in t.horizontalHeaderItem(fc).toolTip()
 
 
 def test_meta_gsea_saves_one_file_per_library(app, meta_df, tmp_path):

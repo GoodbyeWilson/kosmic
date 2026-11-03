@@ -789,18 +789,25 @@ class EnrichmentPage(SidebarTabbedPage):
         from kosmic.reference.pathways.libraries import term_label
         display['_label'] = display['names'].map(term_label)
 
+        from kosmic.de.fgsea import PERMUTATIONS, format_permutation_value
+        floor = (f"Estimated from {PERMUTATIONS:,} gene-set permutations; 0 means "
+                 f"none reached the observed score, so the value is below "
+                 f"{1 / PERMUTATIONS:g} and is shown as < {1 / PERMUTATIONS:g}.")
         cols = [
             Column('Gene set',           '_label',    's'),
             Column('NES',                'nes',       '.2f'),
             Column('ES',                 'es',        '.2f'),
-            Column('P-value',            'pvals',     '.2e'),
-            Column('FDR',                'pvals_adj', '.2e'),
+            Column('P-value',            'pvals',     '.2e', tooltip=floor),
+            Column('FDR',                'pvals_adj', '.2e', tooltip=floor),
             Column('Leading edge',       '_le_n',     'd'),
             Column('Leading-edge genes', '_le_disp',  's'),
         ]
 
         def _decorate(item, row, col_i):
             key = cols[col_i].key
+            if key in ('pvals', 'pvals_adj') and row[key] == 0:
+                # Sorting still uses the stored 0.
+                item.setText(format_permutation_value(0))
             if key == 'pvals_adj' and pd.notna(row['pvals_adj']) and row['pvals_adj'] < alpha:
                 f = item.font()
                 f.setBold(True)
