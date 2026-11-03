@@ -18,7 +18,8 @@ import numpy as np
 from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox, QFileDialog, QSpinBox
 
 from kosmic.gui.figure_export.pages._base import FigurePage
-from kosmic.gui.figure_export.pages.umap import label_columns
+from kosmic.gui.figure_export.pages.umap import (add_same_colours, category_colours_for,
+                                                 label_columns)
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
 from kosmic.gui.shared import dialogs
 
@@ -340,6 +341,7 @@ class _CompositionControls(_ColumnControls):
                                 "cell type the same colour in both figures.")
         self.colours.currentIndexChanged.connect(self.changed)
         self.add_row("Colours:", self.colours)
+        add_same_colours(self)
 
 
 class CompositionPage(_CellTypePage):
@@ -358,13 +360,15 @@ class CompositionPage(_CellTypePage):
                      or 'sample' in adata.obs.columns))
 
     def _table(self):
-        """(percentages, bracket blocks or None, colours) for the current
-        controls."""
+        """(percentages, bracket blocks or None, colour arguments) for the
+        current controls. The colour arguments go to 'category_colours_for'
+        in the render worker, since it may read the project's files."""
         from kosmic.visualisation.scrna.composition import composition_table
-        from kosmic.visualisation.scrna.umap import category_colours
         obs = self._adata().obs
         col = self._column()
-        colours = category_colours(obs[col].astype(str), self._controls.colours.currentText())
+        study = self._study_dir() if self._controls.same_colours.isChecked() else None
+        colours = (obs[col].astype(str).to_numpy(), self._controls.colours.currentText(),
+                   study, col)
         role = obs['_role'].astype(str)
         keep = _labelled(obs[col]) & role.isin([r for r, _ in ROLES]).to_numpy()
         obs, role = obs[keep], role[keep]
@@ -394,8 +398,8 @@ class CompositionPage(_CellTypePage):
 
         def _render(pct=pct, blocks=blocks, colours=colours, sz=figsize, f=font_sizes):
             from kosmic.visualisation.scrna.composition import create_composition_plot
-            return create_composition_plot(pct, colours, blocks=blocks, figsize=sz,
-                                           font_sizes=f)
+            return create_composition_plot(pct, category_colours_for(*colours),
+                                           blocks=blocks, figsize=sz, font_sizes=f)
         return _render
 
     def _export_companions(self, fig_path: Path) -> list[Path]:

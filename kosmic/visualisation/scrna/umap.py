@@ -36,11 +36,19 @@ def _soft_palette(n, scheme='Default'):
     return [base[i % len(base)] for i in range(n)]
 
 
-def category_colours(labels, scheme='Default'):
+def category_colours(labels, scheme='Default', categories=None):
     """``{category: colour}`` as the embedding plots assign them (sorted
     categories, in palette order), so another figure of the same column
-    uses the same colours."""
-    values = sorted(set(np.asarray(labels, dtype=str)))
+    uses the same colours.
+
+    *categories* are further values to assign colours over, such as the
+    values of the same column in the project's other studies. A category
+    then has the same colour in every study, whichever of them it holds.
+    """
+    values = set(np.asarray(labels, dtype=str))
+    if categories is not None:
+        values |= {str(c) for c in categories}
+    values = sorted(values)
     return dict(zip(values, _soft_palette(len(values), scheme)))
 
 
@@ -75,7 +83,7 @@ def _label_centres(ax, coords, labels, values, fontsize):
 def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
                           figsize=(12, 10), point_size=3, alpha=0.7,
                           dpi=150, rasterized=True, font_sizes=None,
-                          scheme='Default', labels_on_plot=False):
+                          scheme='Default', labels_on_plot=False, colours=None):
     """Create a single embedding scatter plot colored by categorical labels.
 
     Parameters
@@ -102,6 +110,9 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
         Write each category's name in bold at the median position of its
         cells, without overlap, instead of drawing a legend; the axes then
         show plain left and bottom axis lines.
+    colours : dict, optional
+        ``{category: colour}`` (see 'category_colours'); by default the
+        categories present are coloured in sorted order.
 
     Returns
     -------
@@ -120,7 +131,9 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
     labels = np.asarray(labels, dtype=str)
     unique_vals = sorted(set(labels))
     n_unique = len(unique_vals)
-    palette = _soft_palette(n_unique, scheme)
+    if colours is None:
+        colours = category_colours(labels, scheme)
+    palette = [colours[v] for v in unique_vals]
 
     # Honour the requested point size exactly (may be sub-1 for dense
     # embeddings); large cell counts need genuinely tiny dots.
@@ -175,7 +188,8 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
 def create_highlight_plot(coords, labels, highlight_values, title='',
                           embedding_name='UMAP', figsize=(12, 10),
                           point_size=3, alpha=0.8, dpi=150, rasterized=True,
-                          font_sizes=None, scheme='Default', labels_on_plot=False):
+                          font_sizes=None, scheme='Default', labels_on_plot=False,
+                          colours=None):
     """Embedding plot with only the chosen categories coloured, the rest grey.
 
     Parameters
@@ -190,6 +204,10 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
         Size of the highlighted points (background uses a smaller size).
     labels_on_plot : bool
         Name the highlighted categories on the plot instead of in a legend.
+    colours : dict, optional
+        ``{category: colour}``, so a highlighted category keeps its colour
+        from the full plot; by default the highlighted categories take the
+        palette in the order given.
 
     Returns
     -------
@@ -216,7 +234,8 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
                edgecolors='none', linewidths=0)
 
     # Each highlighted category in its own colour, on top.
-    palette = _soft_palette(len(highlight), scheme)
+    palette = (_soft_palette(len(highlight), scheme) if colours is None
+               else [colours[v] for v in highlight])
     for j, val in enumerate(highlight):
         m = labels == val
         ax.scatter(coords[m, 0], coords[m, 1], c=[palette[j]], s=s, alpha=alpha,
