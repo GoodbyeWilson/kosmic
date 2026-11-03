@@ -37,13 +37,16 @@ class PCAElbowPage(FigurePage):
         variance_ratio = np.asarray(
             adata.uns['pca']['variance_ratio'], dtype=float)
 
-        def _render(variance_ratio=variance_ratio):
+        figsize = self._controls.figsize.get_figsize()
+        font_sizes = self._font_sizes()
+
+        def _render(variance_ratio=variance_ratio, sz=figsize, f=font_sizes):
             from kosmic.visualisation.scrna.pca_plots import (
                 find_elbow, create_elbow_plot,
             )
             suggested = find_elbow(variance_ratio)
             return create_elbow_plot(variance_ratio, suggested_pcs=suggested,
-                                     dark_mode=False)
+                                     dark_mode=False, figsize=sz, font_sizes=f)
         return _render
 
     def _default_export_dir(self) -> Optional[Path]:

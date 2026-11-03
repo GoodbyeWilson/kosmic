@@ -86,6 +86,66 @@ def test_composition_colours_match_the_embedding_plot():
     assert category_colours(labels) == dict(zip(['a', 'b', 'c'], _soft_palette(3)))
 
 
+def test_a_category_keeps_its_colour_when_another_study_holds_more():
+    full = category_colours(['a', 'b', 'c'])
+    assert category_colours(['a', 'c'], categories=['a', 'b', 'c']) == full
+    # Without the project's categories, 'c' takes 'b's colour.
+    assert category_colours(['a', 'c'])['c'] == full['b']
+
+
+def _project_of_two(tmp_path):
+    """Two studies whose cell types differ: B has 'Myeloid' renamed to
+    'Monocyte', which sorts between A's types."""
+    from tests.study_folder import make_study_folder
+    from kosmic.scrna.load.h5ad_meta import registered_h5ad
+    a = make_study_folder(tmp_path, 'StudyA')
+    b = make_study_folder(tmp_path, 'StudyB')
+    path = registered_h5ad(b)
+    adata = ad.read_h5ad(path)
+    adata.obs['cell_type'] = adata.obs['cell_type'].cat.rename_categories(
+        {'Myeloid': 'Monocyte'})
+    adata.write_h5ad(path)
+    return a, b
+
+
+def test_project_categories_span_every_study(tmp_path):
+    from kosmic.scrna.load.h5ad_meta import project_categories, read_obs_categories
+    a, b = _project_of_two(tmp_path)
+    assert read_obs_categories(next((b / 'processed_data').glob('*.h5ad')), 'cell_type') == [
+        'Endothelial', 'Fibroblast', 'Monocyte']
+    assert project_categories(a, 'cell_type') == [
+        'Endothelial', 'Fibroblast', 'Monocyte', 'Myeloid']
+    assert project_categories(a, 'no_such_column') == []
+
+
+def test_umap_page_colours_a_cell_type_alike_in_every_study(qapp, tmp_path):
+    from tests.study_folder import figure_workspace
+    from kosmic.gui.figure_export.pages.umap import UMAPPage
+    from kosmic.visualisation.scrna import umap
+    a, b = _project_of_two(tmp_path)
+    used = {}
+    real = umap.create_embedding_plot
+
+    def spy(*args, **kwargs):
+        used[study] = kwargs['colours']
+        return real(*args, **kwargs)
+
+    with mock.patch.object(umap, 'create_embedding_plot', spy):
+        for study in (a, b):
+            ws = figure_workspace(study=study)
+            ws.source.scrna_adata()   # starts the read of the study's file
+            ws.source.wait()
+            page = UMAPPage(ws)
+            _open(page, qapp)
+        assert used[a]['Fibroblast'] == used[b]['Fibroblast']
+        assert used[a]['Myeloid'] != used[b]['Monocyte']
+
+        # Off, each study colours only its own types, as before.
+        page._controls.same_colours.setChecked(False)
+        _open(page, qapp)
+        assert used[b] == category_colours(['Endothelial', 'Fibroblast', 'Monocyte'])
+
+
 def test_plots_render():
     a = _adata()
     from kosmic.scrna.inspect.gene_group import marker_panel, summarise_gene_group

@@ -180,8 +180,10 @@ class InteractiveEnrichmentBar(InteractivePlot):
             return
         d = self.bar_data
         if d['mode'] == 'gsea':
+            from kosmic.de.fgsea import format_permutation_value
             text = (f"{names[i]}\nNES: {d['nes'][i]:+.2f}\n"
-                    f"FDR: {d['padj'][i]:.2e}\nLeading edge: {int(d['le_n'][i])}")
+                    f"FDR: {format_permutation_value(d['padj'][i])}\n"
+                    f"Leading edge: {int(d['le_n'][i])}")
         else:
             text = (f"{names[i]}\n-log10(P): {d['val'][i]:.2f}\n"
                     f"FDR: {d['fdr'][i]:.2e}\n{d['direction'][i]}")

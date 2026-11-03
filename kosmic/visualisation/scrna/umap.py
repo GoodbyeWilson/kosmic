@@ -36,11 +36,19 @@ def _soft_palette(n, scheme='Default'):
     return [base[i % len(base)] for i in range(n)]
 
 
-def category_colours(labels, scheme='Default'):
+def category_colours(labels, scheme='Default', categories=None):
     """``{category: colour}`` as the embedding plots assign them (sorted
     categories, in palette order), so another figure of the same column
-    uses the same colours."""
-    values = sorted(set(np.asarray(labels, dtype=str)))
+    uses the same colours.
+
+    *categories* are further values to assign colours over, such as the
+    values of the same column in the project's other studies. A category
+    then has the same colour in every study, whichever of them it holds.
+    """
+    values = set(np.asarray(labels, dtype=str))
+    if categories is not None:
+        values |= {str(c) for c in categories}
+    values = sorted(values)
     return dict(zip(values, _soft_palette(len(values), scheme)))
 
 
@@ -75,7 +83,7 @@ def _label_centres(ax, coords, labels, values, fontsize):
 def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
                           figsize=(12, 10), point_size=3, alpha=0.7,
                           dpi=150, rasterized=True, font_sizes=None,
-                          scheme='Default', labels_on_plot=False):
+                          scheme='Default', labels_on_plot=False, colours=None):
     """Create a single embedding scatter plot colored by categorical labels.
 
     Parameters
@@ -102,6 +110,9 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
         Write each category's name in bold at the median position of its
         cells, without overlap, instead of drawing a legend; the axes then
         show plain left and bottom axis lines.
+    colours : dict, optional
+        ``{category: colour}`` (see 'category_colours'); by default the
+        categories present are coloured in sorted order.
 
     Returns
     -------
@@ -120,7 +131,9 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
     labels = np.asarray(labels, dtype=str)
     unique_vals = sorted(set(labels))
     n_unique = len(unique_vals)
-    palette = _soft_palette(n_unique, scheme)
+    if colours is None:
+        colours = category_colours(labels, scheme)
+    palette = [colours[v] for v in unique_vals]
 
     # Honour the requested point size exactly (may be sub-1 for dense
     # embeddings); large cell counts need genuinely tiny dots.
@@ -175,7 +188,8 @@ def create_embedding_plot(coords, labels, title='', embedding_name='UMAP',
 def create_highlight_plot(coords, labels, highlight_values, title='',
                           embedding_name='UMAP', figsize=(12, 10),
                           point_size=3, alpha=0.8, dpi=150, rasterized=True,
-                          font_sizes=None, scheme='Default', labels_on_plot=False):
+                          font_sizes=None, scheme='Default', labels_on_plot=False,
+                          colours=None):
     """Embedding plot with only the chosen categories coloured, the rest grey.
 
     Parameters
@@ -190,6 +204,10 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
         Size of the highlighted points (background uses a smaller size).
     labels_on_plot : bool
         Name the highlighted categories on the plot instead of in a legend.
+    colours : dict, optional
+        ``{category: colour}``, so a highlighted category keeps its colour
+        from the full plot; by default the highlighted categories take the
+        palette in the order given.
 
     Returns
     -------
@@ -216,7 +234,8 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
                edgecolors='none', linewidths=0)
 
     # Each highlighted category in its own colour, on top.
-    palette = _soft_palette(len(highlight), scheme)
+    palette = (_soft_palette(len(highlight), scheme) if colours is None
+               else [colours[v] for v in highlight])
     for j, val in enumerate(highlight):
         m = labels == val
         ax.scatter(coords[m, 0], coords[m, 1], c=[palette[j]], s=s, alpha=alpha,
@@ -244,191 +263,3 @@ def create_highlight_plot(coords, labels, highlight_values, title='',
 
     plt.tight_layout()
     return fig
-
-
-def create_overview_figure(coords, obs_df, columns, embedding_name='UMAP',
-                           figsize_per_panel=(8, 7), font_sizes=None,
-                           scheme='Default'):
-    """Create a 2-column overview grid of embedding plots.
-
-    Parameters
-    ----------
-    coords : numpy.ndarray
-        (n_cells, 2) embedding coordinates.
-    obs_df : pandas.DataFrame
-        Observation metadata.
-    columns : list of str
-        Column names to plot (max 4).
-    embedding_name : str
-        'UMAP' or 't-SNE'.
-    figsize_per_panel : tuple
-        Size per subplot panel.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    if font_sizes is None:
-        from kosmic.visualisation import default_font_sizes
-        font_sizes = default_font_sizes()
-
-    n_plots = min(len(columns), 4)
-    n_rows = (n_plots + 1) // 2
-    fig_w = figsize_per_panel[0] * 2
-    fig_h = figsize_per_panel[1] * n_rows
-
-    fig, axes = plt.subplots(n_rows, 2, figsize=(fig_w, fig_h))
-    if n_rows == 1:
-        axes = axes.reshape(1, -1)
-
-    for i, col in enumerate(columns[:4]):
-        row, c = i // 2, i % 2
-        ax = axes[row, c]
-        labels = obs_df[col].astype(str).values
-        unique_vals = sorted(set(labels))
-        palette = _soft_palette(len(unique_vals), scheme)
-
-        for j, val in enumerate(unique_vals):
-            mask = labels == val
-            ax.scatter(coords[mask, 0], coords[mask, 1],
-                       c=[palette[j]], label=val, s=2, alpha=0.6, rasterized=True)
-
-        ax.set_title(col, fontsize=font_sizes['axis_label'], fontweight='bold')
-        ax.set_xlabel(f'{embedding_name}_1', fontsize=font_sizes['tick'])
-        ax.set_ylabel(f'{embedding_name}_2', fontsize=font_sizes['tick'])
-        ax.set_aspect('equal')
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-    # Hide empty axes
-    for i in range(n_plots, n_rows * 2):
-        row, c = i // 2, i % 2
-        axes[row, c].set_visible(False)
-
-    plt.tight_layout()
-    return fig
-
-
-def create_scatter_plots(adata, output_dir, color_by, embedding='umap', dataset_name=''):
-    """
-    Create and save scatter plots for each color_by column, plus an overview.
-
-    Parameters
-    ----------
-    adata : anndata.AnnData
-        Must have the embedding in obsm (X_umap or X_tsne).
-    output_dir : str or Path
-        Directory to save PNG files.
-    color_by : list of str
-        Column names from adata.obs to color by.
-    embedding : str
-        'umap' or 'tsne'.
-    dataset_name : str
-        Prefix for saved filenames.
-
-    Returns
-    -------
-    list of str
-        Paths to saved PNG files.
-    """
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    from pathlib import Path
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    saved_paths = []
-
-    embed_key = f'X_{embedding}'
-    if embed_key not in adata.obsm:
-        return []
-
-    coords = adata.obsm[embed_key]
-
-    # Individual plots
-    for col in color_by:
-        if col not in adata.obs.columns:
-            continue
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-        values = adata.obs[col].astype(str)
-        unique_vals = sorted(values.unique())
-
-        if len(unique_vals) <= 20:
-            cmap = plt.cm.get_cmap('tab20' if len(unique_vals) > 10 else 'tab10')
-            colors = {v: cmap(j / len(unique_vals)) for j, v in enumerate(unique_vals)}
-            for val in unique_vals:
-                mask = values == val
-                ax.scatter(
-                    coords[mask.values, 0], coords[mask.values, 1],
-                    c=[colors[val]], label=f"{val} ({mask.sum():,})",
-                    s=2, alpha=0.6, rasterized=True,
-                )
-            ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5),
-                      markerscale=4, fontsize=9)
-        else:
-            ax.scatter(coords[:, 0], coords[:, 1],
-                       c='steelblue', s=1, alpha=0.3, rasterized=True)
-
-        ax.set_xlabel(f'{embedding.upper()}1')
-        ax.set_ylabel(f'{embedding.upper()}2')
-        ax.set_title(f'{dataset_name} - {col}')
-        ax.set_aspect('equal', adjustable='datalim')
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-        plt.tight_layout()
-        filename = f"{dataset_name}_{embedding}_{col.replace(' ', '_')}.png"
-        filepath = output_dir / filename
-        plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
-        plt.close()
-        saved_paths.append(str(filepath))
-
-    # Overview figure (up to 4 panels)
-    if len(color_by) >= 2:
-        valid_cols = [c for c in color_by[:4] if c in adata.obs.columns]
-        if valid_cols:
-            n_cols_grid = min(2, len(valid_cols))
-            n_rows_grid = (len(valid_cols) + n_cols_grid - 1) // n_cols_grid
-
-            fig, axes = plt.subplots(n_rows_grid, n_cols_grid,
-                                     figsize=(8 * n_cols_grid, 7 * n_rows_grid))
-            axes = np.array(axes).flatten() if n_rows_grid * n_cols_grid > 1 else [axes]
-
-            for idx, col in enumerate(valid_cols):
-                ax = axes[idx]
-                values = adata.obs[col].astype(str)
-                unique_vals = sorted(values.unique())
-
-                if len(unique_vals) <= 15:
-                    cmap = plt.cm.get_cmap('tab10')
-                    for j, val in enumerate(unique_vals):
-                        mask = values == val
-                        ax.scatter(coords[mask.values, 0], coords[mask.values, 1],
-                                   c=[cmap(j % 10)], label=val, s=1, alpha=0.5,
-                                   rasterized=True)
-                    ax.legend(loc='upper right', fontsize=7, markerscale=3)
-                else:
-                    ax.scatter(coords[:, 0], coords[:, 1],
-                               c='steelblue', s=1, alpha=0.3, rasterized=True)
-
-                ax.set_title(col)
-                ax.set_xlabel(f'{embedding.upper()}1')
-                ax.set_ylabel(f'{embedding.upper()}2')
-
-            # Hide empty axes
-            for idx in range(len(valid_cols), len(axes)):
-                axes[idx].set_visible(False)
-
-            plt.tight_layout()
-            overview_path = output_dir / f"{dataset_name}_{embedding}_overview.png"
-            plt.savefig(overview_path, dpi=150, bbox_inches='tight', facecolor='white')
-            plt.close()
-            saved_paths.insert(0, str(overview_path))
-
-    return saved_paths

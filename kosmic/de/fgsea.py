@@ -73,6 +73,12 @@ def format_fdr(fdr) -> str:
     return f'FDR < {1 / PERMUTATIONS:g}' if fdr == 0 else f'FDR = {fdr:.2g}'
 
 
+def format_permutation_value(value, fmt: str = '.2e') -> str:
+    """A GSEA p-value or FDR as text: '< 0.001' for 0, which is the
+    permutation floor rather than a value, else *value* in *fmt*."""
+    return f'< {1 / PERMUTATIONS:g}' if value == 0 else format(value, fmt)
+
+
 def run_fgsea(gene_de_results, pathway_gene_sets, rank_by='logfoldchanges',
               min_size=3, max_size=5000, permutation_num=PERMUTATIONS, seed=0,
               threads=4, return_details=False):
@@ -163,5 +169,5 @@ def run_fgsea(gene_de_results, pathway_gene_sets, rank_by='logfoldchanges',
 
 
 __all__ = ["run_fgsea", "save_fgsea_results", "load_fgsea_results",
-           "select_top_nes", "format_fdr", "PERMUTATIONS",
+           "select_top_nes", "format_fdr", "format_permutation_value", "PERMUTATIONS",
            "FGSEA_RESULTS_FILE", "GSEA_LIBRARY_RESULTS_FILE"]

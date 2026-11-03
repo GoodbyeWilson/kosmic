@@ -9,6 +9,7 @@ The percentage of cells of each type, as 100% stacked bars.
 | **Cell types** | The obs column holding the cell-type labels. |
 | **Bars** | *By condition* draws one bar for control and one for disease. *By sample* draws one bar per sample, controls first, with a bracket over each condition's samples. |
 | **Colours** | The colour scheme. With the same scheme and column as the UMAP page, each cell type has the same colour in both figures. |
+| **Same colours in every study** | On (the default), each cell type has the same colour in every study of the project, as on the UMAP page. |
 
 Control and disease are the roles set on the Inspect tab, so studies
 that name their conditions differently (NF, Donor, normal) are grouped

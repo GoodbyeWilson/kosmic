@@ -11,13 +11,16 @@ from kosmic.visualisation.style import DOWN_COLOR, FG, NS_COLOR, UP_COLOR
 
 def create_fgsea_nes_plot(res, disease_label=None, control_label=None,
                           fdr_threshold=DEFAULT_FDR, figsize=None,
-                          font_sizes=None, title=None):
+                          font_sizes=None, title=None, x_limit=None):
     """Horizontal NES bar chart across pathways, sorted.
 
     'res' is the fgsea summary with columns 'names', 'nes', 'pvals_adj'. Bars
     extend from zero; NES < 0 means the pathway is enriched toward the
     control-up (disease-down) end of the ranking. Pathways passing
     *fdr_threshold* are red (NES > 0) or blue (NES < 0), the rest grey.
+    The NES axis runs from -*x_limit* to +*x_limit*; without one, from
+    minus to plus the largest |NES| shown, rounded up to the next 0.5. The
+    plot is drawn in a full box.
     Returns a Figure, or None if there is nothing to plot.
     """
     import matplotlib
@@ -55,14 +58,25 @@ def create_fgsea_nes_plot(res, disease_label=None, control_label=None,
     ax.set_yticks(y)
     ax.set_yticklabels(names, fontsize=font_sizes['tick'])
     ax.set_ylim(-0.6, n - 0.4)
+    if x_limit and x_limit > 0:
+        lim = float(x_limit)
+    else:
+        finite = np.abs(nes[np.isfinite(nes)])
+        lim = max(0.5, float(np.ceil(finite.max() * 2) / 2)) if len(finite) else 1.0
+    ax.set_xlim(-lim, lim)
     ax.set_xlabel('Normalised enrichment score (NES)',
                   fontsize=font_sizes['axis_label'], fontweight='bold')
     if title is None and disease_label and control_label:
         title = f'Pathway enrichment: {disease_label} vs {control_label}'
     if title:
-        ax.set_title(title, fontsize=font_sizes['title'], fontweight='bold')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+        # Anchored to the figure, not the axes: long set names push the
+        # axes right, and a title centred over them runs off the page.
+        fig.suptitle(title, x=0.01, ha='left', fontsize=font_sizes['title'],
+                     fontweight='bold', color=FG)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_color(FG)
+        spine.set_linewidth(0.8)
 
     ax.legend(
         handles=[Patch(facecolor=UP_COLOR, label=f'Up, FDR < {fdr_threshold:g}'),

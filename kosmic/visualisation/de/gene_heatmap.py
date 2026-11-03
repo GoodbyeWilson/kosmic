@@ -63,7 +63,8 @@ def create_gene_heatmap(sample_gene_df, pathway_genes, pathway_name,
         fg = theme_colors.get('fg_primary', '#000000')
         fg2 = theme_colors.get('fg_secondary', '#666666')
     else:
-        bg, fg, fg2 = '#ffffff', '#000000', '#666666'
+        from kosmic.visualisation.style import FG, FG_SECONDARY
+        bg, fg, fg2 = '#ffffff', FG, FG_SECONDARY
 
     df = sample_gene_df.copy()
 

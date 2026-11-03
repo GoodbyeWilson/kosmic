@@ -42,6 +42,20 @@ class FigureControls(QWidget):
         """Add a labelled control row. Caller still wires its own signals."""
         self._form.addRow(label, widget)
 
+    def add_x_limit(self, unit: str):
+        """Add 'X limit (+/- *unit*)' as 'self.x_limit': the axis runs from
+        minus to plus the value. Auto (0) leaves the range to the figure."""
+        from PyQt6.QtWidgets import QDoubleSpinBox
+        self.x_limit = QDoubleSpinBox()
+        self.x_limit.setRange(0.0, 50.0)
+        self.x_limit.setSingleStep(0.5)
+        self.x_limit.setDecimals(1)
+        self.x_limit.setValue(0.0)
+        self.x_limit.setSpecialValueText("Auto")
+        self.x_limit.valueChanged.connect(self.changed)
+        self.add_row(f"X limit (+/- {unit}):", self.x_limit)
+        return self.x_limit
+
     def add_lfc_gate(self, effect: str = "log2 fold change"):
         """Add 'Min |log2FC|' as 'self.lfc_gate'. Off (0) means a gene is
         significant on FDR < 0.05 alone; a value also requires the absolute

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox
+from PyQt6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox
 
 from kosmic.gui.figure_export.pages._base import FigurePage
 from kosmic.gui.figure_export.shared.controls_base import FigureControls
@@ -50,6 +50,33 @@ def label_columns(adata) -> list[str]:
     return out
 
 
+def category_colours_for(labels, scheme: str, study: Optional[Path], column: str) -> dict:
+    """The colours for 'labels': assigned over the values of 'column' in
+    every study of the project when 'study' is given, so a category has
+    the same colour in each study's figures; else over 'labels' alone.
+    Reads the project's files, so it is called in the render worker."""
+    from kosmic.visualisation.scrna.umap import category_colours
+    categories = None
+    if study is not None:
+        from kosmic.scrna.load.h5ad_meta import project_categories
+        categories = project_categories(study, column)
+    return category_colours(labels, scheme, categories)
+
+
+def add_same_colours(controls: FigureControls) -> QCheckBox:
+    """Add 'Same colours in every study' as 'controls.same_colours'."""
+    controls.same_colours = QCheckBox("Same colours in every study")
+    controls.same_colours.setChecked(True)
+    controls.same_colours.setToolTip(
+        "Give each value of the column one colour across the project's\n"
+        "studies (the atlas included), so a cell type has the same colour\n"
+        "in every study's figures. Off: only this study's values are\n"
+        "coloured, so colours move when studies hold different types.")
+    controls.same_colours.toggled.connect(controls.changed)
+    controls.add_row("", controls.same_colours)
+    return controls.same_colours
+
+
 # Highlight selector default: colour every category (no single-category focus).
 HL_NONE = "(show all categories)"
 
@@ -81,6 +108,7 @@ class _UMAPControls(FigureControls):
         self.colours.addItems(PALETTE_NAMES)
         self.colours.currentIndexChanged.connect(self.changed)
         self.add_row("Colours:", self.colours)
+        add_same_colours(self)
 
         # Category names written on the plot, or a legend beside it.
         self.labels = QComboBox()
@@ -191,6 +219,7 @@ class UMAPPage(FigurePage):
         if not col or col not in adata.obs.columns:
             return None
         labels = adata.obs[col].astype(str).values
+        study = self._study_dir() if ctrl.same_colours.isChecked() else None
 
         # Highlight mode: colour only one category, grey the rest.
         on_plot = ctrl.labels.currentText() == LABELS_ON_PLOT
@@ -201,13 +230,14 @@ class UMAPPage(FigurePage):
             def _render(coords=coords, labels=labels, hl=hl, title=title,
                         embed_name=embed_name, figsize=figsize,
                         point_size=point_size, font_sizes=font_sizes, scheme=scheme,
-                        on_plot=on_plot):
+                        on_plot=on_plot, study=study, col=col):
                 from kosmic.visualisation.scrna.umap import create_highlight_plot
                 return create_highlight_plot(
                     coords, labels, [hl], title=title,
                     embedding_name=embed_name, figsize=figsize,
                     point_size=point_size, font_sizes=font_sizes, scheme=scheme,
                     labels_on_plot=on_plot,
+                    colours=category_colours_for(labels, scheme, study, col),
                 )
             return _render
 
@@ -216,12 +246,13 @@ class UMAPPage(FigurePage):
         def _render(coords=coords, labels=labels, title=title,
                     embed_name=embed_name, figsize=figsize,
                     point_size=point_size, font_sizes=font_sizes, scheme=scheme,
-                    on_plot=on_plot):
+                    on_plot=on_plot, study=study, col=col):
             from kosmic.visualisation.scrna.umap import create_embedding_plot
             return create_embedding_plot(
                 coords, labels, title=title, embedding_name=embed_name,
                 figsize=figsize, point_size=point_size, font_sizes=font_sizes,
                 scheme=scheme, labels_on_plot=on_plot,
+                colours=category_colours_for(labels, scheme, study, col),
             )
         return _render
 

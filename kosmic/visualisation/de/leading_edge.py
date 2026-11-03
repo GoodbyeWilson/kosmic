@@ -24,6 +24,9 @@ from kosmic.visualisation.style import FG, FG_SECONDARY, MISSING_COLOR, divergin
 #: Colour for genes a column did not test.
 UNTESTED_COLOR = MISSING_COLOR
 
+#: The colour bar's label when none is given.
+LFC_LABEL = 'Log₂ fold change'
+
 
 def leading_edge_genes(leading_edge, ranking: pd.Series, nes: float,
                        n: int = 15) -> list[str]:
@@ -107,7 +110,7 @@ def _wrap_title(text: str, width: int) -> str:
 
 def create_leading_edge_heatmap(blocks, *, vmax: float | None = None, alpha: float = 0.05,
                                 gap_before=None, title=None,
-                                colour_label='Log$_2$ fold change',
+                                colour_label=None,
                                 figsize=None, font_sizes=None):
     """Heatmap of leading-edge genes (rows) by dataset (columns).
 
@@ -194,7 +197,7 @@ def create_leading_edge_heatmap(blocks, *, vmax: float | None = None, alpha: flo
                      fontweight='bold', color=FG)
     cb = fig.colorbar(im, ax=list(axes), shrink=min(0.6, 6 / max(sum(heights), 1) + 0.3),
                       extend='both')
-    cb.set_label(colour_label, fontsize=font_sizes['colorbar_label'], color=FG)
+    cb.set_label(colour_label or LFC_LABEL, fontsize=font_sizes['colorbar_label'], color=FG)
     cb.ax.tick_params(labelsize=font_sizes['colorbar_tick'], colors=FG)
     cb.outline.set_visible(False)
     return fig

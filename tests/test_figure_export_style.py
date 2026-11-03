@@ -46,6 +46,38 @@ def test_svg_text_is_text(tmp_path):
     assert '<text' in svg and 'Label' in svg
 
 
+def test_no_figure_label_uses_mathtext():
+    """Mathtext ('Log$_2$') places every letter separately, so an exported
+    label opens in a vector editor as single letters. Labels write
+    subscripts and the minus sign as Unicode ('Log₂', '−log₁₀') instead."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / 'kosmic'
+    pattern = re.compile(r"\$[_^\\-]")
+    found = [f'{p.relative_to(root)}:{i}'
+             for folder in ('visualisation', 'gui/figure_export')
+             for p in (root / folder).rglob('*.py')
+             for i, line in enumerate(p.read_text(encoding='utf-8').splitlines(), 1)
+             if pattern.search(line) and not line.lstrip().startswith('#')]
+    assert not found, found
+
+
+def test_leading_edge_labels_export_as_whole_words(tmp_path):
+    import re
+    import pandas as pd
+    from kosmic.visualisation.de.leading_edge import (
+        create_leading_edge_heatmap, leading_edge_table,
+    )
+    de = pd.DataFrame({'names': ['XBP1', 'HSPA5'], 'logfoldchanges': [1.0, -0.5],
+                       'pvals_adj': [0.01, 0.2]})
+    lfc, padj = leading_edge_table(['XBP1', 'HSPA5'], [('Study', de, 'pvals_adj')])
+    fig = create_leading_edge_heatmap([{'title': 'SET (NES +2.1)', 'lfc': lfc, 'padj': padj}])
+    svg = save_figure(fig, tmp_path / 'le.svg', dpi=72).read_text(encoding='utf-8')
+    assert '<tspan' not in svg
+    texts = re.findall(r'<text[^>]*>([^<]*)</text>', svg)
+    assert 'Log₂ fold change' in texts
+
+
 def test_background_is_white(tmp_path):
     out = save_figure(_figure(), tmp_path / 'fig.png', dpi=72)
     corner = plt.imread(out)[0, 0, :3]

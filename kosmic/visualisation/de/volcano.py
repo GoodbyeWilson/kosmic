@@ -128,9 +128,9 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
                neg_log10_pvals.loc[i]) for i in genes_to_label]
 
     stat = 'P' if is_nominal else 'FDR'
-    ax.set_xlabel(xlabel or f'Log$_2$ fold change ({disease_cond} vs {control_cond})',
+    ax.set_xlabel(xlabel or f'Log₂ fold change ({disease_cond} vs {control_cond})',
                   fontsize=font_sizes['axis_label'])
-    ax.set_ylabel(f'$-$Log$_{{10}}$ {stat}', fontsize=font_sizes['axis_label'])
+    ax.set_ylabel(f'−log₁₀ {stat}', fontsize=font_sizes['axis_label'])
 
     headline = title or 'Differential Expression'
     if is_nominal:

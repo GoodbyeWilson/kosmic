@@ -174,7 +174,7 @@ def create_gene_bar_chart(de_results, pathway_name, pathway_genes,
         pval_text = ''
         if 'pvals_adj' in row.index and pd.notna(row['pvals_adj']):
             pval_text = f'  (padj={row["pvals_adj"]:.2e})'
-        ax.text(np.abs(lfc) + 0.02, i, f'log2FC={lfc:+.2f}{pval_text}',
+        ax.text(np.abs(lfc) + 0.02, i, f'log₂FC = {lfc:+.2f}{pval_text}',
                 va='center', fontsize=font_sizes['annotation'], fontweight='bold',
                 color=UP_COLOR if lfc > 0 else DOWN_COLOR)
 

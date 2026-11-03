@@ -28,6 +28,10 @@ Each run is recorded in the provenance, so the methods state which gene sets wer
 
 An enrichment run describes the DE result or pooled gene list it was run on. When Gene DE, or the gene meta-analysis, is run again, the enrichment runs made before it no longer describe the current result: the methods leave them out and say how many were left out. They remain in the provenance file. Run the enrichment again to include it.
 
+## GSEA p-values and FDR
+
+A library GSEA run estimates each gene set's p-value and FDR from 1,000 permutations of the gene sets. When none of the permutations reaches the gene set's observed enrichment score, the estimate is 0, which means the value is below 0.001 rather than zero. The results table, the bar plot and the figures show such a value as < 0.001; the saved results table keeps the 0.
+
 ## What is saved
 
 The results of each run are saved for the Figures workspace, which can then draw them without the run in memory: an over-representation run as `enrichment_results.csv`, and a library GSEA run as its results table with the running-enrichment curves beside it. A DE-workspace run is saved in the study's `results/de_analysis/pathway_scoring/` folder, a meta-analysis run in the selection's folder under `meta_analysis/`. Each run replaces the previous one of its kind, except that a meta-analysis library GSEA run is saved per library.

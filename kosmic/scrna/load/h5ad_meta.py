@@ -67,6 +67,52 @@ def read_obs_columns(h5ad_path) -> list[str]:
         return [k for k in g.keys() if k != idx]
 
 
+def read_obs_categories(h5ad_path, column: str) -> list[str]:
+    """The distinct values of one obs column, as strings: the stored
+    categories of a categorical column (the codes are not read), else the
+    unique values. Empty when the file has no such column."""
+    import h5py
+    from anndata.io import read_elem
+
+    with file_lock(h5ad_path).reading(), h5py.File(str(h5ad_path), 'r') as f:
+        node = f['obs'].get(column) if 'obs' in f else None
+        if node is None:
+            return []
+        if isinstance(node, h5py.Group) and 'categories' in node:
+            values = read_elem(node['categories'])
+        else:
+            values = pd.unique(np.asarray(read_elem(node)))
+    return sorted({str(v) for v in values if not pd.isna(v)})
+
+
+_project_categories_cache: dict = {}
+
+
+def project_categories(study_dir, column: str) -> list[str]:
+    """The values of obs 'column' across every study of the project that
+    holds 'study_dir' (the atlas '_master' included), sorted, so a value
+    can be given the same colour in each study's figures. Each file's
+    values are cached until it changes."""
+    from kosmic.paths import list_studies
+
+    project = Path(study_dir).parent
+    found: set[str] = set()
+    for name in list_studies(project):
+        path = registered_h5ad(project / name)
+        if path is None:
+            continue
+        try:
+            st = path.stat()
+            key = (str(path), st.st_mtime_ns, st.st_size, column)
+            if key not in _project_categories_cache:
+                _project_categories_cache[key] = read_obs_categories(path, column)
+            found.update(_project_categories_cache[key])
+        except OSError:
+            # A file being replaced or copied: leave its values out.
+            continue
+    return sorted(found)
+
+
 def read_shape(h5ad_path) -> Tuple[int, int]:
     """(n_obs, n_vars) from the file's X without reading it."""
     import h5py
