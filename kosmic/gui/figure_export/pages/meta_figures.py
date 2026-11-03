@@ -114,7 +114,7 @@ class MetaVolcanoPage(MetaFigurePage):
             from kosmic.visualisation.de.volcano import create_volcano_plot
             return create_volcano_plot(
                 dr, '', '', title=headline, subtitle=sub,
-                xlabel='Pooled Log$_2$ fold change', max_labels=ml,
+                xlabel='Pooled log₂ fold change', max_labels=ml,
                 logfc_threshold=gate,
                 point_size=ps, figsize=sz, font_sizes=f)
         return _render

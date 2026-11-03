@@ -107,7 +107,7 @@ def _wrap_title(text: str, width: int) -> str:
 
 def create_leading_edge_heatmap(blocks, *, vmax: float | None = None, alpha: float = 0.05,
                                 gap_before=None, title=None,
-                                colour_label='Log$_2$ fold change',
+                                colour_label='Log₂ fold change',
                                 figsize=None, font_sizes=None):
     """Heatmap of leading-edge genes (rows) by dataset (columns).
 

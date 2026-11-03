@@ -161,7 +161,7 @@ def create_summary_figure(summary_df, dataset_name, disease_label, control_label
     ax.axis('off')
 
     col_x = [0.3, 5.0, 6.6, 8.0, 9.3]
-    col_labels = [group_singular, 'Mean log$_2$FC\n(sig. genes)',
+    col_labels = [group_singular, 'Mean log₂FC\n(sig. genes)',
                   'Sig. up', 'Sig. down', 'Total']
 
     lfc_cmap = diverging_cmap()
