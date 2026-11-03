@@ -2,8 +2,6 @@
 from kosmic.visualisation.scrna.umap import (
     create_embedding_plot,
     create_highlight_plot,
-    create_overview_figure,
-    create_scatter_plots,
 )
 from kosmic.visualisation.scrna.clustree import create_clustree_figure
 from kosmic.visualisation.scrna.variable_genes import (
@@ -14,8 +12,6 @@ from kosmic.visualisation.scrna.variable_genes import (
 __all__ = [
     "create_embedding_plot",
     "create_highlight_plot",
-    "create_overview_figure",
-    "create_scatter_plots",
     "create_clustree_figure",
     "compute_variable_genes",
     "create_variable_gene_plot",

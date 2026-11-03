@@ -13,8 +13,6 @@ from kosmic.visualisation.de.dataset_summary import (
 from kosmic.visualisation.de.dotplots import (
     pathway_scores_to_sample_df,
     create_patient_dotplot,
-    create_gene_dotplot,
-    create_expression_dotplot,
 )
 from kosmic.visualisation.de.enrichment import create_enrichment_bar_plot
 
@@ -29,7 +27,5 @@ __all__ = [
     "create_summary_figure",
     "pathway_scores_to_sample_df",
     "create_patient_dotplot",
-    "create_gene_dotplot",
-    "create_expression_dotplot",
     "create_enrichment_bar_plot",
 ]

@@ -5,8 +5,6 @@ from kosmic.visualisation.style import apply_export_rcparams, save_figure
 from kosmic.visualisation.scrna.umap import (
     create_embedding_plot,
     create_highlight_plot,
-    create_overview_figure,
-    create_scatter_plots,
 )
 from kosmic.visualisation.scrna.clustree import create_clustree_figure
 from kosmic.visualisation.scrna.variable_genes import (
@@ -30,12 +28,8 @@ from kosmic.visualisation.de.dataset_summary import (
 from kosmic.visualisation.de.dotplots import (
     pathway_scores_to_sample_df,
     create_patient_dotplot,
-    create_gene_dotplot,
-    create_expression_dotplot,
 )
 from kosmic.visualisation.de.enrichment import create_enrichment_bar_plot
-from kosmic.visualisation.meta.heatmap_forest import create_multi_dataset_figure
-from kosmic.visualisation.meta.forest_plot import create_family_forest_plot
 
 # Every figure saved after this import keeps its text editable (ADR-009).
 apply_export_rcparams()
@@ -73,8 +67,6 @@ __all__ = [
     "load_de_results",
     "create_embedding_plot",
     "create_highlight_plot",
-    "create_overview_figure",
-    "create_scatter_plots",
     "create_clustree_figure",
     "compute_variable_genes",
     "create_variable_gene_plot",
@@ -88,9 +80,5 @@ __all__ = [
     "create_summary_figure",
     "pathway_scores_to_sample_df",
     "create_patient_dotplot",
-    "create_gene_dotplot",
-    "create_expression_dotplot",
     "create_enrichment_bar_plot",
-    "create_multi_dataset_figure",
-    "create_family_forest_plot",
 ]
