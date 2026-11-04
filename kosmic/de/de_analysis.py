@@ -1952,11 +1952,18 @@ def _run_deseq2(pseudobulk_matrix, sample_df, gene_names,
     disease_mask = metadata_df['condition'] == 'disease'
     control_mask = metadata_df['condition'] == 'control'
 
+    # The descriptive columns (group means, variances, Cohen's d) are on
+    # DESeq2's normalised counts (counts / size factor). Raw pseudobulk
+    # counts scale with each sample's cell number and depth, which made a
+    # gene's spread between donors look many times larger than it is.
+    size_factors = np.asarray(dds.obs['size_factors'], dtype=float)
+    norm_df = counts_df.div(size_factors, axis=0)
+
     de_list = []
     for gene in results.index:
         row = results.loc[gene]
-        d_vals = counts_df.loc[disease_mask.values, gene].values.astype(float)
-        c_vals = counts_df.loc[control_mask.values, gene].values.astype(float)
+        d_vals = norm_df.loc[disease_mask.values, gene].values.astype(float)
+        c_vals = norm_df.loc[control_mask.values, gene].values.astype(float)
 
         d_mean, c_mean = np.mean(d_vals), np.mean(c_vals)
         d_var = np.var(d_vals, ddof=1) if len(d_vals) > 1 else 0.0
