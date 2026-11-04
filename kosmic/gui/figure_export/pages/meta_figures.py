@@ -72,13 +72,15 @@ class MetaFigurePage(FigurePage):
 # -- Volcano -----------------------------------------------------------------
 
 class _MetaVolcanoControls(FigureControls):
-    def __init__(self, max_labels: int, point_size: int):
+    def __init__(self, max_labels: int, point_size: int, genes: bool = True):
         super().__init__(8, 8)
         self.max_labels = QSpinBox()
         self.max_labels.setRange(0, 60)
         self.max_labels.setValue(max_labels)
         self.max_labels.valueChanged.connect(self.changed)
         self.add_row("Max labels:", self.max_labels)
+        # Pathways have descriptive names; the option is for genes only.
+        self.named_labels = self.add_named_labels() if genes else None
 
         self.point_size = QSpinBox()
         self.point_size.setRange(1, 30)
@@ -95,7 +97,8 @@ class MetaVolcanoPage(MetaFigurePage):
     HEADLINE = "Meta-Analysed Differential Gene Expression"
 
     def _build_controls(self):
-        return _MetaVolcanoControls(max_labels=10, point_size=3)
+        return _MetaVolcanoControls(max_labels=10, point_size=3,
+                                    genes=self.LEVEL == 'gene')
 
     def _make_render_func(self):
         df = self._results()
@@ -104,17 +107,19 @@ class MetaVolcanoPage(MetaFigurePage):
         dr = df[['names', 'logfoldchanges', 'fdr']].rename(columns={'fdr': 'pvals_adj'})
         ctrl = self._controls
         ml, ps = ctrl.max_labels.value(), ctrl.point_size.value() ** 2
+        unnamed = ctrl.named_labels is None or not ctrl.named_labels.isChecked()
         gate = ctrl.lfc_gate.value()
         sub, headline = self._selection_label(), self.HEADLINE
         figsize = ctrl.figsize.get_figsize() or (8, 8)
         font_sizes = self._font_sizes()
 
-        def _render(dr=dr, ml=ml, ps=ps, gate=gate, sub=sub, headline=headline,
-                    sz=figsize, f=font_sizes):
+        def _render(dr=dr, ml=ml, unnamed=unnamed, ps=ps, gate=gate, sub=sub,
+                    headline=headline, sz=figsize, f=font_sizes):
             from kosmic.visualisation.de.volcano import create_volcano_plot
             return create_volcano_plot(
                 dr, '', '', title=headline, subtitle=sub,
-                xlabel='Pooled log₂ fold change', max_labels=ml,
+                xlabel='Pooled log2 fold change', max_labels=ml,
+                label_unnamed=unnamed,
                 logfc_threshold=gate,
                 point_size=ps, figsize=sz, font_sizes=f)
         return _render

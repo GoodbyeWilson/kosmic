@@ -98,7 +98,7 @@ def create_bubble_plot(stats_df, disease_label, control_label,
                 for c, lab in ((UP_COLOR, f'Up, FDR < {fdr_threshold:g}'),
                                (DOWN_COLOR, f'Down, FDR < {fdr_threshold:g}'),
                                (NS_COLOR, 'Not significant'))]
-    ax.legend(handles=handles, title='−log₁₀ FDR', frameon=False,
+    ax.legend(handles=handles, title='−log10 FDR', frameon=False,
               fontsize=font_sizes['legend'], title_fontsize=font_sizes['legend'],
               loc='upper left', bbox_to_anchor=(1.02, 1), labelspacing=1.2,
               borderaxespad=0)

@@ -21,7 +21,7 @@ def _terms(fdr):
 def test_enrichment_axis_names_the_statistic():
     fig = create_enrichment_bar_plot(_terms([0.001, 0.01]),
                                      significance_label='elim P (uncorrected)')
-    assert fig.axes[0].get_xlabel() == '−log₁₀ elim P (uncorrected)'
+    assert fig.axes[0].get_xlabel() == '−log10 elim P (uncorrected)'
     plt.close(fig)
 
 

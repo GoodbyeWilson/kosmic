@@ -25,7 +25,7 @@ from kosmic.visualisation.style import FG, FG_SECONDARY, MISSING_COLOR, divergin
 UNTESTED_COLOR = MISSING_COLOR
 
 #: The colour bar's label when none is given.
-LFC_LABEL = 'Log₂ fold change'
+LFC_LABEL = 'Log2 fold change'
 
 
 def leading_edge_genes(leading_edge, ranking: pd.Series, nes: float,

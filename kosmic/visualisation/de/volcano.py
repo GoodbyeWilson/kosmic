@@ -4,6 +4,8 @@ Volcano Plot Rendering
 Publication-quality volcano plots for DE results.
 """
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -12,6 +14,22 @@ from kosmic import DEFAULT_FDR
 from kosmic.visualisation.labels import place_labels
 from kosmic.visualisation.style import DOWN_COLOR, FG, NS_COLOR, UP_COLOR
 
+# Genes with no descriptive symbol: Ensembl IDs, GenBank clone names
+# (AC004936.1, AL008633.1), older clone names (RP11-34P13.3), numbered
+# lncRNAs (LINC00670) and antisense, divergent, intronic and overlapping
+# transcripts named after a neighbouring gene (CDC42EP3-AS1, CRIM1-DT).
+_UNNAMED_GENE = re.compile(
+    r'^ENS[A-Z]*G\d+'
+    r'|^[A-Z]{1,2}\d{5,6}\.\d+$'
+    r'|^(RP|CT[ABCD]|XX)\w*-[\w-]+\.\d+$'
+    r'|^LINC\d+'
+    r'|-(AS|IT|OT)\d*$|-DT$')
+
+
+def is_unnamed_gene(name) -> bool:
+    """True for a gene with no descriptive symbol (see '_UNNAMED_GENE')."""
+    return bool(_UNNAMED_GENE.search(str(name)))
+
 
 def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
                         pval_col='pvals_adj', pval_threshold=DEFAULT_FDR,
@@ -19,7 +37,7 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
                         genes_of_interest=None, max_labels=10,
                         font_sizes=None, point_size=9,
                         color_scheme=0, x_limit=None, y_limit=None, title=None,
-                        xlabel=None, subtitle=None):
+                        xlabel=None, subtitle=None, label_unnamed=True):
     """Create a volcano plot from DE results.
 
     Parameters
@@ -55,6 +73,12 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
     xlabel, subtitle : str, optional
         Replace the default x-axis label and the title's second line (e.g.
         for pooled meta-analysis results).
+    label_unnamed : bool
+        If False, the automatic labels pass over genes with no descriptive
+        symbol (Ensembl IDs, clone names such as AC004936.1, LINC and
+        antisense transcripts; see 'is_unnamed_gene') and label the next
+        named gene. The genes are still plotted. *genes_of_interest* are
+        labelled either way.
 
     Returns
     -------
@@ -111,26 +135,29 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
         fc_lim = max(float(lfc.abs().max()) * 1.05, logfc_threshold * 1.5, 0.5)
     ax.set_xlim(-fc_lim, fc_lim)
     if y_limit and y_limit > 0:
-        ax.set_ylim(top=float(y_limit))
+        y_top = float(y_limit)
     else:
         # Headroom for labels at the top.
         y_max = float(neg_log10_pvals.max()) if len(neg_log10_pvals) else 1.0
-        if np.isfinite(y_max) and y_max > 0:
-            ax.set_ylim(bottom=0, top=y_max * 1.1)
+        y_top = y_max * 1.1 if np.isfinite(y_max) and y_max > 0 else 1.0
+    # The axis starts a little below 0: genes with P = 1 sit at 0, and with
+    # the axis at 0 half of each point is clipped, which a vector editor
+    # shows below the axis once it releases the clipping mask.
+    ax.set_ylim(bottom=-0.02 * y_top, top=y_top)
 
     ax.axhline(y=-np.log10(pval_threshold), color=FG, linestyle=':', linewidth=0.8)
 
     genes_to_label = _select_genes_to_label(
         de_results, pval_col, pval_threshold, logfc_threshold,
-        genes_of_interest, max_labels,
+        genes_of_interest, max_labels, label_unnamed,
     )
     labels = [(de_results.loc[i, 'names'], de_results.loc[i, 'logfoldchanges'],
                neg_log10_pvals.loc[i]) for i in genes_to_label]
 
     stat = 'P' if is_nominal else 'FDR'
-    ax.set_xlabel(xlabel or f'Log₂ fold change ({disease_cond} vs {control_cond})',
+    ax.set_xlabel(xlabel or f'Log2 fold change ({disease_cond} vs {control_cond})',
                   fontsize=font_sizes['axis_label'])
-    ax.set_ylabel(f'−log₁₀ {stat}', fontsize=font_sizes['axis_label'])
+    ax.set_ylabel(f'−log10 {stat}', fontsize=font_sizes['axis_label'])
 
     headline = title or 'Differential Expression'
     if is_nominal:
@@ -151,7 +178,7 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
 
 
 def _select_genes_to_label(de_results, pval_col, pval_threshold, logfc_threshold,
-                           genes_of_interest, max_labels):
+                           genes_of_interest, max_labels, label_unnamed=True):
     """Select gene indices to label on volcano plot."""
     genes_of_interest = genes_of_interest or []
 
@@ -170,6 +197,8 @@ def _select_genes_to_label(de_results, pval_col, pval_threshold, logfc_threshold
         (de_results[pval_col] < pval_threshold) &
         (de_results['logfoldchanges'].abs() > logfc_threshold)
     ]
+    if not label_unnamed:
+        sig = sig[~sig['names'].map(is_unnamed_gene)]
     if len(sig) > 0:
         for subset in [sig[sig['logfoldchanges'] > 0], sig[sig['logfoldchanges'] < 0]]:
             if len(subset) > 0:
