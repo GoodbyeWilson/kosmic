@@ -11,10 +11,15 @@ from pathlib import Path
 # Type 42 (TrueType) keeps PDF and PostScript text as text; matplotlib's
 # default Type 3 fonts are imported into vector graphics editors as outlines.
 # svg.fonttype 'none' writes SVG text as <text> elements instead of paths.
+# Figures use Arial; matplotlib's own default is DejaVu Sans. Helvetica and
+# Liberation Sans (metric-compatible with Arial) stand in where Arial is not
+# installed.
 EXPORT_RCPARAMS = {
     'pdf.fonttype': 42,
     'ps.fonttype': 42,
     'svg.fonttype': 'none',
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Helvetica', 'Liberation Sans', 'DejaVu Sans'],
 }
 
 #: Scatter collections with at least this many points are rasterised on
@@ -83,6 +88,23 @@ def rasterize_dense_collections(fig, threshold: int = RASTERIZE_THRESHOLD) -> in
     return n
 
 
+#: OpenType features switched off in exported text. Matplotlib 3.11 shapes
+#: text with HarfBuzz, which joins 'fi' and 'fl' into one ligature glyph in
+#: fonts that have one (DejaVu Sans, Liberation Sans). A PDF writes that
+#: glyph as a separate piece of text, so the word opens in a vector editor
+#: split around it ('signi fi cant').
+NO_LIGATURES = ('-liga', '-clig', '-dlig')
+
+
+def disable_ligatures(fig) -> None:
+    """Switch off ligatures in every text object of *fig*."""
+    from matplotlib.text import Text
+
+    for text in fig.findobj(Text):
+        own = [f for f in (text.get_fontfeatures() or ()) if f not in NO_LIGATURES]
+        text.set_fontfeatures([*own, *NO_LIGATURES])
+
+
 def save_figure(fig, path, dpi: int, close: bool = True) -> Path:
     """Save *fig* to *path* in the format given by its suffix.
 
@@ -100,6 +122,7 @@ def save_figure(fig, path, dpi: int, close: bool = True) -> Path:
 
     apply_export_rcparams()
     rasterize_dense_collections(fig)
+    disable_ligatures(fig)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fig.savefig(path, format=fmt, dpi=dpi, bbox_inches='tight',
