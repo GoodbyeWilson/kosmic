@@ -72,3 +72,17 @@ class FigureControls(QWidget):
         self.lfc_gate.valueChanged.connect(self.changed)
         self.add_row("Min |log2FC|:", self.lfc_gate)
         return self.lfc_gate
+
+    def add_named_labels(self):
+        """Add 'Label named genes only' as 'self.named_labels', checked: the
+        automatic gene labels pass over genes with no descriptive symbol."""
+        from PyQt6.QtWidgets import QCheckBox
+        self.named_labels = QCheckBox("Label named genes only")
+        self.named_labels.setChecked(True)
+        self.named_labels.setToolTip(
+            "Skip genes with no descriptive symbol when choosing labels:\n"
+            "Ensembl IDs, clone names such as AC004936.1, LINC and antisense\n"
+            "(-AS1) transcripts. The genes are still plotted.")
+        self.named_labels.toggled.connect(self.changed)
+        self.add_row("", self.named_labels)
+        return self.named_labels

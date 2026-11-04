@@ -12,7 +12,8 @@ definition the Meta-Analysis workspace uses when it counts significant
 results. **Min |log2FC|** (default *Off*) also requires the pooled log2
 fold change to exceed a value, e.g. 0.25. The dotted line marks the FDR
 threshold, and the most significant items are labelled without overlap,
-as on the [Volcano](volcano.md) page.
+as on the [Volcano](volcano.md) page. The gene-level figure has the same
+**Label named genes only** option.
 
 The figure shows whatever the Meta-Analysis workspace currently holds. To
 draw another selection, run or reload its meta-analysis first.

@@ -23,6 +23,7 @@ class _VolcanoControls(FigureControls):
         self.max_labels.setValue(10)
         self.max_labels.valueChanged.connect(self.changed)
         self.add_row("Max labels:", self.max_labels)
+        self.add_named_labels()
 
         self.point_size = QSpinBox()
         self.point_size.setRange(1, 30)
@@ -84,6 +85,7 @@ class VolcanoPage(FigurePage):
         c = de.control_label
         dn = Path(de.h5ad_path).stem if getattr(de, 'h5ad_path', None) else "Dataset"
         ml = ctrl.max_labels.value()
+        unnamed = not ctrl.named_labels.isChecked()
         ps = ctrl.point_size.value() ** 2
         cs = ctrl.color_scheme.currentIndex()
         pcol = 'pvals' if ctrl.pval_type.currentIndex() == 1 else 'pvals_adj'
@@ -93,13 +95,13 @@ class VolcanoPage(FigurePage):
         figsize = ctrl.figsize.get_figsize() or (8, 8)
         font_sizes = self._font_sizes()
 
-        def _render(dr=dr, d=d, c=c, dn=dn, ml=ml, ps=ps, cs=cs, pcol=pcol,
-                    xlim=xlim, ylim=ylim, gate=gate, figsize=figsize,
+        def _render(dr=dr, d=d, c=c, dn=dn, ml=ml, unnamed=unnamed, ps=ps, cs=cs,
+                    pcol=pcol, xlim=xlim, ylim=ylim, gate=gate, figsize=figsize,
                     font_sizes=font_sizes):
             from kosmic.visualisation.de.volcano import create_volcano_plot
             return create_volcano_plot(
                 dr, d, c, dataset_name=dn, pval_col=pcol,
-                max_labels=ml, point_size=ps, color_scheme=cs,
+                max_labels=ml, label_unnamed=unnamed, point_size=ps, color_scheme=cs,
                 x_limit=xlim, y_limit=ylim, logfc_threshold=gate,
                 font_sizes=font_sizes, figsize=figsize,
             )
