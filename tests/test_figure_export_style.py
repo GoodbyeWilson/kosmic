@@ -46,14 +46,50 @@ def test_svg_text_is_text(tmp_path):
     assert '<text' in svg and 'Label' in svg
 
 
+def test_text_is_set_in_arial(tmp_path):
+    """Matplotlib's default font is DejaVu Sans; exported figures use Arial."""
+    from matplotlib import font_manager
+    try:
+        font_manager.findfont('Arial', fallback_to_default=False)
+    except ValueError:
+        pytest.skip('Arial is not installed')
+    pdf = save_figure(_figure(), tmp_path / 'fig.pdf', dpi=72).read_bytes()
+    assert b'Arial' in pdf and b'DejaVu' not in pdf
+    svg = save_figure(_figure(), tmp_path / 'fig.svg', dpi=72).read_text()
+    assert "font-family: 'Arial'" in svg
+
+
+def test_ligatures_do_not_split_words(tmp_path, monkeypatch):
+    """DejaVu Sans joins 'fi' into a ligature, which a PDF wrote as separate
+    text: 'significant' opened in a vector editor as 'signi fi cant'."""
+    import re
+    import zlib
+    from kosmic.visualisation import style
+    monkeypatch.setitem(style.EXPORT_RCPARAMS, 'font.sans-serif', ['DejaVu Sans'])
+    fig = _figure()
+    fig.axes[0].set_xlabel('Studies significant')
+    pdf = save_figure(fig, tmp_path / 'fig.pdf', dpi=72).read_bytes()
+    style.apply_export_rcparams()   # monkeypatch restores the dict, not rcParams
+    words = []
+    for stream in re.findall(rb'stream\r?\n(.*?)endstream', pdf, re.S):
+        try:
+            content = zlib.decompress(stream.rstrip())
+        except zlib.error:
+            continue
+        for run in re.findall(rb'\[(.*?)\]\s*TJ', content, re.S):
+            words.append(b''.join(re.findall(rb'\(([^)]*)\)', run)).replace(b'\x00', b''))
+    assert b'Studies significant' in words, words
+
+
 def test_no_figure_label_uses_mathtext():
     """Mathtext ('Log$_2$') places every letter separately, so an exported
-    label opens in a vector editor as single letters. Labels write
-    subscripts and the minus sign as Unicode ('Log₂', '−log₁₀') instead."""
+    label opens in a vector editor as single letters. Unicode subscript
+    digits ('Log₂') are not in Arial and draw as empty boxes. Labels write
+    plain digits and the Unicode minus sign instead ('Log2', '−log10')."""
     import re
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / 'kosmic'
-    pattern = re.compile(r"\$[_^\\-]")
+    pattern = re.compile(r"\$[_^\\-]|[₀-₉]")
     found = [f'{p.relative_to(root)}:{i}'
              for folder in ('visualisation', 'gui/figure_export')
              for p in (root / folder).rglob('*.py')
@@ -75,7 +111,7 @@ def test_leading_edge_labels_export_as_whole_words(tmp_path):
     svg = save_figure(fig, tmp_path / 'le.svg', dpi=72).read_text(encoding='utf-8')
     assert '<tspan' not in svg
     texts = re.findall(r'<text[^>]*>([^<]*)</text>', svg)
-    assert 'Log₂ fold change' in texts
+    assert 'Log2 fold change' in texts
 
 
 def test_background_is_white(tmp_path):

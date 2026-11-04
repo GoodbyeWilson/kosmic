@@ -85,7 +85,7 @@ def create_enrichment_dot_plot(enrichment_df, *, fdr_threshold=DEFAULT_FDR, top_
     ax.spines['right'].set_visible(False)
 
     cb = fig.colorbar(pts, ax=ax, shrink=0.45, pad=0.02, anchor=(0, 1))
-    cb.set_label(f'−log₁₀ {significance_label}', fontsize=font_sizes['legend'])
+    cb.set_label(f'−log10 {significance_label}', fontsize=font_sizes['legend'])
     cb.ax.tick_params(labelsize=font_sizes['tick'])
     steps = sorted({int(v) for v in np.quantile(count, [0, 0.5, 1])})
     handles = [ax.scatter([], [], s=area(v), color='white', edgecolors=FG,
@@ -171,7 +171,7 @@ def create_enrichment_bar_plot(
     ax.set_yticks(range(len(terms)))
     ax.set_yticklabels(terms, fontsize=font_sizes.get('tick', 9))
     ax.invert_yaxis()
-    ax.set_xlabel(f'−log₁₀ {significance_label}', fontsize=font_sizes.get('axis_label', 10))
+    ax.set_xlabel(f'−log10 {significance_label}', fontsize=font_sizes.get('axis_label', 10))
     ax.set_title(title, fontsize=font_sizes.get('title', 12), fontweight='bold')
 
     ax.tick_params(colors=fg_color)

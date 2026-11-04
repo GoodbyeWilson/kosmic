@@ -168,7 +168,7 @@ def create_term_chord(members, lfc, order='lfc', title=None, figsize=None,
 
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax,
                       shrink=0.3, pad=0.02, location='left', extend='both')
-    cb.set_label('Log₂ fold change', fontsize=font_sizes['legend'])
+    cb.set_label('Log2 fold change', fontsize=font_sizes['legend'])
     cb.ax.tick_params(labelsize=font_sizes['tick'])
     ax.set_xlim(-1.55, 1.75)
     ax.set_ylim(-1.45, 1.45)
@@ -217,7 +217,7 @@ def create_term_grid(members, lfc, order='lfc', title=None, figsize=None,
         s.set_color('#BBBBBB')
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax,
                       shrink=0.8, pad=0.01, extend='both')
-    cb.set_label('Log₂ fold change', fontsize=font_sizes['legend'])
+    cb.set_label('Log2 fold change', fontsize=font_sizes['legend'])
     cb.ax.tick_params(labelsize=font_sizes['tick'])
     if title:
         ax.set_title(title, fontsize=font_sizes['title'], fontweight='bold')
