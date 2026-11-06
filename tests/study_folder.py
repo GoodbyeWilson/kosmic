@@ -133,6 +133,13 @@ def make_study_folder(root: Path, name: str = 'StudyA', form: str = 'log') -> Pa
     adata = make_adata(form)
     h5ad = processed_data_dir(study) / f'{name}.h5ad'
     adata.write_h5ad(h5ad)
+    # The load and QC steps' cell counts, as the scRNA workflow records them
+    # (QC Violins draws the limits, Cell Filtering the counts).
+    from kosmic import provenance
+    provenance.record_stage(h5ad.parent, name, 'load', {'n_cells': adata.n_obs + 20})
+    provenance.record_stage(h5ad.parent, name, 'qc', {
+        'min_genes': 1, 'max_genes': 0, 'min_counts': 1, 'max_counts': 0, 'max_mt': 4,
+        'n_cells_before': adata.n_obs + 20, 'n_cells_after': adata.n_obs})
     write_manifest(
         study,
         dataset={'file': h5ad.name, 'n_cells': adata.n_obs, 'n_genes': adata.n_vars},

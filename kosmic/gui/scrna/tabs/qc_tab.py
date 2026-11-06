@@ -1896,6 +1896,14 @@ class QCTab(SidebarPage):
         self._doublets_removed = int(n_removed)
         self.adata = adata
         self.main_window.set_adata(adata, str(self.h5ad_path))
+        if hasattr(self.main_window, 'record_provenance'):
+            # Detection is recorded as 'doublets'; this records the cells
+            # removed, so the Cell Filtering figure and Methods count them.
+            self.main_window.record_provenance('doublet_filter', {
+                'n_cells_before': int(adata.n_obs + n_removed),
+                'n_cells_after': int(adata.n_obs),
+                'n_removed': int(n_removed),
+            }, data_changed=True)
 
         self.doublet_status.setText(
             f"Filtered: {n_removed:,} doublets removed, "

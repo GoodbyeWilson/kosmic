@@ -203,6 +203,98 @@ def last_stage(record_or_dir, stage_name: str) -> Optional[dict]:
     return None
 
 
+#: Short names of the stages that remove cells, for the Cell Filtering figure.
+_FILTER_STEP_NAMES = {
+    'filter_dataset': 'Pre-analysis filter',
+    'qc': 'QC limits',
+    'doublet_filter': 'Doublet removal',
+    'qc_recheck': 'QC limits on decontaminated counts',
+    'subset': 'Cell-type subset',
+}
+
+
+def cell_filtering_steps(record: Optional[dict]) -> list:
+    """The cells left after each step that removed cells, oldest first.
+
+    Returns a list of {'step', 'n_cells', 'n_removed'} dicts, starting with
+    the loaded cells ('n_removed' 0). Read from the stages' recorded counts:
+    the latest 'load' gives the starting number (a study loaded again is
+    processed again, so earlier stages no longer describe it); stages with
+    'n_cells_before' and
+    'n_cells_after' give a step when they removed cells (a re-run that
+    removed none is left out). A drop between one recorded count and the
+    next that no stage accounts for is a step too: 'Doublet removal' when it
+    equals the 'n_doublets' of the doublet detection just before it (removal
+    was not recorded before the 'doublet_filter' stage existed), otherwise
+    'Not recorded'. Empty when the record has no load count.
+    """
+    stages = (record or {}).get('stages') or []
+    steps: list = []
+    current = None
+    pending_doublets = None
+
+    def gap_to(n_before):
+        nonlocal current, pending_doublets
+        if current is not None and n_before is not None and n_before < current:
+            removed = current - n_before
+            name = 'Doublet removal' if removed == pending_doublets else 'Not recorded'
+            steps.append({'step': name, 'n_cells': int(n_before), 'n_removed': int(removed)})
+            current = n_before
+            pending_doublets = None
+
+    for entry in stages:
+        stage, params = entry.get('stage'), entry.get('params') or {}
+        if stage == 'load' and params.get('n_cells') is not None:
+            # A later load starts the study again: only the latest run counts.
+            current = int(params['n_cells'])
+            steps = [{'step': 'Loaded', 'n_cells': current, 'n_removed': 0}]
+            pending_doublets = None
+            continue
+        if current is None:
+            continue
+        if stage == 'doublets':
+            pending_doublets = params.get('n_doublets')
+            continue
+        before, after = params.get('n_cells_before'), params.get('n_cells_after')
+        if before is not None and after is not None:
+            gap_to(int(before))
+            if after < before:
+                steps.append({'step': _FILTER_STEP_NAMES.get(stage, stage),
+                              'n_cells': int(after), 'n_removed': int(before - after)})
+            current = int(after)
+            if stage == 'doublet_filter':
+                pending_doublets = None
+        elif params.get('n_cells') is not None:
+            gap_to(int(params['n_cells']))
+    final = ((record or {}).get('fingerprint') or {}).get('n_obs')
+    if final is not None:
+        gap_to(int(final))
+    return steps
+
+
+def qc_limits(record: Optional[dict]) -> dict:
+    """The latest QC step's limits as {metric: {'min': v, 'max': v}}.
+
+    Metrics are the obs columns the QC step filtered on
+    (n_genes_by_counts, total_counts, pct_counts_mt). A limit of 0 or
+    missing means none was applied and is left out. Empty when no QC step
+    is recorded.
+    """
+    params = (last_stage(record, 'qc') or {}).get('params') or {} if record else {}
+    limits: dict = {}
+    for metric, lo, hi in (('n_genes_by_counts', 'min_genes', 'max_genes'),
+                           ('total_counts', 'min_counts', 'max_counts'),
+                           ('pct_counts_mt', None, 'max_mt')):
+        bounds = {}
+        for key, name in (('min', lo), ('max', hi)):
+            value = params.get(name) if name else None
+            if value:
+                bounds[key] = float(value)
+        if bounds:
+            limits[metric] = bounds
+    return limits
+
+
 def combined_counts_layer(record_or_dir) -> Optional[str]:
     """The study layer a combined dataset was built from ('decontX_counts'),
     or None for the original counts or a dataset that was not combined.
@@ -236,6 +328,7 @@ _STAGE_TITLES = {
     'cluster': 'Clustering', 'decontx': 'DecontX decontamination',
     'qc_recheck': 'QC limits re-applied to the decontaminated counts',
     'doublets': 'Doublet detection',
+    'doublet_filter': 'Doublet removal',
     'enrichment': 'Pathway enrichment',
     'annotate': 'Cell-type annotation',
     'annotate_manual': 'Manual cell-type relabelling',
