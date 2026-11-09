@@ -127,6 +127,102 @@ def test_only_dense_scatters_are_rasterised():
     plt.close('all')
 
 
+def _pdf_content(path):
+    import re
+    import zlib
+    raw = path.read_bytes()
+    out = b''
+    for s in re.findall(rb'stream\r?\n(.*?)\r?\nendstream', raw, re.S):
+        try:
+            out += zlib.decompress(s)
+        except zlib.error:
+            pass
+    return out
+
+
+def test_axis_lines_and_ticks_export_black_at_1pt(tmp_path):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    for spine in ax.spines.values():          # a plot that set the old grey
+        spine.set_edgecolor('#333333')
+        spine.set_linewidth(0.8)
+    save_figure(fig, tmp_path / 'fig.pdf', dpi=72, close=False)
+    assert {matplotlib.colors.to_hex(s.get_edgecolor()) for s in ax.spines.values()} == {'#000000'}
+    assert {s.get_linewidth() for s in ax.spines.values()} == {1.0}
+    tick = ax.xaxis.get_major_ticks()[0].tick1line
+    assert matplotlib.colors.to_hex(tick.get_color()) == '#000000'
+    assert tick.get_markeredgewidth() == 1.0
+    plt.close(fig)
+
+
+def test_preview_styles_axes_like_the_export():
+    from kosmic.gui.figure_export.pages._base import _fig_to_png_bytes
+    fig, ax = plt.subplots()
+    ax.spines['left'].set_edgecolor('#333333')
+    _fig_to_png_bytes(fig)
+    assert matplotlib.colors.to_hex(ax.spines['left'].get_edgecolor()) == '#000000'
+
+
+@pytest.mark.parametrize('fmt', ['pdf', 'svg'])
+def test_scatter_points_export_without_a_clip_per_point(tmp_path, fmt):
+    # A vector editor turns a marker placed by reference (a PDF form
+    # object, an SVG <use>) or a clip path on each point into a clipping
+    # mask per point.
+    n = 500
+    out = save_figure(_figure(n), tmp_path / f'fig.{fmt}', dpi=72)
+    if fmt == 'pdf':
+        import re
+        content = _pdf_content(out)
+        assert len(re.findall(rb'\bDo\b', content)) == 0
+        assert len(re.findall(rb'\bW\s+n\b', content)) <= 1
+    else:
+        svg = out.read_text(encoding='utf-8')
+        assert svg.count('clip-path=') <= 1
+        assert svg.count('<use') == 0
+        assert svg.count('<path') >= n
+
+
+def test_artists_reaching_past_the_axes_stay_clipped():
+    from kosmic.visualisation.style import unclip_contained
+    fig, ax = plt.subplots()
+    inside = ax.scatter([1, 2], [1, 2])
+    beyond = ax.scatter([1, 20], [1, 2])
+    ax.set_xlim(0, 5)
+    ax.set_ylim(0, 5)
+    assert unclip_contained(fig) == 1
+    assert not inside.get_clip_on() and beyond.get_clip_on()
+    plt.close(fig)
+
+
+def test_bars_reference_lines_and_segments_inside_the_axes_are_unclipped():
+    from kosmic.visualisation.style import unclip_contained
+    fig, ax = plt.subplots()
+    bars = ax.bar([0, 1, 2], [1, 2, 3])
+    line = ax.axhline(1.5)                      # spans the axes in axes coordinates
+    segs = ax.hlines([0.5, 1.0], 0, 2)
+    legend_dummy = ax.scatter([], [])           # an empty scatter, as size legends use
+    ax.set_xlim(-1, 3)
+    ax.set_ylim(0, 4)
+    unclip_contained(fig)
+    assert not any(b.get_clip_on() for b in bars)
+    assert not line.get_clip_on() and not segs.get_clip_on() and not legend_dummy.get_clip_on()
+    plt.close(fig)
+
+
+def test_volcano_leaves_out_points_beyond_a_set_limit():
+    import pandas as pd
+
+    from kosmic.visualisation.de.volcano import create_volcano_plot
+    de = pd.DataFrame({'names': [f'G{i}' for i in range(6)],
+                       'logfoldchanges': [-6, -1, 0.1, 0.5, 1, 6],
+                       'pvals_adj': [1e-5, 1e-3, 0.5, 0.2, 1e-4, 1e-6]})
+    fig = create_volcano_plot(de, 'D', 'C', x_limit=2, max_labels=0)
+    ax = fig.axes[0]
+    drawn = sum(len(c.get_offsets()) for c in ax.collections)
+    assert drawn == 4                         # the two at |log2FC| 6 are left out
+    plt.close(fig)
+
+
 def test_elbow_plot_does_not_change_global_style():
     # plt.style.use() inside a plotting function turned every later figure
     # dark, which the white export background then made unreadable.

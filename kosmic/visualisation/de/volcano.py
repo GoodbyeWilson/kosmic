@@ -123,17 +123,12 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
     # depends on per-row index lookups.
     sig = (pvals < pval_threshold) & (lfc.abs() > logfc_threshold)
     up, down = sig & (lfc > 0), sig & (lfc < 0)
-    # Not-significant genes first, so coloured points sit on top.
-    for mask, color in ((~sig, NS_COLOR), (down, down_color), (up, up_color)):
-        ax.scatter(lfc[mask], neg_log10_pvals[mask], color=color,
-                   s=point_size, edgecolors='none', linewidth=0)
 
     # x-axis: user-set symmetric limit, else the data range.
     if x_limit and x_limit > 0:
         fc_lim = float(x_limit)
     else:
         fc_lim = max(float(lfc.abs().max()) * 1.05, logfc_threshold * 1.5, 0.5)
-    ax.set_xlim(-fc_lim, fc_lim)
     if y_limit and y_limit > 0:
         y_top = float(y_limit)
     else:
@@ -141,9 +136,19 @@ def create_volcano_plot(de_results, disease_cond, control_cond, dataset_name='',
         y_max = float(neg_log10_pvals.max()) if len(neg_log10_pvals) else 1.0
         y_top = y_max * 1.1 if np.isfinite(y_max) and y_max > 0 else 1.0
     # The axis starts a little below 0: genes with P = 1 sit at 0, and with
-    # the axis at 0 half of each point is clipped, which a vector editor
-    # shows below the axis once it releases the clipping mask.
-    ax.set_ylim(bottom=-0.02 * y_top, top=y_top)
+    # the axis at 0 half of each point would be cut off at the axis.
+    y_bottom = -0.02 * y_top
+    # Points beyond a set limit are left out rather than clipped, so every
+    # point drawn lies inside the axes and exports without a clipping mask.
+    inside = (lfc.abs() <= fc_lim) & neg_log10_pvals.between(y_bottom, y_top)
+
+    # Not-significant genes first, so coloured points sit on top.
+    for mask, color in ((~sig, NS_COLOR), (down, down_color), (up, up_color)):
+        keep = mask & inside
+        ax.scatter(lfc[keep], neg_log10_pvals[keep], color=color,
+                   s=point_size, edgecolors='none', linewidth=0)
+    ax.set_xlim(-fc_lim, fc_lim)
+    ax.set_ylim(bottom=y_bottom, top=y_top)
 
     ax.axhline(y=-np.log10(pval_threshold), color=FG, linestyle=':', linewidth=0.8)
 

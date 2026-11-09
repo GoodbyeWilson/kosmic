@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 # Type 42 (TrueType) keeps PDF and PostScript text as text; matplotlib's
@@ -88,6 +89,113 @@ def rasterize_dense_collections(fig, threshold: int = RASTERIZE_THRESHOLD) -> in
     return n
 
 
+#: Axis lines (spines) and tick marks in every figure: black at 1 pt, applied
+#: by 'style_axes' to the preview and the export, so each plot function does
+#: not have to set them and none can drift from the others.
+AXIS_COLOR = '#000000'
+AXIS_LINEWIDTH = 1.0
+
+
+def style_axes(fig) -> None:
+    """Draw every axis line and tick mark of *fig* in AXIS_COLOR at
+    AXIS_LINEWIDTH. Tick labels and other text keep their colour."""
+    for ax in fig.get_axes():
+        for spine in ax.spines.values():
+            spine.set_edgecolor(AXIS_COLOR)
+            spine.set_linewidth(AXIS_LINEWIDTH)
+        ax.tick_params(which='both', color=AXIS_COLOR, width=AXIS_LINEWIDTH)
+
+
+def _display_points(artist, renderer):
+    """Points (n, 2) in page (display) coordinates that bound *artist*, or
+    None when they cannot be found. Scatter points count by their centres:
+    a marker at the edge of the axes is drawn whole either way."""
+    import numpy as np
+    from matplotlib.collections import Collection, PathCollection
+    from matplotlib.lines import Line2D
+
+    empty = np.empty((0, 2))
+    try:
+        if isinstance(artist, Line2D):
+            xy = np.asarray(artist.get_xydata(), dtype=float)
+            return artist.get_transform().transform(xy) if len(xy) else empty
+        if isinstance(artist, PathCollection):      # scatter: one marker per offset
+            offsets = np.asarray(artist.get_offsets(), dtype=float)
+            return artist.get_offset_transform().transform(offsets) if len(offsets) else empty
+        if isinstance(artist, Collection):          # areas, line segments: their vertices
+            verts = [p.vertices for p in artist.get_paths() if len(p.vertices)]
+            return artist.get_transform().transform(np.vstack(verts)) if verts else empty
+        box = artist.get_window_extent(renderer)
+        return np.array([[box.x0, box.y0], [box.x1, box.y1]])
+    except Exception:                     # an artist that cannot say: keep its clip
+        return None
+
+
+def unclip_contained(fig, tolerance: float = 1.0) -> int:
+    """Switch off clipping for artists that lie entirely inside their axes.
+
+    A clipped artist exports with a clip path; in PDF and SVG a vector
+    editor turns that into a clipping mask (one per point of a scatter --
+    thousands in a volcano -- and one per bar, line or label). An artist
+    wholly inside the axes is not cut by the clip, so removing it changes
+    nothing on the page. The test is made in page coordinates, so it holds
+    for log axes, categorical axes and lines spanning the axes (axhline).
+    Artists that reach past the axes by more than *tolerance* pixels, and
+    rasterised ones, keep their clip. Returns the number changed.
+    """
+    import numpy as np
+
+    renderer = fig.canvas.get_renderer() if hasattr(fig.canvas, 'get_renderer') \
+        else fig._get_renderer()
+    n = 0
+    for ax in fig.get_axes():
+        box = ax.get_window_extent(renderer)
+        artists = [*ax.collections, *ax.lines, *ax.patches, *ax.images, *ax.texts]
+        for artist in artists:
+            if (not artist.get_clip_on() or artist.get_rasterized()
+                    or not artist.get_visible() or artist is ax.patch):
+                continue
+            pts = _display_points(artist, renderer)
+            if pts is None:
+                continue
+            pts = pts[np.isfinite(pts).all(axis=1)]
+            if not len(pts) or (
+                    pts[:, 0].min() >= box.x0 - tolerance and pts[:, 0].max() <= box.x1 + tolerance
+                    and pts[:, 1].min() >= box.y0 - tolerance
+                    and pts[:, 1].max() <= box.y1 + tolerance):
+                artist.set_clip_on(False)
+                n += 1
+    return n
+
+
+@contextmanager
+def _markers_as_paths():
+    """Write scatter points and line markers as plain paths in PDF and SVG.
+
+    Both backends draw a repeated marker once and place it by reference (a
+    PDF form object, an SVG <use>), which a vector editor imports as one
+    group with its own clipping mask per point. The base renderer draws
+    each as an ordinary path instead: same picture, slightly larger file.
+    """
+    from matplotlib.backend_bases import RendererBase
+    from matplotlib.backends.backend_pdf import RendererPdf
+    from matplotlib.backends.backend_svg import RendererSVG
+
+    saved = []
+    for cls in (RendererPdf, RendererSVG):
+        for name in ('draw_path_collection', 'draw_markers'):
+            saved.append((cls, name, cls.__dict__.get(name)))
+            setattr(cls, name, getattr(RendererBase, name))
+    try:
+        yield
+    finally:
+        for cls, name, original in saved:
+            if original is None:
+                delattr(cls, name)
+            else:
+                setattr(cls, name, original)
+
+
 #: OpenType features switched off in exported text. Matplotlib 3.11 shapes
 #: text with HarfBuzz, which joins 'fi' and 'fl' into one ligature glyph in
 #: fonts that have one (DejaVu Sans, Liberation Sans). A PDF writes that
@@ -109,9 +217,12 @@ def save_figure(fig, path, dpi: int, close: bool = True) -> Path:
     """Save *fig* to *path* in the format given by its suffix.
 
     The background is always white, so a figure drawn under the dark GUI
-    theme does not export with a dark background. *dpi* sets the PNG
-    resolution and the resolution of rasterised parts of a PDF or SVG.
-    Returns the path written.
+    theme does not export with a dark background. Axis lines and tick marks
+    are drawn black at 1 pt ('style_axes'). In PDF and SVG, artists wholly
+    inside their axes are not clipped and scatter points are plain paths,
+    so a vector editor opens them without a clipping mask per point. *dpi*
+    sets the PNG resolution and the resolution of rasterised parts of a
+    PDF or SVG. Returns the path written.
     """
     import matplotlib.pyplot as plt
 
@@ -123,10 +234,15 @@ def save_figure(fig, path, dpi: int, close: bool = True) -> Path:
     apply_export_rcparams()
     rasterize_dense_collections(fig)
     disable_ligatures(fig)
+    style_axes(fig)
+    vector = fmt in ('pdf', 'svg')
+    if vector:
+        unclip_contained(fig)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        fig.savefig(path, format=fmt, dpi=dpi, bbox_inches='tight',
-                    facecolor='white', edgecolor='none')
+        with _markers_as_paths() if vector else nullcontext():
+            fig.savefig(path, format=fmt, dpi=dpi, bbox_inches='tight',
+                        facecolor='white', edgecolor='none')
     finally:
         if close:
             plt.close(fig)
