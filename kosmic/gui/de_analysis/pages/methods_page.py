@@ -835,8 +835,16 @@ class MethodsPage(SimplePage):
         bits = []
 
         def _ver(modname: str):
+            # importlib.metadata first: scanpy and anndata deprecate
+            # '__version__' and warn on reading it. A package installed
+            # without distribution metadata falls back to the attribute.
+            import importlib
+            import importlib.metadata
             try:
-                import importlib
+                return f"{modname} {importlib.metadata.version(modname)}"
+            except importlib.metadata.PackageNotFoundError:
+                pass
+            try:
                 m = importlib.import_module(modname)
                 v = getattr(m, '__version__', None)
                 if v is not None:
