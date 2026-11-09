@@ -46,9 +46,12 @@ def export_format() -> str:
 
 
 def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
-    """Serialise a matplotlib Figure to PNG bytes and close it."""
+    """Serialise a matplotlib Figure to PNG bytes and close it. Axis lines
+    are styled as on export ('style_axes'), so the preview matches it."""
     import matplotlib.pyplot as plt
 
+    from kosmic.visualisation.style import style_axes
+    style_axes(fig)
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight',
                 facecolor=fig.get_facecolor(), edgecolor='none')
