@@ -17,7 +17,7 @@ from kosmic.gui.shared.widgets import (
     StageAccordion, StageSummaryCard,
 )
 from kosmic.paths import (
-    de_analysis_dir, de_stats_dir, significant_path,
+    de_analysis_dir, de_run_dir, de_stats_dir,
 )
 from kosmic.de.de_analysis import required_donor_count
 from kosmic.numerical import neg_log10
@@ -3233,7 +3233,9 @@ class GeneDEPage(SidebarTabbedPage):
                 self.ws.de_results,
                 fdr=self.pval_filter.value(),
                 lfc=self.fc_filter.value())
-            out = significant_path(self.ws.project_dir, gse_id)
+            # The run's counts folder (ADR-015), beside its DE table.
+            out = (de_run_dir(self.ws.project_dir, self._count_source())
+                   / f"{gse_id}_significant_genes.csv")
             out.parent.mkdir(parents=True, exist_ok=True)
             sig.to_csv(out, index=False)
             self.ws.log_message.emit(
@@ -3267,7 +3269,7 @@ class GeneDEPage(SidebarTabbedPage):
             if norm_df.empty:
                 return
 
-            stats_dir = de_stats_dir(self.ws.project_dir)
+            stats_dir = de_run_dir(self.ws.project_dir, self._count_source())
             stats_dir.mkdir(parents=True, exist_ok=True)
             norm_path = stats_dir / f"{gse_id}_PathwayStats_Norm.csv"
             raw_path = stats_dir / f"{gse_id}_PathwayStats_Raw.csv"
@@ -3306,7 +3308,7 @@ class GeneDEPage(SidebarTabbedPage):
 
             self.ws.log_message.emit(
                 f"Exporting gene-level stats for {len(norm_df)} genes...")
-            stats_dir = de_stats_dir(self.ws.project_dir)
+            stats_dir = de_run_dir(self.ws.project_dir, self._count_source())
             stats_dir.mkdir(parents=True, exist_ok=True)
             norm_path = stats_dir / f"{gse_id}_GeneStats_Norm.csv"
             raw_path = stats_dir / f"{gse_id}_GeneStats_Raw.csv"

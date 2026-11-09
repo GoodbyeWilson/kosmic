@@ -113,6 +113,87 @@ def test_meta_discovery_finds_runs_and_their_counts(tmp_path, layout):
     assert {e['counts'] for e in found} == {'decontX_counts'}
 
 
+# -- Stage 2: writers and summary ------------------------------------------
+
+def _adata(decontx=False):
+    """Two cell types, three donors per arm, and one donor too small to keep."""
+    import anndata
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    rows = []
+    for role, donors in (('disease', ['D1', 'D2', 'D3']), ('control', ['C1', 'C2', 'C3'])):
+        for d in donors:
+            for ct in ('Endothelial', 'Fibroblast'):
+                rows += [(d, role, ct)] * 30
+    rows += [('C4', 'control', 'Endothelial')] * 5        # below min_cells: excluded
+    obs = pd.DataFrame(rows, columns=['donor', '_role', 'cell_type'])
+    obs['condition'] = np.where(obs['_role'] == 'disease', 'DCM', 'Donor')
+    obs.index = [f'c{i}' for i in range(len(obs))]
+    x = rng.poisson(6, size=(len(obs), 40)).astype(np.float32)
+    a = anndata.AnnData(X=x, obs=obs, var=pd.DataFrame(index=[f'G{i}' for i in range(40)]))
+    if decontx:
+        a.layers['decontX_counts'] = np.floor(x * 0.9)
+    return a
+
+
+def _batch(tmp_path, **kw):
+    from kosmic.de import batch as B
+    return B.run_de_by_cell_type(
+        _adata(decontx='counts_layer' in kw), 'cell_type', 'donor', 'condition',
+        tmp_path / 'GSE1', 'GSE1', de_method='ttest', min_cells=10,
+        detection_min_pct=0.0, run_record={'counts_source': 'raw'}, **kw)
+
+
+def test_batch_writes_each_cell_type_into_its_counts_and_cell_type_folder(tmp_path):
+    runs = _batch(tmp_path)
+    for r in runs:
+        folder = de_run_dir(tmp_path / 'GSE1', 'raw', r.cell_type)
+        written = [r.de_path, r.de_path.with_suffix('.json'), r.pseudobulk_path,
+                   r.significant_path]
+        assert all(p.parent == folder and p.is_file() for p in written)
+        assert [p.name for p in written[2:]] == [f'GSE1_{r.slug}_pseudobulk.csv',
+                                                 f'GSE1_{r.slug}_significant_genes.csv']
+        record = json.loads(r.de_path.with_suffix('.json').read_text())
+        assert record['counts_source'] == 'raw' and record['saved'] == r.saved
+    # Nothing is left in the flat layout.
+    assert not list(de_stats_dir(tmp_path / 'GSE1').glob('*.csv'))
+
+
+def test_a_corrected_layer_gets_its_own_counts_folder(tmp_path):
+    runs = _batch(tmp_path, counts_layer='decontX_counts')
+    assert {r.de_path.parent.parent.name for r in runs} == {'decontX_counts'}
+    assert {r.counts for r in runs} == {'decontX_counts'}
+
+
+def test_the_summary_describes_each_run(tmp_path):
+    from kosmic.de import batch as B
+    runs = _batch(tmp_path)
+    s = B.batch_summary(runs).set_index('cell_type')
+    endo = s.loc['Endothelial']
+    assert endo['counts'] == 'original_counts' and endo['folder'] == 'Endothelial'
+    assert (endo['n_donors_control'], endo['n_donors_disease'],
+            endo['n_donors_excluded']) == (3, 3, 1)            # C4 has 5 cells
+    assert endo['median_cells_per_donor'] == 30
+    assert endo['n_up'] + endo['n_down'] == endo['n_significant']
+    assert endo['min_cells'] == 10 and endo['fdr'] == 0.05
+    assert not any(':' in str(v) and '\\' in str(v) for v in s['folder'])   # no absolute paths
+    out = B.summary_path(tmp_path / 'GSE1', 'GSE1', 'raw')
+    assert out.parent == de_run_dir(tmp_path / 'GSE1', 'raw')
+
+
+def test_written_runs_are_read_back_after_the_project_is_moved(tmp_path):
+    import shutil
+    _batch(tmp_path)
+    moved = tmp_path / 'elsewhere' / 'GSE1'
+    shutil.move(str(tmp_path / 'GSE1'), str(moved))
+    runs = list_gene_de_runs(moved)
+    assert [r.cell_type for r in runs] == ['Endothelial', 'Fibroblast']
+    assert {r.counts for r in runs} == {'original_counts'}
+    found = [e for e in discover_de_results(moved.parent) if e['file_type'] == 'de_results']
+    assert len(found) == 2
+
+
 def test_pseudobulk_is_the_one_beside_each_run(tmp_path, monkeypatch):
     from kosmic.gui.meta_analysis import pseudobulk_discovery as pd_disc
     monkeypatch.setattr(pd_disc, '_load_persisted_cache', lambda: {})
