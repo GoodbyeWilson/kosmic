@@ -1356,8 +1356,9 @@ class DownloadTab(TabbedPage):
                 'imported', mtime.strftime("%d %b %Y, %H:%M"))
         except OSError:
             self._source_panel.set_value('imported', "?")
-        import anndata as _ad
-        self._source_panel.set_value('anndata_ver', _ad.__version__)
+        import importlib.metadata
+        self._source_panel.set_value(
+            'anndata_ver', importlib.metadata.version('anndata'))
 
         # --- Quality checks panel (computed on the counts source) ---
         mat_source = adata.raw if has_raw else adata

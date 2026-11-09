@@ -196,3 +196,51 @@ def test_reference_annotation_worker_does_not_copy_the_study(app, tmp_path, monk
     assert 'counts' in a.layers                                  # untouched
     assert out.exists() and not (tmp_path / 's.h5ad.tmp').exists()
     assert 'annotate_tab' in str(annotate_tab)
+
+
+def _counts_with_markers(n=300, g=40, seed=1):
+    a = _study(n=n, g=g, normalised=False, seed=seed)
+    a.obs['leiden'] = pd.Categorical(['0'] * (n // 2) + ['1'] * (n - n // 2))
+    X = a.X.toarray()
+    X[: n // 2, :5] += 20.0                                # cluster 0 markers G0..G4
+    a.X = sp.csr_matrix(X)
+    return a
+
+
+@pytest.mark.parametrize('cap', [0, 50])
+def test_marker_genes_on_counts_rank_log_normalised_rows(cap, monkeypatch):
+    """A master atlas keeps counts in X. Markers are ranked on log1p(CP10K)
+    of those rows, so the log fold changes are finite and equal those from
+    explicitly log-normalised data, and X is left as counts."""
+    import warnings
+
+    import scanpy as sc
+    import scanpy.logging as sc_log
+
+    from kosmic.scrna.annotate.marker_genes import compute_cluster_marker_genes
+    logged = []
+    real_warning = sc_log.warning
+    monkeypatch.setattr(sc_log, 'warning',
+                        lambda msg, *a, **k: logged.append(msg) or real_warning(msg, *a, **k))
+    a = _counts_with_markers()
+    X_before = a.X.copy()
+    ref = a.copy()
+    sc.pp.normalize_total(ref, target_sum=1e4)
+    sc.pp.log1p(ref)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', RuntimeWarning)     # expm1 overflow
+        compute_cluster_marker_genes(a, max_cells_per_cluster=cap)
+    assert not any('raw count data' in str(m) for m in logged)
+    compute_cluster_marker_genes(ref, max_cells_per_cluster=cap)
+
+    assert (a.X != X_before).nnz == 0 and 'log1p' not in a.uns
+    got, want = a.uns['rank_genes_groups'], ref.uns['rank_genes_groups']
+    for grp in ('0', '1'):
+        lfc = np.asarray(got['logfoldchanges'][grp], dtype=float)
+        assert np.isfinite(lfc).all()
+        g_df = pd.Series(lfc, index=got['names'][grp]).sort_index()
+        w_df = pd.Series(np.asarray(want['logfoldchanges'][grp], dtype=float),
+                         index=want['names'][grp]).sort_index()
+        np.testing.assert_allclose(g_df.values, w_df.values, rtol=1e-4, atol=1e-4)
+    assert set(pd.DataFrame(got['names'])['0'][:5]) == {'G0', 'G1', 'G2', 'G3', 'G4'}

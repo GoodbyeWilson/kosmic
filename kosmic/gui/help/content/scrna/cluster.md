@@ -81,7 +81,11 @@ Annotate and Marker Check tabs. Above 5,000 cells in a cluster the
 ranking uses a random 5,000 of them — ranking every cell of a large
 study needs more memory than the study itself — and the result records
 how many cells it used. `marker_max_cells_per_cluster` in `config.toml`
-changes the cap; 0 ranks every cell.
+changes the cap; 0 ranks every cell. On a combined atlas, whose
+expression matrix holds raw counts, the ranked cells are
+log-normalised (counts per 10,000, then log1p) for the ranking, so the
+log fold changes in the marker lists are on the same scale as for a
+single study; the atlas file itself is not changed.
 
 Both the PCA and the clustering step work on one matrix for the
 included cells and write their results back onto the study, so a study

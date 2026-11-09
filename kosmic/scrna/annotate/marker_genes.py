@@ -18,6 +18,13 @@
 # - 'get_top_marker_genes' -- pulls the top-N for a single
 #   cluster out of the cached result as a clean DataFrame, ready to
 #   render in a Qt table.
+#
+# A combined master atlas keeps raw counts in X and is never normalised on
+# disk. Wilcoxon scores are unaffected by that (ranks within a gene), but
+# Scanpy computes the log fold change by exponentiating X as if it were
+# log1p data, so on counts it overflows. When X holds counts the rows that
+# are ranked are copied and log1p(CP10K) normalised first; the caller's X
+# is not modified.
 from __future__ import annotations
 
 from typing import Optional
@@ -48,7 +55,10 @@ def compute_cluster_marker_genes(
         Passed to scanpy. Default False: X is the full gene list and is
         log-normalised, which is what the Wilcoxon test expects; '.raw'
         in KOSMIC files held raw counts, so ranking on it confounded
-        every gene with sequencing depth.
+        every gene with sequencing depth. When X holds raw counts (a
+        combined master atlas), the ranked rows are log1p(CP10K)
+        normalised in a copy first, so the log fold changes are valid;
+        'adata.X' is not modified.
     max_cells_per_cluster : int, optional
         Rank on at most this many cells from each cluster, drawn at
         random with 'seed'. None (default) uses the configured
@@ -97,6 +107,12 @@ def compute_cluster_marker_genes(
         max_cells_per_cluster = MARKER_MAX_CELLS_PER_CLUSTER
 
     idx = _subsample_per_cluster(adata.obs[cluster_col], max_cells_per_cluster, seed)
+    counts = not use_raw and _x_holds_counts(adata)
+    if idx is None and counts:
+        idx_all = np.arange(adata.n_obs)
+        result = _rank_rows(adata, idx_all, cluster_col, method, normalise=True)
+        adata.uns['rank_genes_groups'] = result
+        return adata
     if idx is None:
         sc.tl.rank_genes_groups(
             adata,
@@ -107,22 +123,62 @@ def compute_cluster_marker_genes(
         )
         return adata
 
-    # A small AnnData of the sampled rows; X rows are copied once (a few
-    # thousand cells per cluster), nothing else about 'adata' is touched.
-    import anndata as ad
-    sub = ad.AnnData(
-        X=adata.X[idx],
-        obs=adata.obs.iloc[idx][[cluster_col]].copy(),
-        var=pd.DataFrame(index=adata.var_names),
-    )
-    sub.obs[cluster_col] = sub.obs[cluster_col].cat.remove_unused_categories()
-    sc.tl.rank_genes_groups(
-        sub, groupby=cluster_col, method=method, use_raw=False, pts=True)
-    result = sub.uns['rank_genes_groups']
+    result = _rank_rows(adata, idx, cluster_col, method, normalise=counts)
     result['params']['max_cells_per_cluster'] = int(max_cells_per_cluster)
     result['params']['n_cells_used'] = int(len(idx))
     adata.uns['rank_genes_groups'] = result
     return adata
+
+
+def _x_holds_counts(adata) -> bool:
+    """True when X holds raw counts: no 'log1p' record in 'uns' and the
+    stored values are integers."""
+    from kosmic.scrna.cluster.hvg import _looks_like_counts
+    if 'log1p' in getattr(adata, 'uns', {}):
+        return False
+    return _looks_like_counts(adata)
+
+
+def _log1p_cp10k(X, target_sum: float = 1e4):
+    """log1p(counts per 'target_sum') of a counts matrix, as a new float32
+    matrix. Each cell's total is taken over all genes, as in
+    'kosmic.scrna.counts.log_normalised'."""
+    import scipy.sparse as sp
+
+    X = sp.csr_matrix(X, dtype=np.float32) if sp.issparse(X) else np.array(X, dtype=np.float32)
+    totals = np.asarray(X.sum(axis=1), dtype=float).ravel()
+    scale = np.where(totals > 0, target_sum / np.where(totals > 0, totals, 1), 0.0)
+    if sp.issparse(X):
+        X = sp.csr_matrix(sp.diags(scale.astype(np.float32)) @ X)
+        X.data = np.log1p(X.data)
+        return X
+    return np.log1p(X * scale[:, None].astype(np.float32))
+
+
+def _rank_rows(adata, idx, cluster_col: str, method: str, normalise: bool) -> dict:
+    """Run 'rank_genes_groups' on the rows 'idx' of 'adata' and return the
+    result. The rows are copied into a small AnnData (log-normalised first
+    when 'normalise'); nothing about 'adata' is touched."""
+    import anndata as ad
+    import scanpy as sc
+
+    X = adata.X[idx]
+    if normalise:
+        X = _log1p_cp10k(X)
+    sub = ad.AnnData(
+        X=X,
+        obs=adata.obs.iloc[idx][[cluster_col]].copy(),
+        var=pd.DataFrame(index=adata.var_names),
+    )
+    if normalise:
+        sub.uns['log1p'] = {'base': None}
+    sub.obs[cluster_col] = sub.obs[cluster_col].cat.remove_unused_categories()
+    sc.tl.rank_genes_groups(
+        sub, groupby=cluster_col, method=method, use_raw=False, pts=True)
+    result = sub.uns['rank_genes_groups']
+    if normalise:
+        result['params']['normalised'] = 'log1p(CP10K) of counts in X'
+    return result
 
 
 def _subsample_per_cluster(groups: pd.Series, cap: Optional[int], seed: int):
@@ -133,7 +189,6 @@ def _subsample_per_cluster(groups: pd.Series, cap: Optional[int], seed: int):
     counts = groups.value_counts()
     if counts.max() <= cap:
         return None
-    import numpy as np
     rng = np.random.default_rng(seed)
     codes = groups.astype(str).values
     keep = []
