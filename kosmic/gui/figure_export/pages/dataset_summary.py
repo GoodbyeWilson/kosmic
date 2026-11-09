@@ -13,6 +13,7 @@ from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
 
 class DatasetSummaryPage(FigurePage):
+    GATE_FROM_RUN = True
     TITLE = "Dataset Summary"
     CHECKS_DE_STALENESS = True
     UNAVAILABLE_MESSAGE = (

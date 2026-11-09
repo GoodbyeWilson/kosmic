@@ -42,4 +42,4 @@ Gene symbols are matched without regard to case, because the libraries use human
 
 ## Thresholds
 
-FDR and |log2FC| cutoffs define which genes from Gene DE are considered 'significant' for enrichment. The P threshold controls which enrichment results are highlighted as significant.
+FDR and |log2FC| cutoffs define which genes from Gene DE are considered 'significant' for enrichment. They start from the values the DE run shown was made with, each time a different run is shown; values typed here stay until then. The P threshold controls which enrichment results are highlighted as significant.

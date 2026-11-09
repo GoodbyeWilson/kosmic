@@ -410,7 +410,8 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                 save_run_record(run.de_path, {
                     **run_record, 'method': label, 'cell_type': plan.cell_type,
                     'cell_type_column': cell_type_col, 'design': run.design,
-                    'counts_source': counts_source, 'saved': run.saved})
+                    'counts_source': counts_source, 'saved': run.saved,
+                    'fdr': float(fdr), 'lfc_threshold': float(lfc)})
 
             # The significant subset alongside the full table -- the same
             # selection the counts above report, so nobody has to re-derive

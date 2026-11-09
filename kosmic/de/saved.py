@@ -196,14 +196,18 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
                      min_cells: Optional[int] = None, min_counts: Optional[int] = None,
                      covariates=(), pathway_gene_sets: Optional[dict] = None,
                      geneset_label: Optional[str] = None,
-                     h5ad_path=None) -> dict:
+                     h5ad_path=None, fdr: Optional[float] = None,
+                     lfc_threshold: Optional[float] = None) -> dict:
     """The settings of a gene DE run, as saved beside its table.
 
     ``counts_source`` is the count matrix the run used: 'raw' for the
     original counts or a layer name ('decontX_counts'), as
     :func:`kosmic.scrna.counts.loaded_count_source` reports it. Only the
-    file name of ``h5ad_path`` is kept.
+    file name of ``h5ad_path`` is kept. ``fdr`` and ``lfc_threshold`` are
+    the significance rule the run's counts and files use (ADR-015); 0 for
+    ``lfc_threshold`` means no fold-change gate.
     """
+    from kosmic import DEFAULT_FDR, DEFAULT_LFC_THRESHOLD
     from kosmic.scrna.counts import loaded_count_source
 
     return {
@@ -223,7 +227,26 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
         'pathway_gene_sets': {str(k): [str(g) for g in v]
                               for k, v in (pathway_gene_sets or {}).items()},
         'dataset_file': Path(str(h5ad_path)).name if h5ad_path else None,
+        'fdr': float(DEFAULT_FDR if fdr is None else fdr),
+        'lfc_threshold': float(DEFAULT_LFC_THRESHOLD if lfc_threshold is None
+                               else lfc_threshold),
     }
+
+
+def run_significance(record: Optional[dict]) -> tuple:
+    """(fdr, lfc_threshold, assumed) of a saved run (ADR-015).
+
+    A run saved before the rule was recorded was made with the
+    configuration of its time: FDR from the configuration and
+    ``LEGACY_LFC_THRESHOLD`` (0.25), with *assumed* True so it can be
+    shown as such.
+    """
+    from kosmic import DEFAULT_FDR, LEGACY_LFC_THRESHOLD
+
+    rec = record or {}
+    if 'lfc_threshold' in rec:
+        return float(rec.get('fdr', DEFAULT_FDR)), float(rec['lfc_threshold']), False
+    return float(rec.get('fdr', DEFAULT_FDR)), float(LEGACY_LFC_THRESHOLD), True
 
 
 def save_run_record(de_path, record: dict) -> Path:

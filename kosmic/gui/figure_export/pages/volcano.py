@@ -64,6 +64,7 @@ class _VolcanoControls(FigureControls):
 
 
 class VolcanoPage(FigurePage):
+    GATE_FROM_RUN = True
     TITLE = "Volcano Plot"
     CHECKS_DE_STALENESS = True
     UNAVAILABLE_MESSAGE = "Run a Differential Expression analysis to view this figure."

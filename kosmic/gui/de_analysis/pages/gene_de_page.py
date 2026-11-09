@@ -841,8 +841,14 @@ class GeneDEPage(SidebarTabbedPage):
         self.fc_filter.setValue(DEFAULT_LFC_THRESHOLD)
         self.fc_filter.setSingleStep(0.1)
         self.fc_filter.setPrefix("|log2FC| > ")
+        self.fc_filter.setSpecialValueText("Min |log2FC|: Off")
         self.fc_filter.setToolTip(
-            "Keep genes whose ESTIMATED |log2FC| exceeds this."
+            "Keep genes whose ESTIMATED |log2FC| exceeds this. Off: a gene"
+            " is significant on FDR alone."
+            + "\n\n" +
+            "Recorded with each DE run: its significant-genes file, the"
+            " batch summary and the Methods text use it, and a saved run"
+            " reopens with the value it was run with."
             + "\n\n" +
             "A display cut on the point estimate, not a test: the FDR"
             " beside it answers 'did this gene change?', not"
@@ -1105,7 +1111,9 @@ class GeneDEPage(SidebarTabbedPage):
             control_label=ws.control_label, min_cells=min_cells,
             min_counts=min_counts, covariates=covariates,
             pathway_gene_sets=ws.pathway_gene_sets, geneset_label=ws.geneset_label,
-            h5ad_path=ws.h5ad_path)
+            h5ad_path=ws.h5ad_path,
+            # The significance rule the run's files and counts use (ADR-015).
+            fdr=self.pval_filter.value(), lfc_threshold=self.fc_filter.value())
 
     def _count_source(self):
         """Which counts the loaded dataset holds: 'raw' or a layer name.
@@ -1388,6 +1396,7 @@ class GeneDEPage(SidebarTabbedPage):
             de_results = pd.read_csv(path)
             if de_results.empty or 'names' not in de_results.columns:
                 return
+            self._apply_run_significance(path)
             self._apply_loaded_results(de_results, path.name)
         except Exception as e:
             self.ws.log_message.emit(f"Could not load previous DE results: {e}")
@@ -1425,6 +1434,24 @@ class GeneDEPage(SidebarTabbedPage):
             ))
         return runs
 
+    def _apply_run_significance(self, de_path):
+        """Set the FDR and Min |log2FC| controls to the rule a saved run was
+        made with (ADR-015), so its counts here match its files. A run
+        saved before the rule was recorded is shown with the value of its
+        time, marked as assumed."""
+        from kosmic.de.saved import read_run_record, run_significance
+
+        fdr, lfc, assumed = run_significance(read_run_record(de_path))
+        for spin, value in ((self.pval_filter, fdr), (self.fc_filter, lfc)):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.ws.significance = (fdr, lfc, assumed)
+        if assumed:
+            self.ws.log_message.emit(
+                f"{Path(str(de_path)).name}: no significance rule recorded; shown "
+                f"with |log2FC| > {lfc:g}, the setting of the time (assumed).")
+
     def _apply_loaded_results(self, de_results, source_name):
         """Apply loaded DE results to the workspace and refresh the UI."""
         import pandas as pd
@@ -1434,9 +1461,10 @@ class GeneDEPage(SidebarTabbedPage):
         # one so fgsea falls back to these loaded (genome-wide) results.
         self.ws.gene_de_genome_wide = de_results.attrs.get('genome_wide_ranking')
 
-        if 'pvals_adj' in de_results.columns and 'abs_logfoldchange' in de_results.columns:
-            sig_mask = (de_results['pvals_adj'] < DEFAULT_FDR) & (de_results['abs_logfoldchange'] > DEFAULT_LFC_THRESHOLD)
-            self.ws.significant_genes = de_results[sig_mask]
+        if 'pvals_adj' in de_results.columns:
+            from kosmic.de.de_analysis import significant_subset
+            self.ws.significant_genes = significant_subset(
+                de_results, fdr=self.pval_filter.value(), lfc=self.fc_filter.value())
         else:
             self.ws.significant_genes = pd.DataFrame()
 
@@ -2377,6 +2405,8 @@ class GeneDEPage(SidebarTabbedPage):
             filter_min_count=self.filter_min_count_spin.value(),
             filter_min_samples=int(self.filter_min_samples_spin.value()),
             exclude_gene_groups=self._excluded_gene_groups(),
+            # The rule the summary counts and significant-gene files use.
+            fdr=self.pval_filter.value(), lfc=self.fc_filter.value(),
             run_record=self._run_record(
                 min_cells=self.min_cells_spin.value(),
                 min_counts=self.min_counts_spin.value(),
@@ -2462,6 +2492,8 @@ class GeneDEPage(SidebarTabbedPage):
         from kosmic.de.de_analysis import significant_subset
 
         run = runs[index]
+        if run.de_path is not None:
+            self._apply_run_significance(run.de_path)
         self.ws.de_results = run.de_results
         self.ws.significant_genes = significant_subset(
             run.de_results, fdr=self.pval_filter.value(),
@@ -2506,7 +2538,11 @@ class GeneDEPage(SidebarTabbedPage):
             self._populate_batch_view()
 
         self.ws.de_results = de_results
-        self.ws.significant_genes = significant_genes
+        # The page's rule, which this run records (ADR-015).
+        from kosmic.de.de_analysis import significant_subset
+        self.ws.significant_genes = significant_subset(
+            de_results, fdr=self.pval_filter.value(), lfc=self.fc_filter.value())
+        self.ws.significance = (self.pval_filter.value(), self.fc_filter.value(), False)
         self.ws.pathway_coverage = pathway_coverage
         self.ws.sample_df = sample_df
         # Snapshot the settings this run used, so later edits flag a re-run.
@@ -3505,7 +3541,8 @@ class GeneDEPage(SidebarTabbedPage):
         if self.ws.de_results is not None and self.ws.pathway_gene_sets:
             self._topde_plot.set_data(
                 self.ws.de_results, self.ws.pathway_gene_sets,
-                self._topde_n_spin.value()
+                self._topde_n_spin.value(),
+                fdr=self.pval_filter.value(), lfc=self.fc_filter.value(),
             )
 
     def refresh_theme(self):

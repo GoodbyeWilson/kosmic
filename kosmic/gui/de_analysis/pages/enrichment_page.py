@@ -464,7 +464,22 @@ class EnrichmentPage(SidebarTabbedPage):
 
     def on_activated(self):
         """Called when page becomes visible."""
+        self._sync_significance()
         self._update_gene_count()
+
+    def _sync_significance(self):
+        """Start the FDR and |log2FC| boxes from the rule of the DE run shown
+        (ADR-015), each time a different run is shown; values typed here
+        stay until then."""
+        rule = getattr(self.ws, 'significance', None)
+        if not rule or rule == getattr(self, '_synced_rule', None):
+            return
+        self._synced_rule = rule
+        fdr, lfc, _assumed = rule
+        for spin, value in ((self._fdr_spin, fdr), (self._lfc_spin, lfc)):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
 
     def _get_sig_genes(self):
         """

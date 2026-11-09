@@ -761,7 +761,12 @@ class MethodsPage(SimplePage):
                 universe = "across all tested genes (genome-wide)"
             items.append(("FDR universe:", f"Benjamini-Hochberg {universe}"))
             used_refs.add('bh')
-        items.append(("|log2FC| threshold:", f"> {fc_thresh:g}"))
+        assumed = bool((getattr(self.ws, 'significance', None) or (0, 0, False))[2])
+        if fc_thresh > 0:
+            items.append(("|log2FC| threshold:", f"> {fc_thresh:g}"
+                          + (" (assumed: not recorded with this run)" if assumed else "")))
+        else:
+            items.append(("|log2FC| threshold:", "none (significance on FDR alone)"))
 
         return items
 

@@ -132,6 +132,9 @@ class DEWorkspace(QWidget):
         # Results
         self.de_results = None
         self.significant_genes = None
+        # (fdr, lfc_threshold, assumed) of the run shown: the rule its counts
+        # and files use (ADR-015). None until a run is made or loaded.
+        self.significance = None
         self.pathway_coverage = None
         self.sample_df = None
         self.pathway_de_results = None  # Meta-analysis compatible (same format as gene DE)
@@ -361,6 +364,7 @@ class DEWorkspace(QWidget):
             self._manual_load = False
             self.de_results = None
             self.significant_genes = None
+            self.significance = None
             self.pathway_coverage = None
             self.sample_df = None
             self.pathway_de_results = None

@@ -194,6 +194,118 @@ def test_written_runs_are_read_back_after_the_project_is_moved(tmp_path):
     assert len(found) == 2
 
 
+# -- Stage 3: significance is a setting of each run ------------------------
+
+def test_the_gate_is_off_by_default_and_not_in_the_config():
+    import tomllib
+    from pathlib import Path
+
+    import kosmic
+    assert kosmic.DEFAULT_LFC_THRESHOLD == 0.0
+    cfg = tomllib.loads((Path(kosmic.__file__).parent.parent / 'config.toml').read_text())
+    assert 'lfc_threshold' not in cfg['significance']
+
+
+def _n_fdr(r, lfc=0.0):
+    t = r.de_results
+    return int(((t['pvals_adj'] < 0.05) & (t['logfoldchanges'].abs() > lfc)).sum())
+
+
+def test_a_run_with_the_gate_off_counts_on_fdr_alone(tmp_path):
+    from kosmic.de import batch as B
+    runs = _batch(tmp_path)
+    s = B.batch_summary(runs).set_index('cell_type')
+    for r in runs:
+        assert r.n_significant == _n_fdr(r)
+        assert len(pd.read_csv(r.significant_path)) == r.n_significant
+        record = json.loads(r.de_path.with_suffix('.json').read_text())
+        assert (record['fdr'], record['lfc_threshold']) == (0.05, 0.0)
+        assert s.loc[r.cell_type, 'lfc_threshold'] == 0.0
+
+
+def test_a_chosen_gate_is_recorded_and_used(tmp_path):
+    runs = _batch(tmp_path, lfc=0.5)
+    for r in runs:
+        assert r.n_significant == _n_fdr(r, 0.5)
+        assert len(pd.read_csv(r.significant_path)) == r.n_significant
+        assert json.loads(r.de_path.with_suffix('.json').read_text())['lfc_threshold'] == 0.5
+
+
+def test_a_run_without_a_recorded_rule_is_read_as_assumed():
+    from kosmic.de.saved import run_significance
+    assert run_significance({'counts_source': 'raw'}) == (0.05, 0.25, True)
+    assert run_significance(None) == (0.05, 0.25, True)
+    assert run_significance({'fdr': 0.1, 'lfc_threshold': 0.0}) == (0.1, 0.0, False)
+
+
+@pytest.fixture(scope='module')
+def app():
+    import os
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def _spin(value):
+    from PyQt6.QtWidgets import QDoubleSpinBox
+    s = QDoubleSpinBox()
+    s.setRange(0, 10)
+    s.setDecimals(4)
+    s.setValue(value)
+    return s
+
+
+def test_reopening_a_saved_run_sets_the_de_page_to_its_rule(app, tmp_path):
+    from types import SimpleNamespace
+
+    from kosmic.gui.de_analysis.pages.gene_de_page import GeneDEPage
+    de = tmp_path / 'S1_DE_deseq2.csv'
+    _table(de)
+    _record(de, fdr=0.05, lfc_threshold=0.5)
+    page = SimpleNamespace(pval_filter=_spin(0.05), fc_filter=_spin(0.0),
+                           ws=SimpleNamespace(log_message=SimpleNamespace(emit=print)))
+    GeneDEPage._apply_run_significance(page, de)
+    assert page.fc_filter.value() == 0.5 and page.ws.significance == (0.05, 0.5, False)
+    _record(de, counts_source='raw')                      # an older run: no rule
+    GeneDEPage._apply_run_significance(page, de)
+    assert page.fc_filter.value() == 0.25 and page.ws.significance[2] is True
+
+
+def test_enrichment_starts_from_the_runs_rule_once_per_run(app):
+    from types import SimpleNamespace
+
+    from kosmic.gui.de_analysis.pages.enrichment_page import EnrichmentPage
+    page = SimpleNamespace(_fdr_spin=_spin(0.05), _lfc_spin=_spin(0.25),
+                           ws=SimpleNamespace(significance=(0.05, 0.0, False)))
+    EnrichmentPage._sync_significance(page)
+    assert page._lfc_spin.value() == 0.0
+    page._lfc_spin.setValue(1.0)                          # typed by the user
+    EnrichmentPage._sync_significance(page)
+    assert page._lfc_spin.value() == 1.0                  # kept: same run
+    page.ws.significance = (0.05, 0.5, False)             # another run shown
+    EnrichmentPage._sync_significance(page)
+    assert page._lfc_spin.value() == 0.5
+
+
+def test_figure_gate_starts_from_the_runs_rule(app, tmp_path):
+    from kosmic.de import saved
+    from kosmic.gui.figure_export.pages.volcano import VolcanoPage
+    from tests.study_folder import figure_workspace, make_study_folder, write_de_outputs
+
+    study = write_de_outputs(make_study_folder(tmp_path))
+    ws = figure_workspace(study=study)
+    run = saved.list_gene_de_runs(study)[0]
+    ws.source.set_de_run(run)
+    _record(run.path, lfc_threshold=0.5, fdr=0.05)
+    page = VolcanoPage(ws)
+    page._controls.blockSignals(True)
+    page._sync_gate_from_run()
+    assert page._controls.lfc_gate.value() == 0.5
+    page._controls.lfc_gate.setValue(0.0)                 # set here: kept for this run
+    page._sync_gate_from_run()
+    assert page._controls.lfc_gate.value() == 0.0
+
+
 def test_pseudobulk_is_the_one_beside_each_run(tmp_path, monkeypatch):
     from kosmic.gui.meta_analysis import pseudobulk_discovery as pd_disc
     monkeypatch.setattr(pd_disc, '_load_persisted_cache', lambda: {})
