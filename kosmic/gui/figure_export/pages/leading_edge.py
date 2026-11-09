@@ -219,6 +219,8 @@ class LeadingEdgeHeatmapPage(EnrichmentFigurePage):
         """*blocks* with each study column named by its study alone: the
         selection's cell type is in the figure title ('Chaffin_Endothelial_Cell'
         is shown as 'Chaffin'). The export table keeps the full names."""
+        from kosmic.meta_analysis.io import split_selection
+        selection = split_selection(selection)[1] if selection else None
         suffix = f"_{selection}".lower() if selection else None
 
         def label(col):

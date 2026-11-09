@@ -1,7 +1,8 @@
 """A project's saved meta-analysis runs, read back for Figure Export (ADR-014).
 
 Every pooling run is saved in its selection's folder,
-``meta_analysis/{selection}/``:
+``meta_analysis/<counts>/<selection>/`` (ADR-015; ``meta_analysis/<selection>/``
+before it):
 
 - a gene-level run as ``consensus_{methods}_{calibration}.csv`` with a
   ``.json`` sidecar whose parameters name the DE method and the studies
@@ -56,8 +57,9 @@ class MetaRun:
 
     @property
     def label(self) -> str:
-        """'Endothelial Cell: reml + vote count (analytical)'."""
-        sel = self.selection.replace('_', ' ')
+        """'Endothelial Cell, decontX counts: reml + vote count (analytical)'."""
+        from kosmic.meta_analysis.io import selection_label
+        sel = selection_label(self.selection)
         if self.gene_path is None:
             m = _PATHWAY_RUN.match(self.pathway_path.name)
             return f"{sel}: pathways, {m.group(1).replace('_', ' ')}"
@@ -73,12 +75,20 @@ def _newest(paths) -> Optional[Path]:
 
 def list_meta_runs(project_folder) -> list[MetaRun]:
     """The project's saved meta-analysis runs, by selection and then newest
-    first. A selection with pathway runs only gives one run."""
+    first. A selection with pathway runs only gives one run.
+
+    Selections are read in both layouts: ``meta_analysis/<counts>/<selection>/``
+    (ADR-015) and ``meta_analysis/<selection>/`` from earlier versions."""
     root = meta_output_dir(project_folder)
     if not root.is_dir():
         return []
+    folders = []
+    for child in sorted(p for p in root.iterdir() if p.is_dir()):
+        folders.append((child, child.name))
+        folders.extend((sub, f"{child.name}/{sub.name}")
+                       for sub in sorted(p for p in child.iterdir() if p.is_dir()))
     runs = []
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+    for folder, selection in folders:
         files = [p for p in folder.iterdir() if p.is_file()]
         genes = sorted((p for p in files if _GENE_RUN.match(p.name)),
                        key=lambda p: p.stat().st_mtime, reverse=True)
@@ -86,7 +96,7 @@ def list_meta_runs(project_folder) -> list[MetaRun]:
         for gene in genes or [None]:
             if gene is None and pathway is None:
                 continue
-            runs.append(MetaRun(Path(project_folder), folder.name, gene, pathway))
+            runs.append(MetaRun(Path(project_folder), selection, gene, pathway))
     return runs
 
 
@@ -99,8 +109,12 @@ def read_parameters(csv_path) -> dict:
     return data.get('parameters') or {}
 
 
+_ANY_COUNTS = object()
+
+
 def study_tables(project_folder, names, *, level: str = 'gene',
-                 de_method: Optional[str] = None) -> tuple[list, list]:
+                 de_method: Optional[str] = None,
+                 counts=_ANY_COUNTS) -> tuple[list, list]:
     """The DE tables of the studies a run pooled.
 
     Parameters
@@ -112,6 +126,11 @@ def study_tables(project_folder, names, *, level: str = 'gene',
     de_method : str, optional
         The gene-level run's DE method; a study without a table of that
         method uses another, as the Meta-Analysis workspace does.
+    counts : str or None, optional
+        The counts folder the run's study results were made on, None for
+        results whose counts are not known (ADR-015). Left out, a study's
+        table on any counts is used, as for a run saved before KOSMIC
+        recorded them.
 
     Returns
     -------
@@ -120,7 +139,8 @@ def study_tables(project_folder, names, *, level: str = 'gene',
         ``missing`` the names with no readable table in the project (an
         external CSV imported for the run, or a study since removed).
     """
-    loaders, missing = _study_loaders(project_folder, names, level, de_method)
+    loaders, missing = _study_loaders(project_folder, names, level, de_method,
+                                      counts)
     tables = []
     for name in names:
         if name in missing:
@@ -132,14 +152,18 @@ def study_tables(project_folder, names, *, level: str = 'gene',
     return tables, missing
 
 
-def _study_loaders(project_folder, names, level, de_method):
+def _study_loaders(project_folder, names, level, de_method, counts=_ANY_COUNTS):
     """({name: function loading its table}, names without a table), from
-    the project's file listing only."""
+    the project's file listing only; gene tables on 'counts' only, unless
+    it is left out."""
     from kosmic.meta_analysis.io import (
         discover_de_results, load_de_results, load_study_de, require_se,
         select_de_entries,
     )
     discovered = discover_de_results(Path(project_folder))
+    if counts is not _ANY_COUNTS:
+        discovered = [e for e in discovered if e['file_type'] != 'de_results'
+                      or e.get('counts') == counts]
     found: dict = {}
     if level == 'gene':
         chosen, _fallback, _skipped = select_de_entries(
@@ -242,8 +266,12 @@ class MetaFigureInputs(Mapping):
             path = self.run.gene_path if level == 'gene' else self.run.pathway_path
             params = read_parameters(path) if path is not None else {}
             names = [str(n) for n in params.get('study_names') or []]
+            # The study tables on the counts the run pooled (ADR-015); a
+            # run saved before they were recorded takes any.
+            counts = (params['counts'] if 'counts' in params and level == 'gene'
+                      else _ANY_COUNTS)
             loaders, missing = (_study_loaders(self.run.project, names, level,
-                                               params.get('de_method'))
+                                               params.get('de_method'), counts)
                                 if names else ({}, []))
             self._loader_cache[level] = (names, loaders, missing)
         names, loaders, missing = self._loader_cache[level]

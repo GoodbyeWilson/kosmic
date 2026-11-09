@@ -14,6 +14,11 @@
 # 'split_cell_types' names the cell type of each per-cell-type result, so
 # the Select Studies page can offer one cell type across studies.
 #
+# A selection's output folder is 'meta_analysis/<counts>/<selection>/'
+# (ADR-007, ADR-015): 'selection_counts' names the counts the selected
+# results were made on and refuses a selection that mixes them, and
+# 'meta_selection_path' / 'split_selection' build and read the folder.
+#
 # Plus 'require_se' — small validator for "is this DataFrame usable
 # for meta-analysis pooling?" Fails loudly with a helpful remediation
 # message rather than silently fabricating weights.
@@ -466,12 +471,98 @@ def meta_selection_folder(cell_types: Sequence[Optional[str]]) -> str:
     return MIXED
 
 
+#: Counts folder of a selection that includes results whose counts are not
+#: known: imported external tables, and DE runs saved before KOSMIC
+#: recorded the counts (ADR-015).
+UNSPECIFIED_COUNTS = 'unspecified_counts'
+
+
+class MixedCountsError(ValueError):
+    """The selected results were made on different counts (ADR-015)."""
+
+
+def counts_text(counts: Optional[str]) -> str:
+    """'decontX_counts' -> 'decontX counts'; None -> 'counts not recorded'."""
+    return str(counts).replace('_', ' ') if counts else 'counts not recorded'
+
+
+def selection_counts(datasets: Sequence[dict]) -> str:
+    """The counts folder of a meta-analysis selection (ADR-015).
+
+    Parameters
+    ----------
+    datasets : sequence of dict
+        The selected results, each with 'name' and, for a project result,
+        'counts' (the counts folder of its DE run, None when not known);
+        an imported table has 'external' True.
+
+    Returns
+    -------
+    str
+        The counts every project result was made on, or
+        'unspecified_counts' when the selection includes an imported table
+        or a result whose counts are not known, or is empty.
+
+    Raises
+    ------
+    MixedCountsError
+        When project results made on different counts are selected; the
+        message names the results on each.
+    """
+    by_counts: dict = {}
+    unknown = not datasets
+    for d in datasets:
+        counts = None if d.get('external') else d.get('counts')
+        if counts is None:
+            unknown = True
+        else:
+            by_counts.setdefault(counts, []).append(str(d.get('name')))
+    if len(by_counts) > 1:
+        parts = "; ".join(f"{counts_text(c)}: {', '.join(names)}"
+                          for c, names in sorted(by_counts.items()))
+        raise MixedCountsError(
+            "The selected results were made on different counts and cannot be "
+            f"pooled together ({parts}). Select results made on one counts source.")
+    if unknown or not by_counts:
+        return UNSPECIFIED_COUNTS
+    return next(iter(by_counts))
+
+
+def meta_selection_path(counts: Optional[str], selection: str) -> str:
+    """The folder under meta_analysis/ for a selection: '<counts>/<selection>'."""
+    return f"{counts or UNSPECIFIED_COUNTS}/{selection}"
+
+
+def split_selection(selection: Optional[str]) -> tuple:
+    """(counts folder or None, selection) of a folder under meta_analysis/.
+
+    'decontX_counts/Endothelial_Cell' gives ('decontX_counts',
+    'Endothelial_Cell'); a folder of the layout before ADR-015
+    ('Endothelial_Cell') gives (None, 'Endothelial_Cell').
+    """
+    text = str(selection or '').replace('\\', '/').strip('/')
+    if '/' in text:
+        counts, rest = text.split('/', 1)
+        return counts, rest
+    return None, text
+
+
+def selection_label(selection: Optional[str]) -> str:
+    """'Endothelial Cell, decontX counts' for a selection folder; the cell
+    type alone for a folder of the layout before ADR-015."""
+    counts, rest = split_selection(selection)
+    text = rest.replace('_', ' ')
+    return f"{text}, {counts_text(counts)}" if counts else text
+
+
 def mixed_selection_warning(selection: Optional[str]) -> Optional[str]:
     """The output-panel warning for a selection spanning cell types, or None."""
-    if selection != MIXED:
+    counts, rest = split_selection(selection)
+    if rest != MIXED:
         return None
+    folder = f"meta_analysis/{counts}/{MIXED}/" if counts else f"meta_analysis/{MIXED}/"
     return ("Warning: the selected results span more than one cell type, so "
-            "they were pooled together and saved under meta_analysis/mixed/. "
+            f"they were pooled together and saved under {folder}. "
             "Choose one cell type on Select Studies to pool it on its own.")
 
 

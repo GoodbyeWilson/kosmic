@@ -223,10 +223,14 @@ def study_dir(project_dir: PathLike, accession: str) -> Path:
 def meta_output_dir(project_dir: PathLike, selection: Optional[str] = None) -> Path:
     """``{project_dir}/meta_analysis[/{selection}]`` -- meta-analysis output.
 
-    ``selection`` names what was pooled -- a cell type, ``all_cells`` or
-    ``mixed`` (see ``kosmic.meta_analysis.io.meta_selection_folder``) --
-    so each cell type's results and methods record are kept apart
-    (ADR-007). Without it, the top-level folder earlier versions wrote to.
+    ``selection`` is the folder of what was pooled,
+    ``<counts>/<cell type>`` (``kosmic.meta_analysis.io.meta_selection_path``):
+    the counts the study results were made on (ADR-015) and the cell type,
+    ``all_cells`` or ``mixed`` (ADR-007), so each cell type's results and
+    methods record are kept apart, and so are the results on original and
+    corrected counts. A folder of the layout before ADR-015 is the cell
+    type alone. Without ``selection``, the top-level folder earlier
+    versions wrote to.
     """
     base = Path(project_dir) / "meta_analysis"
     return base / selection if selection else base

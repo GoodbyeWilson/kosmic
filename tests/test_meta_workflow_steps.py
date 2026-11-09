@@ -534,9 +534,11 @@ def test_selection_names_the_output_folder(app, per_cell_type_project):
     ws = _scanned(per_cell_type_project)
     combo = ws._cell_type_combo
     combo.setCurrentIndex(combo.findData("CD8_T_Cell"))
-    assert ws.output_selection == "CD8_T_Cell"
+    # Results in the flat layout, with no run record, have no known counts
+    # (ADR-015).
+    assert ws.output_selection == "unspecified_counts/CD8_T_Cell"
     assert ws.selected_study_folders == ["Chaffin", "Guo", "Koenig"]
-    assert "meta_analysis/CD8_T_Cell/" in ws._select_summary.text()
+    assert "meta_analysis/unspecified_counts/CD8_T_Cell/" in ws._select_summary.text()
 
 
 def test_two_cell_types_in_a_row_keep_both_results(app, tmp_path):
