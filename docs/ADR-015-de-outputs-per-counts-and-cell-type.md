@@ -75,7 +75,9 @@ picker and Figure Export's Run list name all three
 
 - The meta-analysis pools runs made on **one counts source** in every
   selected study, and states which. A selection whose studies' runs used
-  different counts is refused, naming the studies.
+  different counts is refused, naming the studies. In the application a
+  **Counts** box on Select Studies chooses the counts, and only runs on
+  them are listed, so a mixed selection cannot be made there.
 - Its outputs go to `meta_analysis/<counts>/<selection>/`, extending
   ADR-007's per-selection folders, so a DecontX and an original-counts
   meta-analysis of the same cell type are kept side by side.

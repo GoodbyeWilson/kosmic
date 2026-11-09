@@ -8,7 +8,7 @@ The scRNA and DE figures show one study, named above the switch (*Study: Chaffin
 
 Each figure draws on the workspace that holds the study when one does, so a change not yet saved, such as an open subclustering, is shown. Otherwise it reads the study's folder: the processed dataset file and the results the DE steps saved. You do not need to open the scRNA or DE workspace, or keep a study loaded, to export its figures. A large study's file takes a few seconds to read; until then its scRNA figures are greyed with *Reading* followed by the file name.
 
-When a study has more than one saved DE run, for example one per cell type, a **Run** list appears above the DE figures. It lists the run in the DE workspace, when it holds one for this study, and then each saved run by cell type and method. The Meta figures have their own **Run** list: the run in the Meta-Analysis workspace, then each meta-analysis run saved in the project, by selection and methods.
+When a study has more than one saved DE run, for example one per cell type, a **Run** list appears above the DE figures. It lists the run in the DE workspace, when it holds one for this study, and then each saved run by cell type, method and counts. The Meta figures have their own **Run** list: the run in the Meta-Analysis workspace, then each meta-analysis run saved in the project, by selection, counts and methods.
 
 A DE figure drawn from saved results that are older than the study's dataset file carries the note *These results were made before the study's file was last saved*, with the date. A later step, such as relabelling cell types, may have changed the data since; run the DE step again to update the figure.
 

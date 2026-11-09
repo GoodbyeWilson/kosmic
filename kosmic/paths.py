@@ -10,25 +10,38 @@ Layout
 ::
 
     project_dir/                     <- Meta workspace root
-        meta_analysis/               <- consensus MA outputs land here
+        meta_analysis/               <- meta-analysis outputs
+            <counts>/                <- the counts the pooled results used
+                <selection>/         <- a cell type, all_cells or mixed
         {accession_1}/               <- one study; a "study_dir"
             raw_data/                <- downloaded source files
             processed_data/          <- pipeline intermediate h5ad files
             figures/                 <- scRNA figure outputs
             results/
                 figures/             <- DE workspace figure exports
-                metabolic_DE_results_all.csv
-                metabolic_DE_results_significant.csv
                 de_analysis/
                     statistics/
-                        {accession_1}_pseudobulk.csv
-                        {accession_1}_DE_deseq2_fast.csv
-                        {accession_1}_DE_welch_cpm.csv
-                        ...
+                        <counts>/    <- original_counts, decontX_counts
+                            {accession_1}_by_cell_type_summary.csv
+                            {accession_1}_DE_deseq2.csv     <- whole-study run
+                            <cell type>/
+                                {accession_1}_{cell type}_DE_deseq2.csv
+                                {accession_1}_{cell type}_DE_deseq2.json
+                                {accession_1}_{cell type}_pseudobulk.csv
+                                {accession_1}_{cell type}_significant_genes.csv
                     pathway_scoring/
                         pathway_de_results.csv
         {accession_2}/
             ...
+
+DE outputs are kept per counts and cell type (ADR-015): ``<counts>`` is
+``original_counts`` for a study's original counts and the layer name for
+corrected counts, so runs on both are kept side by side.
+:func:`de_run_dir` builds a run's folder and :func:`de_output_dirs`
+lists every folder that may hold runs, including ``statistics/`` itself,
+where earlier versions wrote every file. Meta-analysis outputs follow
+the same rule (``kosmic.meta_analysis.io.meta_selection_path``);
+``meta_analysis/<selection>/`` folders of earlier versions stay readable.
 
 The DE workspace operates on a single study at a time -- its
 'project_dir' is one of the '{accession}' folders (a "study_dir").
@@ -156,7 +169,8 @@ def de_pathway_scoring_dir(study_dir: PathLike) -> Path:
 
 
 def de_result_path(study_dir: PathLike, accession: str, method: str) -> Path:
-    """Path to one DE-method result CSV for a study.
+    """Path to one DE-method result CSV for a study, in the flat layout of
+    the versions before ADR-015; new runs are written to :func:`de_run_dir`.
 
     Produces ``{study_dir}/results/de_analysis/statistics/{accession}_DE_{method}.csv``.
     ``method`` must match the regex in
@@ -177,7 +191,8 @@ def significant_path(study_dir, accession):
 
 
 def pseudobulk_path(study_dir: PathLike, accession: str) -> Path:
-    """Path to the per-study pseudobulk counts CSV.
+    """Path to the per-study pseudobulk counts CSV, in the flat layout of
+    the versions before ADR-015 (see :func:`de_result_path`).
 
     Produces ``{study_dir}/results/de_analysis/statistics/{accession}_pseudobulk.csv``.
     """

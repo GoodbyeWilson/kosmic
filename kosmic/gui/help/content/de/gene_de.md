@@ -198,8 +198,44 @@ false positives from genes with unusually low variance.
 BH FDR at 5%. The displayed scope depends on which display filters are
 active -- see the **DE Results table** note above.
 
+## Where results are saved
+
+Each run is saved in the study's `results/de_analysis/statistics/`
+folder, in a folder for the counts it used: `original_counts/` for the
+original counts and `decontX_counts/` for the DecontX counts. Runs on
+the two counts are therefore kept side by side and can be compared.
+
+```
+statistics/
+    original_counts/
+        {study}_DE_deseq2.csv                       a whole-study run
+        {study}_by_cell_type_summary.csv
+        Endothelial_Cell/
+            {study}_Endothelial_Cell_DE_deseq2.csv
+            {study}_Endothelial_Cell_DE_deseq2.json
+            {study}_Endothelial_Cell_pseudobulk.csv
+            {study}_Endothelial_Cell_significant_genes.csv
+    decontX_counts/
+        ...
+```
+
+The `.json` file records the run's settings, including the counts and
+the significance rule. The significant-genes file lists the genes that
+pass that rule.
+
+The summary table of **Run per cell type...** has one row per cell
+type: whether it ran and why not, the method, counts, design and
+minimum cells per donor; the donors in each group and those left out
+for having too few cells; the cells tested and the median per donor;
+the genes tested, significant, up and down; the FDR and minimum
+|log2FC| used; the cell type's folder; and when the run was saved.
+
+Results saved directly in `statistics/` by earlier versions are still
+listed and opened.
+
 ## Exporting
 
 Use the export buttons in the sidebar to save the full table, the
-significant-only subset, and the analysis settings JSON. The CSVs are
-the inputs the meta-analysis workspace looks for.
+significant-only subset, and the analysis settings JSON. They are saved
+in the folder for the counts loaded. The DE tables are the inputs the
+meta-analysis workspace looks for.
