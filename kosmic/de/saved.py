@@ -255,6 +255,70 @@ def save_run_record(de_path, record: dict) -> Path:
     return path
 
 
+def recut_saved_run(de_path, de_results, fdr: float, lfc: float) -> Path:
+    """Apply a changed significance rule to a gene DE run (ADR-015).
+
+    The DE test is not run again. The run's significant-genes file, beside
+    its table, is rewritten with the genes that pass the rule. When the
+    run's table is saved, its record stores the rule, and for a run of
+    one cell type its row of the batch summary in the counts folder
+    (``*_by_cell_type_summary.csv``, matched on folder and method) gets
+    the new counts and rule, so every file of the run reports the same
+    selection.
+
+    Parameters
+    ----------
+    de_path : path
+        The run's table, ``{accession}_DE_{method}.csv``. It need not
+        exist yet (a run whose table is still being written); then only
+        the significant-genes file is written.
+    de_results : DataFrame
+        The run's results.
+    fdr, lfc : float
+        The rule; ``lfc`` 0 for no fold-change minimum.
+
+    Returns
+    -------
+    Path
+        The significant-genes file.
+    """
+    from kosmic.de.de_analysis import significant_subset
+
+    de_path = Path(de_path)
+    stem, method = de_path.stem.rsplit('_DE_', 1)
+    sig = significant_subset(de_results, fdr=fdr, lfc=lfc)
+    sig_path = de_path.with_name(f"{stem}_significant_genes.csv")
+    sig_path.parent.mkdir(parents=True, exist_ok=True)
+    sig.to_csv(sig_path, index=False)
+    if not de_path.is_file():
+        return sig_path
+
+    record = read_run_record(de_path) or {}
+    record.update(fdr=float(fdr), lfc_threshold=float(lfc))
+    save_run_record(de_path, record)
+
+    # A run of one cell type sits in statistics/<counts>/<cell type>/.
+    counts_dir = de_path.parent.parent
+    if counts_dir.parent.name == 'statistics':
+        lfcs = pd.to_numeric(sig['logfoldchanges'], errors='coerce')
+        for summary in counts_dir.glob('*_by_cell_type_summary.csv'):
+            try:
+                table = pd.read_csv(summary)
+            except (OSError, ValueError):
+                continue
+            if not {'folder', 'method'} <= set(table.columns):
+                continue
+            row = ((table['folder'].astype(str) == de_path.parent.name)
+                   & (table['method'].astype(str) == method))
+            if not row.any():
+                continue
+            table.loc[row, ['n_significant', 'n_up', 'n_down', 'fdr', 'lfc_threshold']] = [
+                len(sig), int((lfcs > 0).sum()), int((lfcs < 0).sum()),
+                float(fdr), float(lfc)]
+            table.to_csv(summary, index=False)
+    return sig_path
+
+
 def read_run_record(de_path) -> Optional[dict]:
     """The run's record, or None for a run saved before records were kept
     (or one whose record cannot be read)."""

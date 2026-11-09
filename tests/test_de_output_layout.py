@@ -344,3 +344,91 @@ def test_the_significance_rule_is_set_in_the_sidebar():
     ws.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+
+
+def _cell_type_run(tmp_path):
+    """A saved per-cell-type run with its record and a batch summary."""
+    from kosmic.de.batch import SUMMARY_COLUMNS
+    from kosmic.de.saved import save_run_record
+    run_dir = de_run_dir(tmp_path, 'decontX_counts', 'Endothelial Cell')
+    run_dir.mkdir(parents=True)
+    de = pd.DataFrame({'names': ['A', 'B', 'C', 'D'],
+                       'logfoldchanges': [1.0, -0.1, -2.0, 0.3],
+                       'pvals_adj': [0.01, 0.01, 0.01, 0.5]})
+    de_path = run_dir / 'S1_Endothelial_Cell_DE_deseq2.csv'
+    de.to_csv(de_path, index=False)
+    save_run_record(de_path, {'method': 'deseq2', 'cell_type': 'Endothelial Cell',
+                              'fdr': 0.05, 'lfc_threshold': 0.0})
+    row = dict.fromkeys(SUMMARY_COLUMNS)
+    row.update(cell_type='Endothelial Cell', status='ok', method='deseq2',
+               folder=run_dir.name, n_significant=3, n_up=1, n_down=2,
+               fdr=0.05, lfc_threshold=0.0)
+    other = {**row, 'cell_type': 'Fibroblast', 'folder': 'Fibroblast'}
+    summary = run_dir.parent / 'S1_by_cell_type_summary.csv'
+    pd.DataFrame([row, other], columns=list(SUMMARY_COLUMNS)).to_csv(summary, index=False)
+    return de_path, de, summary
+
+
+def test_a_changed_rule_recuts_every_file_of_a_cell_type_run(tmp_path):
+    from kosmic.de.saved import read_run_record, recut_saved_run
+    de_path, de, summary = _cell_type_run(tmp_path)
+    out = recut_saved_run(de_path, de, 0.05, 0.5)
+    # Beside the run's own table, not the whole-study name in the counts folder.
+    assert out == de_path.parent / 'S1_Endothelial_Cell_significant_genes.csv'
+    assert not (de_path.parent.parent / 'S1_significant_genes.csv').exists()
+    assert list(pd.read_csv(out)['names']) == ['A', 'C']
+    rec = read_run_record(de_path)
+    assert (rec['fdr'], rec['lfc_threshold'], rec['cell_type']) == (0.05, 0.5, 'Endothelial Cell')
+    table = pd.read_csv(summary).set_index('cell_type')
+    assert table.loc['Endothelial Cell', ['n_significant', 'n_up', 'n_down',
+                                          'lfc_threshold']].tolist() == [2, 1, 1, 0.5]
+    assert table.loc['Fibroblast', 'n_significant'] == 3     # other rows untouched
+
+
+def test_a_run_whose_table_is_not_written_yet_gets_only_its_significant_file(tmp_path):
+    from kosmic.de.saved import recut_saved_run
+    de_path = de_run_dir(tmp_path, 'raw') / 'S1_DE_deseq2.csv'
+    de = pd.DataFrame({'names': ['A'], 'logfoldchanges': [1.0], 'pvals_adj': [0.01]})
+    out = recut_saved_run(de_path, de, 0.05, 0.0)
+    assert out == de_path.parent / 'S1_significant_genes.csv' and out.is_file()
+    assert not de_path.with_suffix('.json').exists()
+
+
+def test_a_legacy_run_records_the_rule_it_is_recut_with(tmp_path):
+    from kosmic.de.saved import read_run_record, recut_saved_run, run_significance
+    stats = tmp_path / 'results' / 'de_analysis' / 'statistics'
+    stats.mkdir(parents=True)
+    de = pd.DataFrame({'names': ['A'], 'logfoldchanges': [1.0], 'pvals_adj': [0.01]})
+    de_path = stats / 'S1_Endothelial_Cell_DE_deseq2.csv'
+    de.to_csv(de_path, index=False)
+    recut_saved_run(de_path, de, 0.05, 0.0)
+    assert run_significance(read_run_record(de_path)) == (0.05, 0.0, False)
+    assert (stats / 'S1_Endothelial_Cell_significant_genes.csv').is_file()
+
+
+def test_apply_on_a_shown_cell_type_run_writes_to_that_run(tmp_path):
+    """The Gene DE page cuts the run it shows, not a whole-study file."""
+    from types import SimpleNamespace
+    from kosmic.de.saved import read_run_record
+    from kosmic.gui.de_analysis.pages.gene_de_page import GeneDEPage
+    de_path, de, _summary = _cell_type_run(tmp_path)
+    logs = []
+    page = SimpleNamespace(
+        ws=SimpleNamespace(de_results=de, project_dir=str(tmp_path), gse_accession='S1',
+                           h5ad_path=None, de_method='deseq2',
+                           log_message=SimpleNamespace(emit=logs.append)),
+        pval_filter=SimpleNamespace(value=lambda: 0.05),
+        fc_filter=SimpleNamespace(value=lambda: 0.5),
+        eb_checkbox=SimpleNamespace(isChecked=lambda: False),
+        _count_source=lambda: 'decontX_counts',
+        _shown_de_path=de_path)
+    GeneDEPage._auto_export_significant(page)
+    assert (de_path.parent / 'S1_Endothelial_Cell_significant_genes.csv').is_file()
+    assert not (de_path.parent.parent / 'S1_significant_genes.csv').exists()
+    assert read_run_record(de_path)['lfc_threshold'] == 0.5
+    assert 'Exported 2 genes' in logs[0]
+
+    # A run made in this session goes to the whole-study file of its counts.
+    page._shown_de_path = None
+    GeneDEPage._auto_export_significant(page)
+    assert (de_path.parent.parent / 'S1_significant_genes.csv').is_file()

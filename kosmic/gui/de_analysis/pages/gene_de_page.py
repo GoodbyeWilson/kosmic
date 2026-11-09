@@ -273,6 +273,10 @@ class GeneDEPage(SidebarTabbedPage):
         self.ws = workspace
         self.de_worker = None
         self._meta_export_worker = None
+        # The saved table of the run shown, when it was opened from disk
+        # (a restored or per-cell-type run); None for a run made in this
+        # session, whose table is the whole-study one (ADR-015).
+        self._shown_de_path = None
         self._last_run_comparison = None  # settings snapshot at last DE run
         self._setup_ui()
         self.ws.mode_changed.connect(self._on_mode_changed)
@@ -1462,6 +1466,7 @@ class GeneDEPage(SidebarTabbedPage):
         time, marked as assumed."""
         from kosmic.de.saved import read_run_record, run_significance
 
+        self._shown_de_path = Path(de_path)
         fdr, lfc, assumed = run_significance(read_run_record(de_path))
         for spin, value in ((self.pval_filter, fdr), (self.fc_filter, lfc)):
             spin.blockSignals(True)
@@ -2571,6 +2576,7 @@ class GeneDEPage(SidebarTabbedPage):
         self.ws.significant_genes = significant_subset(
             de_results, fdr=self.pval_filter.value(), lfc=self.fc_filter.value())
         self.ws.significance = (self.pval_filter.value(), self.fc_filter.value(), False)
+        self._shown_de_path = None
         self.ws.pathway_coverage = pathway_coverage
         self.ws.sample_df = sample_df
         # Snapshot the settings this run used, so later edits flag a re-run.
@@ -3279,15 +3285,16 @@ class GeneDEPage(SidebarTabbedPage):
         return Path.cwd() / "de_analysis_results"
 
     def _auto_export_significant(self):
-        """Write the significant-gene table beside the full one.
+        """Write the significant-gene table beside the shown run's table.
 
-        Every run already writes '{accession}_DE_{method}.csv'; this is
-        the same table cut to the FDR and log2FC thresholds currently set
-        on the results tab, which is what the counts in the app report.
-        It used to be a button, which meant the file existed only if
-        someone remembered to press it.
+        Every run writes '{accession}_DE_{method}.csv'; this is the same
+        table cut to the rule set under Significance, which is what the
+        counts in the app report. For a saved run the run's record and,
+        for one cell type, its batch-summary row take the rule too
+        (:func:`kosmic.de.saved.recut_saved_run`), so all its files agree.
         """
-        from kosmic.de.de_analysis import significant_subset
+        from kosmic.de.batch import method_label
+        from kosmic.de.saved import recut_saved_run
 
         if self.ws.de_results is None or self.ws.de_results.empty:
             return
@@ -3296,20 +3303,26 @@ class GeneDEPage(SidebarTabbedPage):
 
         gse_id = self.ws.gse_accession or (
             Path(self.ws.h5ad_path).stem if self.ws.h5ad_path else "unknown")
+        de_path = self._shown_de_path
         try:
-            sig = significant_subset(
-                self.ws.de_results,
-                fdr=self.pval_filter.value(),
-                lfc=self.fc_filter.value())
-            # The run's counts folder (ADR-015), beside its DE table.
-            out = (de_run_dir(self.ws.project_dir, self._count_source())
-                   / f"{gse_id}_significant_genes.csv")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            sig.to_csv(out, index=False)
+            in_study = de_path is not None and Path(de_path).resolve().is_relative_to(
+                Path(self.ws.project_dir).resolve())
+        except OSError:
+            in_study = False
+        if not in_study:
+            # A run made in this session: the whole-study table in the
+            # counts folder, as the meta-analysis export writes it.
+            label = method_label(self.ws.de_method, self.eb_checkbox.isChecked())
+            de_path = (de_run_dir(self.ws.project_dir, self._count_source())
+                       / f"{gse_id}_DE_{label}.csv")
+        try:
+            fdr, lfc = self.pval_filter.value(), self.fc_filter.value()
+            out = recut_saved_run(de_path, self.ws.de_results, fdr, lfc)
+            from kosmic.de.de_analysis import significant_subset
+            n = len(significant_subset(self.ws.de_results, fdr=fdr, lfc=lfc))
             self.ws.log_message.emit(
-                f"Exported {len(sig):,} genes with FDR<"
-                f"{self.pval_filter.value():g} and estimated |log2FC|>"
-                f"{self.fc_filter.value():g}: {out.name}")
+                f"Exported {n:,} genes with FDR<{fdr:g} and estimated "
+                f"|log2FC|>{lfc:g}: {out.name}")
         except Exception as e:
             self.ws.log_message.emit(
                 f"Warning: could not export significant genes: {e}")
