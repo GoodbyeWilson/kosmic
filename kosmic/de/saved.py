@@ -47,73 +47,120 @@ class GeneDERun:
     ``name`` is the file's accession part ('Chaffin_Endothelial_Cell');
     ``cell_type`` the cell type it was run on, or None for a whole-study
     run (or one whose cell type cannot be told from its name); ``method``
-    the method token ('deseq2', 'welch_cpm_eb', ...).
+    the method token ('deseq2', 'welch_cpm_eb', ...); ``counts`` the
+    counts folder ('original_counts', 'decontX_counts'; ADR-015), or None
+    when neither its folder nor its record says.
     """
 
     name: str
     cell_type: Optional[str]
     method: str
     path: Path
+    counts: Optional[str] = None
 
     @property
     def label(self) -> str:
-        return f"{self.cell_type or self.name} ({self.method})"
+        detail = self.method + (f", {self.counts.replace('_', ' ')}" if self.counts else '')
+        return f"{self.cell_type or self.name} ({detail})"
 
     @property
     def record_path(self) -> Path:
         return run_record_path(self.path)
 
 
-def list_gene_de_runs(study_dir) -> list[GeneDERun]:
+def list_gene_de_runs(study_dir, counts: Optional[str] = None) -> list[GeneDERun]:
     """The study's saved gene DE tables, whole-study runs first, then by
-    cell type and method.
+    cell type, method and counts.
 
-    The cell type of a per-cell-type run is taken from its run record,
-    else from the batch summary written beside it
+    Runs are found in both layouts: directly in ``statistics/`` (earlier
+    versions) and in its ``<counts>/`` and ``<counts>/<cell type>/``
+    folders (ADR-015). The cell type of a per-cell-type run is taken from
+    its run record, else from a batch summary
     ('{accession}_by_cell_type_summary.csv'), else from the file name: the
     part after the study folder's name, compared without case (the Stroke
-    project has both 'GSE174574_...' and 'gse174574_...').
+    project has both 'GSE174574_...' and 'gse174574_...'). With *counts*,
+    only runs on those counts and runs whose counts are not known.
     """
-    return gene_de_runs_in(de_stats_dir(study_dir), Path(study_dir).name)
+    return gene_de_runs_in(de_stats_dir(study_dir), Path(study_dir).name, counts=counts)
 
 
-def gene_de_runs_in(stats, study: str) -> list[GeneDERun]:
-    """:func:`list_gene_de_runs` for a statistics folder, with 'study' the
-    name a per-cell-type file starts with."""
+def run_counts(path) -> Optional[str]:
+    """The counts folder a saved DE run used: its folder in the ADR-015
+    layout, else the 'counts_source' in its run record, else None."""
+    from kosmic.paths import counts_folder_name, counts_folder_of
+
+    folder = counts_folder_of(path)
+    if folder:
+        return folder
+    record = read_run_record(path) or {}
+    return counts_folder_name(record['counts_source']) if record.get('counts_source') else None
+
+
+def gene_de_runs_in(stats, study: str, counts: Optional[str] = None) -> list[GeneDERun]:
+    """:func:`list_gene_de_runs` for a ``statistics/`` folder, with 'study'
+    the name a per-cell-type file starts with."""
     from kosmic.meta_analysis.io import _DE_RESULTS_PATTERN
+    from kosmic.paths import de_output_dirs
 
-    stats = Path(stats)
-    if not stats.is_dir():
+    dirs = de_output_dirs(stats)
+    if not dirs:
         return []
-    labels = _summary_cell_types(stats)
+    labels = _summary_cell_types(dirs)
     runs = []
-    for path in sorted(stats.glob('*_DE_*.csv')):
-        m = _DE_RESULTS_PATTERN.match(path.name)
-        if not m:
-            continue
-        name, method = m.group(1), m.group(2)
-        record = read_run_record(path) or {}
-        if 'cell_type' in record:
-            cell_type = record['cell_type'] or None
-        elif name in labels:
-            cell_type = labels[name]
-        else:
-            cell_type = _cell_type_from_name(name, study)
-        runs.append(GeneDERun(name=name, cell_type=cell_type, method=method, path=path))
+    for folder in dirs:
+        for path in sorted(folder.glob('*_DE_*.csv')):
+            m = _DE_RESULTS_PATTERN.match(path.name)
+            if not m:
+                continue
+            name, method = m.group(1), m.group(2)
+            record = read_run_record(path) or {}
+            if 'cell_type' in record:
+                cell_type = record['cell_type'] or None
+            elif name in labels:
+                cell_type = labels[name]
+            else:
+                cell_type = _cell_type_from_name(name, study)
+            run_counts_ = run_counts(path)
+            if counts is not None and run_counts_ not in (None, counts):
+                continue
+            runs.append(GeneDERun(name=name, cell_type=cell_type, method=method,
+                                  path=path, counts=run_counts_))
     runs.sort(key=lambda r: (r.cell_type is not None, (r.cell_type or '').lower(),
-                             r.method, r.name))
+                             r.method, r.counts or '', r.name))
     return runs
 
 
-def _summary_cell_types(stats: Path) -> dict:
-    """{run accession: cell type} from the batch summaries in 'stats'."""
+def find_de_result(study_dir, accession: str, method: str,
+                   counts: Optional[str] = None) -> Optional[Path]:
+    """A whole-study (or named) run's DE table: in its counts folder
+    (ADR-015) when *counts* is given and the file is there, else in any
+    counts folder, else directly in ``statistics/`` (earlier versions).
+    None when there is none."""
+    from kosmic.paths import de_output_dirs, de_stats_dir
+
+    name = f"{accession}_DE_{method}.csv"
+    stats = de_stats_dir(study_dir)
+    if counts:
+        hit = stats / counts / name
+        if hit.is_file():
+            return hit
+    for folder in de_output_dirs(stats)[1:]:
+        if (folder / name).is_file() and folder.parent == stats:
+            return folder / name
+    flat = stats / name
+    return flat if flat.is_file() else None
+
+
+def _summary_cell_types(dirs) -> dict:
+    """{run accession: cell type} from the batch summaries in *dirs*."""
     out = {}
-    for path in stats.glob('*_by_cell_type_summary.csv'):
-        try:
-            df = pd.read_csv(path, usecols=['cell_type', 'accession'])
-        except (OSError, ValueError):
-            continue
-        out.update(zip(df['accession'].astype(str), df['cell_type'].astype(str)))
+    for d in dirs:
+        for path in Path(d).glob('*_by_cell_type_summary.csv'):
+            try:
+                df = pd.read_csv(path, usecols=['cell_type', 'accession'])
+            except (OSError, ValueError):
+                continue
+            out.update(zip(df['accession'].astype(str), df['cell_type'].astype(str)))
     return out
 
 

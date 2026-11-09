@@ -43,8 +43,9 @@ def discover_de_results(project_folder: Path) -> list[dict]:
     Expected layout per analysis folder::
 
         {project_folder}/{analysis_name}/results/de_analysis/statistics/
-            {accession}_GeneStats_{Norm|Raw}.csv
-            {accession}_DE_{method}.csv
+            [<counts>/[<cell type>/]]
+                {accession}_GeneStats_{Norm|Raw}.csv
+                {accession}_DE_{method}.csv
         {project_folder}/{analysis_name}/results/de_analysis/pathway_scoring/
             pathway_de_results.csv
 
@@ -59,8 +60,9 @@ def discover_de_results(project_folder: Path) -> list[dict]:
         'accession' (str), 'file_type' ('"gene"', '"de_results"',
         or '"pathway_de"'), 'variant' ('"Norm"'/'"Raw"' for gene
         stats, DE method name for de_results, '"pathway_de"'), 'path'
-        (Path), 'analysis_folder' (str), and 'de_method' (str) for
-        de_results entries.
+        (Path), 'analysis_folder' (str), and 'de_method' (str) and
+        'counts' (the counts folder, or None when not known; see
+        'kosmic.de.saved.run_counts') for de_results entries.
     """
     project_folder = Path(project_folder)
     if not project_folder.is_dir():
@@ -72,10 +74,15 @@ def discover_de_results(project_folder: Path) -> list[dict]:
         if not child.is_dir() or child.name == MASTER_ACCESSION:
             continue
 
-        # Gene-stats + per-method DE tables in statistics/
-        stats_dir = de_stats_dir(child)
-        if stats_dir.is_dir():
-            for csv_file in sorted(stats_dir.iterdir()):
+        # Gene-stats + per-method DE tables in statistics/, in the flat
+        # layout of earlier versions and in its <counts>/<cell type>/
+        # folders (ADR-015).
+        from kosmic.de.saved import run_counts
+        from kosmic.paths import de_output_dirs
+        csv_files = [f for d in de_output_dirs(de_stats_dir(child))
+                     for f in sorted(d.iterdir())]
+        if csv_files:
+            for csv_file in csv_files:
                 if not csv_file.is_file() or csv_file.suffix.lower() != ".csv":
                     continue
 
@@ -97,6 +104,7 @@ def discover_de_results(project_folder: Path) -> list[dict]:
                         "file_type": "de_results",
                         "variant": de_match.group(2),
                         "de_method": de_match.group(2),
+                        "counts": run_counts(csv_file),
                         "path": csv_file.resolve(),
                         "analysis_folder": child.name,
                     })

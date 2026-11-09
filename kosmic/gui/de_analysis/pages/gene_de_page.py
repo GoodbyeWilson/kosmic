@@ -17,7 +17,7 @@ from kosmic.gui.shared.widgets import (
     StageAccordion, StageSummaryCard,
 )
 from kosmic.paths import (
-    de_analysis_dir, de_result_path, de_stats_dir, significant_path,
+    de_analysis_dir, de_stats_dir, significant_path,
 )
 from kosmic.de.de_analysis import required_donor_count
 from kosmic.numerical import neg_log10
@@ -1373,11 +1373,15 @@ class GeneDEPage(SidebarTabbedPage):
         if not gse_id:
             return
 
-        path = de_result_path(self.ws.project_dir, gse_id, label)
-        if not path.is_file():
+        from kosmic.de.saved import find_de_result
+        from kosmic.paths import counts_folder_name
+        counts = counts_folder_name(self._count_source())
+        path = find_de_result(self.ws.project_dir, gse_id, label, counts=counts)
+        if path is None:
             # A study analysed per cell type has one result file per cell
             # type and no whole-study file: offer them in the picker.
-            self._batch_runs = self._load_cell_type_runs(stats_dir, gse_id, label)
+            self._batch_runs = self._load_cell_type_runs(stats_dir, gse_id, label,
+                                                         counts=counts)
             self._populate_batch_view()
             return
         try:
@@ -1388,16 +1392,18 @@ class GeneDEPage(SidebarTabbedPage):
         except Exception as e:
             self.ws.log_message.emit(f"Could not load previous DE results: {e}")
 
-    def _load_cell_type_runs(self, stats_dir, accession, label):
+    def _load_cell_type_runs(self, stats_dir, accession, label, counts=None):
         """Saved per-cell-type results ('{accession}_{cell type}_DE_{label}.csv'),
-        as 'kosmic.de.saved' lists them for Figure Export too."""
+        as 'kosmic.de.saved' lists them for Figure Export too. With
+        *counts* (a counts folder, ADR-015), only runs on those counts and
+        runs from before the counts were recorded."""
         from kosmic.de.batch import CellTypeRun
         from kosmic.de.de_analysis import significant_subset
         from kosmic.de.saved import gene_de_runs_in, read_gene_de
 
         runs = []
         prefix = f"{accession}_"
-        for saved in gene_de_runs_in(stats_dir, accession):
+        for saved in gene_de_runs_in(stats_dir, accession, counts=counts):
             if saved.method != label or not saved.name.startswith(prefix):
                 continue
             slug = saved.name[len(prefix):]

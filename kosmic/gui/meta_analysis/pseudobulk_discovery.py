@@ -128,6 +128,16 @@ def find_pseudobulk_paths(
             continue
         name = d.get('name', '?')
 
+        # The run's own pseudobulk beside its DE table: one per cell-type
+        # folder in the ADR-015 layout, found by the DE file's accession.
+        from kosmic.meta_analysis.io import _DE_RESULTS_PATTERN
+        de_file = Path(str(d['path']))
+        m = _DE_RESULTS_PATTERN.match(de_file.name)
+        own = de_file.with_name(f"{m.group(1)}_pseudobulk.csv") if m else None
+        if own is not None and own.is_file():
+            pb_paths.append(str(own))
+            continue
+
         # Prefer project-folder layout; fall back to scanning the
         # original DE output directory.
         fallback = _try_project_folder_fallback(project_folder, name, log_cb)
