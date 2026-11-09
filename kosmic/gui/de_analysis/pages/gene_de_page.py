@@ -295,7 +295,9 @@ class GeneDEPage(SidebarTabbedPage):
         filters_lay = QVBoxLayout(filters_page)
         fdr_page = QWidget()
         fdr_lay = QVBoxLayout(fdr_page)
-        for _lay in (model_lay, design_lay, filters_lay, fdr_lay):
+        sig_page = QWidget()
+        sig_lay = QVBoxLayout(sig_page)
+        for _lay in (model_lay, design_lay, filters_lay, fdr_lay, sig_lay):
             _lay.setContentsMargins(0, 4, 0, 0)
             _lay.setSpacing(4)
 
@@ -667,6 +669,53 @@ class GeneDEPage(SidebarTabbedPage):
         for _lay in (model_lay, design_lay, filters_lay, fdr_lay):
             _lay.addStretch()
 
+        # The significance rule: recorded with each run (ADR-015), so it
+        # is set here with the run's other settings rather than on a
+        # results tab, where it could not be seen before a run.
+        self.pval_filter = NoScrollDoubleSpinBox()
+        self.pval_filter.setRange(0, 1)
+        self.pval_filter.setValue(DEFAULT_FDR)
+        self.pval_filter.setSingleStep(0.01)
+        self.pval_filter.setPrefix("FDR < ")
+        self.pval_filter.setToolTip(
+            "A gene is significant when its FDR is below this (its raw"
+            " p-value with 'Raw p-values' ticked under the volcano)."
+            + "\n\n" +
+            "Recorded with each DE run, as Min |log2FC| is. Changing it"
+            " after a run updates the shown results and the run's"
+            " significant-genes file when you press Apply filters under"
+            " the volcano; the test itself is not run again.")
+        self.pval_filter.valueChanged.connect(self._mark_filters_dirty)
+
+        self.fc_filter = NoScrollDoubleSpinBox()
+        self.fc_filter.setRange(0, 10)
+        self.fc_filter.setValue(DEFAULT_LFC_THRESHOLD)
+        self.fc_filter.setSingleStep(0.1)
+        self.fc_filter.setPrefix("|log2FC| > ")
+        self.fc_filter.setSpecialValueText("Min |log2FC|: Off")
+        self.fc_filter.setToolTip(
+            "Keep genes whose ESTIMATED |log2FC| exceeds this. Off: a gene"
+            " is significant on FDR alone."
+            + "\n\n" +
+            "Recorded with each DE run: its significant-genes file, the"
+            " batch summary and the Methods text use it, and a saved run"
+            " reopens with the value it was run with."
+            + "\n\n" +
+            "A display cut on the point estimate, not a test: the FDR"
+            " beside it answers 'did this gene change?', not"
+            " 'did it change by more than this much?'."
+            + "\n\n" +
+            "Read the 95% CI column before describing a gene as"
+            " changing by more than N-fold -- an estimate of 2.9 with"
+            " an interval of [1.4, 4.3] supports a weaker claim than"
+            " the 2.9 suggests.")
+        self.fc_filter.valueChanged.connect(self._mark_filters_dirty)
+        sig_lay.addWidget(SecondaryLabel("Significant when"))
+        sig_lay.addWidget(self.pval_filter)
+        sig_lay.addWidget(self.fc_filter)
+        for _spin in (self.pval_filter, self.fc_filter):
+            _spin.valueChanged.connect(self._refresh_card_summaries)
+
         # What the dataset IS comes before every setting, because it
         # decides most of them: whether 'study' belongs in the design,
         # whether detection has to be applied per study, and whether a
@@ -696,6 +745,11 @@ class GeneDEPage(SidebarTabbedPage):
         self._fdr_card.set_settings_widget(fdr_page)
         left_layout.addWidget(self._fdr_card)
         self._accordion.add_card('fdr', self._fdr_card)
+
+        self._sig_card = StageSummaryCard("Significance", icon="circle-dot")
+        self._sig_card.set_settings_widget(sig_page)
+        left_layout.addWidget(self._sig_card)
+        self._accordion.add_card('significance', self._sig_card)
 
         left_layout.addStretch()
         self._accordion.finalize()
@@ -822,44 +876,7 @@ class GeneDEPage(SidebarTabbedPage):
         results_layout_inner = QVBoxLayout(results_widget)
 
         filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Filter:"))
 
-        self.pval_filter = NoScrollDoubleSpinBox()
-        self.pval_filter.setRange(0, 1)
-        self.pval_filter.setValue(DEFAULT_FDR)
-        self.pval_filter.setSingleStep(0.01)
-        self.pval_filter.setPrefix("FDR < ")
-        self.pval_filter.setToolTip(
-            "Threshold applied to FDR or raw p-values depending on the "
-            "'Raw p-values' toggle next to the volcano. Sig flag flips "
-            "to use whichever is active.")
-        self.pval_filter.valueChanged.connect(self._mark_filters_dirty)
-        filter_layout.addWidget(self.pval_filter)
-
-        self.fc_filter = NoScrollDoubleSpinBox()
-        self.fc_filter.setRange(0, 10)
-        self.fc_filter.setValue(DEFAULT_LFC_THRESHOLD)
-        self.fc_filter.setSingleStep(0.1)
-        self.fc_filter.setPrefix("|log2FC| > ")
-        self.fc_filter.setSpecialValueText("Min |log2FC|: Off")
-        self.fc_filter.setToolTip(
-            "Keep genes whose ESTIMATED |log2FC| exceeds this. Off: a gene"
-            " is significant on FDR alone."
-            + "\n\n" +
-            "Recorded with each DE run: its significant-genes file, the"
-            " batch summary and the Methods text use it, and a saved run"
-            " reopens with the value it was run with."
-            + "\n\n" +
-            "A display cut on the point estimate, not a test: the FDR"
-            " beside it answers 'did this gene change?', not"
-            " 'did it change by more than this much?'."
-            + "\n\n" +
-            "Read the 95% CI column before describing a gene as"
-            " changing by more than N-fold -- an estimate of 2.9 with"
-            " an interval of [1.4, 4.3] supports a weaker claim than"
-            " the 2.9 suggests.")
-        self.fc_filter.valueChanged.connect(self._mark_filters_dirty)
-        filter_layout.addWidget(self.fc_filter)
 
         self.sig_count_label = QLabel("")
         filter_layout.addWidget(self.sig_count_label)
@@ -1065,6 +1082,10 @@ class GeneDEPage(SidebarTabbedPage):
         self._filter_results()
         self._on_pval_toggle()
         self._auto_export_significant()
+        if self.ws.de_results is not None:
+            # Enrichment and Figures start from this (ADR-015).
+            self.ws.significance = (self.pval_filter.value(),
+                                    self.fc_filter.value(), False)
         # _on_pval_toggle re-rendered the scatter, so re-apply the highlight.
         if hasattr(self, '_volcano_gene_search'):
             self._on_volcano_gene_search(self._volcano_gene_search.text())
@@ -1870,6 +1891,13 @@ class GeneDEPage(SidebarTabbedPage):
         else:
             self._fdr_card.set_summary(
                 ["DESeq2 only", "not used by this engine"])
+
+        if not hasattr(self, '_sig_card'):
+            return
+        lfc = self.fc_filter.value()
+        self._sig_card.set_summary([
+            f"FDR < {self.pval_filter.value():g}",
+            f"|log2FC| > {lfc:g}" if lfc > 0 else "no |log2FC| minimum"])
 
     def _show_advanced_filters(self):
         """The gene filter's numbers, plus the optional cell-level floor.
@@ -2883,8 +2911,12 @@ class GeneDEPage(SidebarTabbedPage):
             scope_note = "  (raw p-values, no MTC)"
         else:
             scope_note = ""
+        rule = (f"|log2FC| > {fc_threshold:g}" if fc_threshold > 0
+                else "no |log2FC| minimum")
+        p_name = "p" if use_raw_pvals else "FDR"
         self.sig_count_label.setText(
-            f"{sig_count} significant / {total} genes{scope_note}")
+            f"{sig_count} significant / {total} genes{scope_note}  \u00b7  "
+            f"{p_name} < {pval_threshold:g}, {rule} (set under Significance)")
 
         self._update_count_readout(pval_threshold, fc_threshold, use_raw_pvals)
 

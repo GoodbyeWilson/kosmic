@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pandas as pd
 import pytest
@@ -317,3 +318,29 @@ def test_pseudobulk_is_the_one_beside_each_run(tmp_path, monkeypatch):
     paths = pd_disc.find_pseudobulk_paths(datasets, str(tmp_path))
     assert [p.split('\\')[-1].split('/')[-1] for p in paths] == [
         f"{e['accession']}_pseudobulk.csv" for e in found]
+
+
+def test_the_significance_rule_is_set_in_the_sidebar():
+    """FDR and Min |log2FC| sit in the Gene DE sidebar's Significance card,
+    with the run's other settings, and its summary states the rule."""
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtWidgets import QApplication
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    app = QApplication.instance() or QApplication([])
+    ws = DEWorkspace()
+    page = ws.gene_de_page
+    sig_page = page._sig_card._settings_scroll.widget()
+    assert page.pval_filter.parent() is sig_page
+    assert page.fc_filter.parent() is sig_page
+
+    def summary():
+        box = page._sig_card._summary_box
+        return [box.itemAt(i).widget().text() for i in range(box.count())]
+    assert summary() == ["FDR < 0.05", "no |log2FC| minimum"]
+    page.fc_filter.setValue(0.5)
+    assert summary()[1] == "|log2FC| > 0.5"
+    ws.close()
+    ws.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
