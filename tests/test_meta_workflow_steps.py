@@ -790,3 +790,24 @@ def test_the_settings_card_follows_min_studies_and_the_de_method(app, tmp_path):
     page._de_combo.setCurrentText("Welch CPM")
     lines = " | ".join(summary())
     assert "a gene needs 5 of 5 studies" in lines and "DE input: Welch CPM" in lines
+
+
+def test_a_large_pool_lists_nothing_until_a_cell_type_is_chosen(app, per_cell_type_project):
+    """Per-cell-type DE gives one entry per cell type and study; the page
+    starts on 'Choose a cell type...' rather than listing them all."""
+    ws = _scanned(per_cell_type_project)
+    combo = ws._cell_type_combo
+    assert combo.currentText() == "Choose a cell type..."
+    assert ws._visible_study_rows() == []
+    combo.setCurrentIndex(combo.findData("__all__"))
+    assert len(ws._visible_study_rows()) == 7
+    combo.setCurrentIndex(combo.findData("Endothelial_Cell"))
+    assert len(ws._visible_study_rows()) == 3
+
+
+def test_a_small_pool_is_listed_at_once(app, tmp_path):
+    for study in ("Chaffin", "Guo", "Koenig"):
+        _write_de(tmp_path, study, study)
+    ws = _scanned(tmp_path)
+    assert ws._cell_type_combo.findData("__choose__") == -1
+    assert len(ws._visible_study_rows()) == 3

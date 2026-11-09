@@ -212,3 +212,32 @@ def test_a_saved_run_draws_the_study_tables_on_its_counts(two_counts_project):
         studies = figure_inputs(run)["gene_studies"]
         assert [n for n, _ in studies] == names
         assert all(df["logfoldchanges"].eq(lfc).all() for _, df in studies), run.selection
+
+
+def test_the_counts_choice_does_not_carry_into_another_project(app, two_counts_project, tmp_path_factory):
+    ws = _scanned(two_counts_project)
+    ws._counts_combo.setCurrentIndex(ws._counts_combo.findData("decontX_counts"))
+    ws._rescan_project()
+    assert ws._counts_combo.currentData() == "decontX_counts"     # same project: kept
+    other = tmp_path_factory.mktemp("other")
+    for study in ("A", "B", "C"):
+        _write_run(other, study, "raw")
+        _write_run(other, study, "decontX_counts")
+    ws._project_folder = str(other)
+    ws._rescan_project()
+    assert ws._counts_combo.currentData() == "original_counts"
+
+
+def test_the_counts_most_results_were_made_on_are_chosen_first(app, tmp_path):
+    """An older project: whole-study runs record their counts, the
+    per-cell-type runs saved before records do not."""
+    for study in ("A", "B", "C"):
+        _write_run(tmp_path, study, "raw")                      # one on original counts
+        stats = tmp_path / study / "results" / "de_analysis" / "statistics"
+        for ct in ("Endothelial_Cell", "Fibroblast"):
+            pd.DataFrame({"names": ["G1"], "logfoldchanges": 0.1, "se": 0.1, "pvals": 0.1,
+                          "pvals_adj": 0.1}).to_csv(stats / f"{study}_{ct}_DE_deseq2.csv",
+                                                    index=False)
+    ws = _scanned(tmp_path)
+    assert ws._counts_combo.currentData() == ""                 # counts not recorded
+    assert len(ws._all_gene_datasets) == 6

@@ -31,7 +31,7 @@ counts such as the DecontX counts. These are separate analyses, so a
 meta-analysis pools results made on one of them. The **Counts** box
 lists the counts the project's results were made on, with the number of
 studies that have results on each, and only results on the chosen counts
-are listed. The original counts are chosen when they are available. A
+are listed. The counts that most results were made on are chosen first, and the original counts when two are equal. A
 study with no result on the chosen counts is named in the output panel.
 
 Results saved before KOSMIC recorded the counts of a run are listed
@@ -45,6 +45,10 @@ endothelium and one in cardiomyocytes are different contrasts. The
 studies that have it. Choosing one selects that cell type in every
 study and shows only those rows. **All entries** shows every row and
 leaves the ticks as they are.
+
+When the project has more than four results, as it does after DE is run
+per cell type, the box starts at **Choose a cell type...** and no rows
+are listed or selected until you choose one.
 
 A cell type found in fewer studies than the minimum for pooling (3 by
 default) is listed but cannot be chosen. **Whole study** collects the
