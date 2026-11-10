@@ -47,73 +47,120 @@ class GeneDERun:
     ``name`` is the file's accession part ('Chaffin_Endothelial_Cell');
     ``cell_type`` the cell type it was run on, or None for a whole-study
     run (or one whose cell type cannot be told from its name); ``method``
-    the method token ('deseq2', 'welch_cpm_eb', ...).
+    the method token ('deseq2', 'welch_cpm_eb', ...); ``counts`` the
+    counts folder ('original_counts', 'decontX_counts'; ADR-015), or None
+    when neither its folder nor its record says.
     """
 
     name: str
     cell_type: Optional[str]
     method: str
     path: Path
+    counts: Optional[str] = None
 
     @property
     def label(self) -> str:
-        return f"{self.cell_type or self.name} ({self.method})"
+        detail = self.method + (f", {self.counts.replace('_', ' ')}" if self.counts else '')
+        return f"{self.cell_type or self.name} ({detail})"
 
     @property
     def record_path(self) -> Path:
         return run_record_path(self.path)
 
 
-def list_gene_de_runs(study_dir) -> list[GeneDERun]:
+def list_gene_de_runs(study_dir, counts: Optional[str] = None) -> list[GeneDERun]:
     """The study's saved gene DE tables, whole-study runs first, then by
-    cell type and method.
+    cell type, method and counts.
 
-    The cell type of a per-cell-type run is taken from its run record,
-    else from the batch summary written beside it
+    Runs are found in both layouts: directly in ``statistics/`` (earlier
+    versions) and in its ``<counts>/`` and ``<counts>/<cell type>/``
+    folders (ADR-015). The cell type of a per-cell-type run is taken from
+    its run record, else from a batch summary
     ('{accession}_by_cell_type_summary.csv'), else from the file name: the
     part after the study folder's name, compared without case (the Stroke
-    project has both 'GSE174574_...' and 'gse174574_...').
+    project has both 'GSE174574_...' and 'gse174574_...'). With *counts*,
+    only runs on those counts and runs whose counts are not known.
     """
-    return gene_de_runs_in(de_stats_dir(study_dir), Path(study_dir).name)
+    return gene_de_runs_in(de_stats_dir(study_dir), Path(study_dir).name, counts=counts)
 
 
-def gene_de_runs_in(stats, study: str) -> list[GeneDERun]:
-    """:func:`list_gene_de_runs` for a statistics folder, with 'study' the
-    name a per-cell-type file starts with."""
+def run_counts(path) -> Optional[str]:
+    """The counts folder a saved DE run used: its folder in the ADR-015
+    layout, else the 'counts_source' in its run record, else None."""
+    from kosmic.paths import counts_folder_name, counts_folder_of
+
+    folder = counts_folder_of(path)
+    if folder:
+        return folder
+    record = read_run_record(path) or {}
+    return counts_folder_name(record['counts_source']) if record.get('counts_source') else None
+
+
+def gene_de_runs_in(stats, study: str, counts: Optional[str] = None) -> list[GeneDERun]:
+    """:func:`list_gene_de_runs` for a ``statistics/`` folder, with 'study'
+    the name a per-cell-type file starts with."""
     from kosmic.meta_analysis.io import _DE_RESULTS_PATTERN
+    from kosmic.paths import de_output_dirs
 
-    stats = Path(stats)
-    if not stats.is_dir():
+    dirs = de_output_dirs(stats)
+    if not dirs:
         return []
-    labels = _summary_cell_types(stats)
+    labels = _summary_cell_types(dirs)
     runs = []
-    for path in sorted(stats.glob('*_DE_*.csv')):
-        m = _DE_RESULTS_PATTERN.match(path.name)
-        if not m:
-            continue
-        name, method = m.group(1), m.group(2)
-        record = read_run_record(path) or {}
-        if 'cell_type' in record:
-            cell_type = record['cell_type'] or None
-        elif name in labels:
-            cell_type = labels[name]
-        else:
-            cell_type = _cell_type_from_name(name, study)
-        runs.append(GeneDERun(name=name, cell_type=cell_type, method=method, path=path))
+    for folder in dirs:
+        for path in sorted(folder.glob('*_DE_*.csv')):
+            m = _DE_RESULTS_PATTERN.match(path.name)
+            if not m:
+                continue
+            name, method = m.group(1), m.group(2)
+            record = read_run_record(path) or {}
+            if 'cell_type' in record:
+                cell_type = record['cell_type'] or None
+            elif name in labels:
+                cell_type = labels[name]
+            else:
+                cell_type = _cell_type_from_name(name, study)
+            run_counts_ = run_counts(path)
+            if counts is not None and run_counts_ not in (None, counts):
+                continue
+            runs.append(GeneDERun(name=name, cell_type=cell_type, method=method,
+                                  path=path, counts=run_counts_))
     runs.sort(key=lambda r: (r.cell_type is not None, (r.cell_type or '').lower(),
-                             r.method, r.name))
+                             r.method, r.counts or '', r.name))
     return runs
 
 
-def _summary_cell_types(stats: Path) -> dict:
-    """{run accession: cell type} from the batch summaries in 'stats'."""
+def find_de_result(study_dir, accession: str, method: str,
+                   counts: Optional[str] = None) -> Optional[Path]:
+    """A whole-study (or named) run's DE table: in its counts folder
+    (ADR-015) when *counts* is given and the file is there, else in any
+    counts folder, else directly in ``statistics/`` (earlier versions).
+    None when there is none."""
+    from kosmic.paths import de_output_dirs, de_stats_dir
+
+    name = f"{accession}_DE_{method}.csv"
+    stats = de_stats_dir(study_dir)
+    if counts:
+        hit = stats / counts / name
+        if hit.is_file():
+            return hit
+    for folder in de_output_dirs(stats)[1:]:
+        if (folder / name).is_file() and folder.parent == stats:
+            return folder / name
+    flat = stats / name
+    return flat if flat.is_file() else None
+
+
+def _summary_cell_types(dirs) -> dict:
+    """{run accession: cell type} from the batch summaries in *dirs*."""
     out = {}
-    for path in stats.glob('*_by_cell_type_summary.csv'):
-        try:
-            df = pd.read_csv(path, usecols=['cell_type', 'accession'])
-        except (OSError, ValueError):
-            continue
-        out.update(zip(df['accession'].astype(str), df['cell_type'].astype(str)))
+    for d in dirs:
+        for path in Path(d).glob('*_by_cell_type_summary.csv'):
+            try:
+                df = pd.read_csv(path, usecols=['cell_type', 'accession'])
+            except (OSError, ValueError):
+                continue
+            out.update(zip(df['accession'].astype(str), df['cell_type'].astype(str)))
     return out
 
 
@@ -149,14 +196,18 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
                      min_cells: Optional[int] = None, min_counts: Optional[int] = None,
                      covariates=(), pathway_gene_sets: Optional[dict] = None,
                      geneset_label: Optional[str] = None,
-                     h5ad_path=None) -> dict:
+                     h5ad_path=None, fdr: Optional[float] = None,
+                     lfc_threshold: Optional[float] = None) -> dict:
     """The settings of a gene DE run, as saved beside its table.
 
     ``counts_source`` is the count matrix the run used: 'raw' for the
     original counts or a layer name ('decontX_counts'), as
     :func:`kosmic.scrna.counts.loaded_count_source` reports it. Only the
-    file name of ``h5ad_path`` is kept.
+    file name of ``h5ad_path`` is kept. ``fdr`` and ``lfc_threshold`` are
+    the significance rule the run's counts and files use (ADR-015); 0 for
+    ``lfc_threshold`` means no fold-change gate.
     """
+    from kosmic import DEFAULT_FDR, DEFAULT_LFC_THRESHOLD
     from kosmic.scrna.counts import loaded_count_source
 
     return {
@@ -176,13 +227,99 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
         'pathway_gene_sets': {str(k): [str(g) for g in v]
                               for k, v in (pathway_gene_sets or {}).items()},
         'dataset_file': Path(str(h5ad_path)).name if h5ad_path else None,
+        'fdr': float(DEFAULT_FDR if fdr is None else fdr),
+        'lfc_threshold': float(DEFAULT_LFC_THRESHOLD if lfc_threshold is None
+                               else lfc_threshold),
     }
+
+
+def run_significance(record: Optional[dict]) -> tuple:
+    """(fdr, lfc_threshold, assumed) of a saved run (ADR-015).
+
+    A run saved before the rule was recorded was made with the
+    configuration of its time: FDR from the configuration and
+    ``LEGACY_LFC_THRESHOLD`` (0.25), with *assumed* True so it can be
+    shown as such.
+    """
+    from kosmic import DEFAULT_FDR, LEGACY_LFC_THRESHOLD
+
+    rec = record or {}
+    if 'lfc_threshold' in rec:
+        return float(rec.get('fdr', DEFAULT_FDR)), float(rec['lfc_threshold']), False
+    return float(rec.get('fdr', DEFAULT_FDR)), float(LEGACY_LFC_THRESHOLD), True
 
 
 def save_run_record(de_path, record: dict) -> Path:
     path = run_record_path(de_path)
     path.write_text(json.dumps(record, indent=2), encoding='utf-8')
     return path
+
+
+def recut_saved_run(de_path, de_results, fdr: float, lfc: float) -> Path:
+    """Apply a changed significance rule to a gene DE run (ADR-015).
+
+    The DE test is not run again. The run's significant-genes file, beside
+    its table, is rewritten with the genes that pass the rule. When the
+    run's table is saved, its record stores the rule, and for a run of
+    one cell type its row of the batch summary in the counts folder
+    (``*_by_cell_type_summary.csv``, matched on cell type and method) gets
+    the new counts and rule, so every file of the run reports the same
+    selection.
+
+    Parameters
+    ----------
+    de_path : path
+        The run's table, ``{accession}_DE_{method}.csv``. It need not
+        exist yet (a run whose table is still being written); then only
+        the significant-genes file is written.
+    de_results : DataFrame
+        The run's results.
+    fdr, lfc : float
+        The rule; ``lfc`` 0 for no fold-change minimum.
+
+    Returns
+    -------
+    Path
+        The significant-genes file.
+    """
+    from kosmic.de.de_analysis import significant_subset
+
+    de_path = Path(de_path)
+    stem, method = de_path.stem.rsplit('_DE_', 1)
+    sig = significant_subset(de_results, fdr=fdr, lfc=lfc)
+    sig_path = de_path.with_name(f"{stem}_significant_genes.csv")
+    sig_path.parent.mkdir(parents=True, exist_ok=True)
+    sig.to_csv(sig_path, index=False)
+    if not de_path.is_file():
+        return sig_path
+
+    record = read_run_record(de_path) or {}
+    record.update(fdr=float(fdr), lfc_threshold=float(lfc))
+    save_run_record(de_path, record)
+
+    # A run of one cell type sits in statistics/<counts>/<cell type>/.
+    counts_dir = de_path.parent.parent
+    if counts_dir.parent.name == 'statistics':
+        lfcs = pd.to_numeric(sig['logfoldchanges'], errors='coerce')
+        for summary in counts_dir.glob('*_by_cell_type_summary.csv'):
+            try:
+                table = pd.read_csv(summary)
+            except (OSError, ValueError):
+                continue
+            if not {'cell_type', 'method'} <= set(table.columns):
+                continue
+            # The run's folder is its cell type made file-safe.
+            from kosmic.de.batch import slugify_cell_type
+            row = ((table['cell_type'].astype(str).map(slugify_cell_type)
+                    == de_path.parent.name)
+                   & (table['method'].astype(str) == method))
+            if not row.any():
+                continue
+            table.loc[row, ['n_significant', 'n_up', 'n_down', 'fdr', 'lfc_threshold']] = [
+                len(sig), int((lfcs > 0).sum()), int((lfcs < 0).sum()),
+                float(fdr), float(lfc)]
+            table.to_csv(summary, index=False)
+    return sig_path
 
 
 def read_run_record(de_path) -> Optional[dict]:

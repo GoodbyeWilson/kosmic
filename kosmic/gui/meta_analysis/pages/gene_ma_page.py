@@ -2275,6 +2275,7 @@ class GeneMAPage(SidebarTabbedPage):
                 'independent_filter': if_active,
                 'n_studies': len(self._run_study_names()),
                 'studies': self._run_study_names(),
+                'counts': self._run_counts(),
                 'study_tokens': tokens,
             }
             params.update(self._direction_params())
@@ -2349,6 +2350,7 @@ class GeneMAPage(SidebarTabbedPage):
         params['mode'] = getattr(self, '_mode', None)
         params['n_studies_input'] = len(self._run_study_names())
         params['study_names'] = self._run_study_names()
+        params['counts'] = self._run_counts()
         if hasattr(self, '_pathway_gene_sets') and self._pathway_gene_sets:
             params['n_pathways_in_geneset'] = len(self._pathway_gene_sets)
 
@@ -2378,6 +2380,15 @@ class GeneMAPage(SidebarTabbedPage):
         if self._last_consensus_labels is not None:
             return list(self._last_consensus_labels)
         return [d.get('name', '?') for d in (self._datasets or [])]
+
+    def _run_counts(self):
+        """The counts folder the last run's project results were made on
+        ('original_counts', 'decontX_counts'; ADR-015), or None when it is
+        not known."""
+        names = set(self._run_study_names())
+        found = {d.get('counts') for d in (self._datasets or [])
+                 if d.get('name') in names and not d.get('external')}
+        return next(iter(found)) if len(found) == 1 else None
 
     @property
     def run_output_selection(self):

@@ -6,7 +6,7 @@ from kosmic.gui.shared import dialogs
 from kosmic.gui.shared.widgets import CaptionLabel, PrimaryButton, SecondaryButton
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QCheckBox, QComboBox, QFileDialog,
     QFrame, QScrollArea, QStackedWidget,
 )
@@ -19,11 +19,16 @@ from kosmic.meta_analysis.io import (
     require_se,
     discover_de_results,
     meta_selection_folder,
+    meta_selection_path,
+    MixedCountsError,
+    selection_counts,
     split_cell_types,
 )
 
 # Choices in the Select Studies cell-type box that are not cell types.
 _ALL_ENTRIES = '__all__'
+# Shown first when the pool is too large to list unasked: no rows.
+_CHOOSE = '__choose__'
 _WHOLE_STUDY = '__whole__'
 _EXTERNAL = '__external__'
 
@@ -396,9 +401,22 @@ class MetaAnalysisWorkspace(QWidget):
         # Ticking them by hand, or worse leaving them all ticked, is how
         # you end up pooling fibroblasts with endothelium. Choosing a cell
         # type selects that type in every study and nothing else.
-        tools_row = QHBoxLayout()
-        tools_row.setSpacing(6)
-        tools_row.addWidget(QLabel("Cell type:"))
+        tools_grid = QGridLayout()
+        tools_grid.setHorizontalSpacing(6)
+        tools_grid.setVerticalSpacing(6)
+        tools_grid.setColumnStretch(1, 1)
+        # One counts source at a time (ADR-015): a study can hold DE runs
+        # on its original counts and on DecontX counts, which are separate
+        # analyses and must not be pooled together.
+        tools_grid.addWidget(QLabel("Counts:"), 0, 0)
+        self._counts_combo = QComboBox()
+        self._counts_combo.setToolTip(
+            "The counts the study results were made on. Only results on\n"
+            "the chosen counts are listed and pooled, and they are saved\n"
+            "under meta_analysis/<counts>/.")
+        self._counts_combo.currentIndexChanged.connect(self._on_counts_chosen)
+        tools_grid.addWidget(self._counts_combo, 0, 1, 1, 3)
+        tools_grid.addWidget(QLabel("Cell type:"), 1, 0)
         self._cell_type_combo = QComboBox()
         self._cell_type_combo.setToolTip(
             "Choose a cell type to select it in every study that has it.\n"
@@ -407,16 +425,16 @@ class MetaAnalysisWorkspace(QWidget):
             "greyed out.")
         self._cell_type_combo.currentIndexChanged.connect(
             self._on_cell_type_chosen)
-        tools_row.addWidget(self._cell_type_combo, 1)
+        tools_grid.addWidget(self._cell_type_combo, 1, 1, 1, 3)
 
         self._select_all_btn = SecondaryButton("Select all")
         self._select_all_btn.clicked.connect(lambda: self._set_all_shown(True))
-        tools_row.addWidget(self._select_all_btn)
+        tools_grid.addWidget(self._select_all_btn, 2, 2)
 
         self._select_none_btn = SecondaryButton("Clear")
         self._select_none_btn.clicked.connect(lambda: self._set_all_shown(False))
-        tools_row.addWidget(self._select_none_btn)
-        data_layout.addLayout(tools_row)
+        tools_grid.addWidget(self._select_none_btn, 2, 3)
+        data_layout.addLayout(tools_grid)
 
         # A fixed-height scroller, so filtering changes what is listed
         # and nothing else. Rows used to sit straight in the layout, so
@@ -503,6 +521,9 @@ class MetaAnalysisWorkspace(QWidget):
         de_files = [e for e in discovered if e['file_type'] == 'de_results']
         gene_files = [e for e in discovered if e['file_type'] == 'gene']
 
+        # Results on the chosen counts only (ADR-015).
+        de_files = self._results_on_chosen_counts(de_files)
+
         # Prefer DE results; fall back to GeneStats files
         to_load = de_files if de_files else gene_files
 
@@ -559,7 +580,8 @@ class MetaAnalysisWorkspace(QWidget):
                 name = entry["accession"]
                 self._all_gene_datasets.append({
                     'path': filepath, 'name': name, 'df': df,
-                    'study': entry['analysis_folder']})
+                    'study': entry['analysis_folder'],
+                    'counts': entry.get('counts')})
                 if verbose:
                     self._log(f"Loaded: {name} ({len(df)} genes)")
             except Exception as e:
@@ -606,6 +628,64 @@ class MetaAnalysisWorkspace(QWidget):
         self._apply_study_selection()
         self._log(f"Meta-analysis: found {len(by_accession)} DE result(s) "
                   f"from {len(by_folder)} studies")
+
+    def _results_on_chosen_counts(self, de_files: list) -> list:
+        """The DE results made on the counts chosen in the Counts box.
+
+        Refills the box with the counts the project's results were made
+        on, keeping the previous choice for this project when it is still
+        there, else the counts most results were made on (the original
+        counts on a tie). Studies with no result on the chosen counts are
+        named in the output panel.
+        """
+        from kosmic.meta_analysis.io import counts_text
+        from kosmic.paths import ORIGINAL_COUNTS_FOLDER
+
+        combo = self._counts_combo
+        # Keep the choice across rescans of one project, not into another.
+        same_project = getattr(self, '_counts_project', None) == self._project_folder
+        previous = combo.currentData() if combo.count() and same_project else None
+        self._counts_project = self._project_folder
+        found = {e.get('counts') for e in de_files}
+        order = sorted((c for c in found if c),
+                       key=lambda c: (c != ORIGINAL_COUNTS_FOLDER, c.lower()))
+        if None in found:
+            order.append(None)
+
+        combo.blockSignals(True)
+        combo.clear()
+        for counts in order:
+            n = len({e['analysis_folder'] for e in de_files
+                     if e.get('counts') == counts})
+            text = ("Original counts" if counts == ORIGINAL_COUNTS_FOLDER
+                    else counts_text(counts))
+            text = text[0].upper() + text[1:]
+            combo.addItem(f"{text}  ({n} {'study' if n == 1 else 'studies'})",
+                          counts or '')
+        idx = combo.findData(previous) if previous is not None else -1
+        if idx < 0 and order:
+            # Most results first; 'order' puts the original counts first,
+            # and max() keeps the first of equals.
+            n = {c: sum(e.get('counts') == c for e in de_files) for c in order}
+            idx = order.index(max(order, key=lambda c: n[c]))
+        combo.setCurrentIndex(max(idx, 0))
+        combo.blockSignals(False)
+        combo.setEnabled(len(order) > 1)
+        if not order:
+            return de_files
+
+        chosen = combo.currentData() or None
+        kept = [e for e in de_files if e.get('counts') == chosen]
+        without = sorted({e['analysis_folder'] for e in de_files}
+                         - {e['analysis_folder'] for e in kept})
+        if without:
+            self._log(f"No DE results on {counts_text(chosen)} in: "
+                      + ", ".join(without))
+        return kept
+
+    def _on_counts_chosen(self, _index=None):
+        """Rebuild the pool from the results on the chosen counts."""
+        self._rescan_project()
 
     @staticmethod
     def _results_signature(discovered) -> frozenset:
@@ -766,6 +846,11 @@ class MetaAnalysisWorkspace(QWidget):
 
         combo.blockSignals(True)
         combo.clear()
+        # A large pool (per-cell-type DE gives one entry per cell type and
+        # study) is not listed until a cell type is chosen.
+        many = len(self._all_gene_datasets) > self._AUTOSELECT_LIMIT
+        if many:
+            combo.addItem("Choose a cell type...", _CHOOSE)
         combo.addItem(f"All entries ({len(self._all_gene_datasets)})",
                       _ALL_ENTRIES)
         special = {_WHOLE_STUDY: "Whole study", _EXTERNAL: "External imports"}
@@ -781,14 +866,14 @@ class MetaAnalysisWorkspace(QWidget):
             combo.addItem(f"{special.get(g, g)}  ({n} {unit})", g)
             if g != _EXTERNAL and n < MIN_STUDIES:
                 model.item(combo.count() - 1).setEnabled(False)
-        idx = combo.findData(previous)
+        idx = combo.findData(previous) if previous is not None else -1
         combo.setCurrentIndex(idx if idx >= 0 else 0)
         combo.blockSignals(False)
 
     def _on_cell_type_chosen(self, _index=None):
         """Show the chosen group and select exactly it."""
         group = self._cell_type_combo.currentData()
-        if group not in (None, _ALL_ENTRIES):
+        if group not in (None, _ALL_ENTRIES, _CHOOSE):
             self._selection_touched = True
             self._excluded_studies = {
                 d['name'] for d in self._all_gene_datasets
@@ -830,7 +915,8 @@ class MetaAnalysisWorkspace(QWidget):
             w = item.widget() if item else None
             if w is None:
                 continue
-            match = not filtered or w.property("group") == group
+            match = group != _CHOOSE and (
+                not filtered or w.property("group") == group)
             w.setVisible(match)
             n_shown += int(match)
 
@@ -883,8 +969,11 @@ class MetaAnalysisWorkspace(QWidget):
             head = (f"{n_all} studies available for meta-analysis · all selected"
                     if n_sel == n_all
                     else f"{n_sel} of {n_all} available entries selected")
-            self._select_summary.setText(
-                f"{head} · results go to meta_analysis/{self.output_selection}/")
+            try:
+                where = f"results go to meta_analysis/{self.output_selection}/"
+            except MixedCountsError as e:
+                where = str(e)
+            self._select_summary.setText(f"{head} · {where}")
         self.status_message.emit(f"{n_sel} of {n_all} dataset(s) selected")
 
 
@@ -914,13 +1003,18 @@ class MetaAnalysisWorkspace(QWidget):
 
     @property
     def output_selection(self) -> str:
-        """Folder under meta_analysis/ for the current selection (ADR-007).
+        """Folder under meta_analysis/ for the current selection:
+        '<counts>/<cell type>' (ADR-007, ADR-015).
 
-        Named after the selected project results' cell type; external
-        imports have none and do not count.
+        The cell type is the selected project results'; external imports
+        have none and do not count. The counts are those the results were
+        made on, 'unspecified_counts' when an external import or a result
+        whose counts are not known is selected. Raises MixedCountsError for
+        results on different counts, which the Counts box prevents.
         """
-        return meta_selection_folder(
+        cell = meta_selection_folder(
             [d.get('cell_type') for d in self.datasets if not d.get('external')])
+        return meta_selection_path(selection_counts(self.datasets), cell)
 
     @property
     def selected_study_folders(self) -> list:

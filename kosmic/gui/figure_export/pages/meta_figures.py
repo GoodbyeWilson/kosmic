@@ -51,7 +51,8 @@ class MetaFigurePage(FigurePage):
 
     def _selection_label(self) -> str:
         inputs = self._inputs() or {}
-        sel = str(inputs.get('selection') or '').replace('_', ' ')
+        from kosmic.meta_analysis.io import split_selection
+        sel = split_selection(inputs.get('selection'))[1].replace('_', ' ')
         n = len(self._studies())
         return f"{sel} ({n} studies)" if sel else f"{n} studies"
 

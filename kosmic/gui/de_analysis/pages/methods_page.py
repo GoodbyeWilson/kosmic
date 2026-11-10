@@ -440,8 +440,8 @@ class MethodsPage(SimplePage):
             used_refs.add('soupx')
         if 'X_pca_harmony' in obsm:
             used_refs.add('harmony')
-        if ('decontX_counts' in layers
-                or adata.uns.get('counts_loaded_from') == 'layers:decontX_counts'):
+        from kosmic.scrna.counts import loaded_count_source
+        if 'decontX_counts' in layers or loaded_count_source(adata) == 'decontX_counts':
             used_refs.add('decontx')
         # CellTypist's own outputs; other annotation methods also write
         # cell_type_auto, so that column is no evidence of CellTypist.
@@ -761,7 +761,12 @@ class MethodsPage(SimplePage):
                 universe = "across all tested genes (genome-wide)"
             items.append(("FDR universe:", f"Benjamini-Hochberg {universe}"))
             used_refs.add('bh')
-        items.append(("|log2FC| threshold:", f"> {fc_thresh:g}"))
+        assumed = bool((getattr(self.ws, 'significance', None) or (0, 0, False))[2])
+        if fc_thresh > 0:
+            items.append(("|log2FC| threshold:", f"> {fc_thresh:g}"
+                          + (" (assumed: not recorded with this run)" if assumed else "")))
+        else:
+            items.append(("|log2FC| threshold:", "none (significance on FDR alone)"))
 
         return items
 

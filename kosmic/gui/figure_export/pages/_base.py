@@ -260,7 +260,32 @@ class FigurePage(SidebarPage):
         self._cached_pixmap = None
         self._render()
 
+    #: The page's Min |log2FC| box starts from the DE run's recorded rule
+    #: (ADR-015), each time a different run is shown; a value set here
+    #: stays until then.
+    GATE_FROM_RUN = False
+
+    def _sync_gate_from_run(self):
+        gate = getattr(self._controls, 'lfc_gate', None)
+        if not self.GATE_FROM_RUN or gate is None:
+            return
+        de = self._de()
+        rule = getattr(de, 'significance', None) if de is not None else None
+        key = (getattr(de, 'run_label', None), rule)
+        if rule is None or key == getattr(self, '_gate_key', None):
+            return
+        self._gate_key = key
+        if not hasattr(self, '_gate_tooltip'):
+            self._gate_tooltip = gate.toolTip()
+        gate.blockSignals(True)
+        gate.setValue(rule[1])
+        gate.blockSignals(False)
+        note = ("\n\nStarted from the run's value"
+                + (", assumed: the run did not record one." if rule[2] else "."))
+        gate.setToolTip(self._gate_tooltip + note)
+
     def _render(self):
+        self._sync_gate_from_run()
         func = self._make_render_func()
         if func is None:
             self._preview.set_message(self.UNAVAILABLE_MESSAGE)

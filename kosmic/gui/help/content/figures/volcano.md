@@ -7,9 +7,9 @@ on the y axis.
 ## Colours and threshold
 
 Genes with FDR < 0.05 are red (up in the disease group) or blue (down);
-all other genes are grey. **Min |log2FC|** (default *Off*) also requires
-the log2 fold change to exceed a value, e.g. 0.25. The dotted
-line marks the FDR threshold.
+all other genes are grey. **Min |log2FC|** also requires the log2 fold
+change to exceed a value. It starts from the value the DE run was made with, so the figure counts the same genes as the run's files; a run saved before KOSMIC recorded the value is shown with 0.25, the setting of the time, and the tooltip says the value is assumed. The dotted line marks the FDR
+threshold.
 
 ## Labels
 

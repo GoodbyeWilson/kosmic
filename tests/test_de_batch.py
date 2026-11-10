@@ -302,7 +302,7 @@ def test_batch_summary_shape(tmp_path):
         write=False)
     summary = B.batch_summary(runs)
     assert len(summary) == 2
-    assert {'cell_type', 'accession', 'status', 'n_significant'} <= set(summary.columns)
+    assert list(summary.columns) == list(B.SUMMARY_COLUMNS)   # ADR-015
 
 
 def test_common_tested_genes_intersects():

@@ -21,7 +21,7 @@ import pandas as pd
 
 from kosmic.gui.shared.theme import get_font_sizes
 from kosmic.gui.shared.widgets import BaseWorker
-from kosmic.paths import de_result_path, de_stats_dir, pseudobulk_path
+from kosmic.paths import de_run_dir
 from kosmic import DEFAULT_FDR
 
 
@@ -448,22 +448,25 @@ class MetaExportWorker(BaseWorker):
         self.gse_id = gse_id
 
     def _run(self):
-        from kosmic.de.batch import method_label, pseudobulk_frame
+        from kosmic.de.batch import method_label, pseudobulk_frame, run_counts_source
         from kosmic.de.de_analysis import create_pseudobulk
 
-        stats_dir = de_stats_dir(self.output_dir)
-        stats_dir.mkdir(parents=True, exist_ok=True)
+        # A whole-study run's files go to its counts folder (ADR-015).
+        counts_source = run_counts_source(self.adata)
+        run_dir = de_run_dir(self.output_dir, counts_source)
+        run_dir.mkdir(parents=True, exist_ok=True)
         self.progress_pct.emit(0)
 
         # Export the chosen method's results (already computed) in the layout
         # the meta-analysis loads.
         label = method_label(self.primary_method, self.primary_moderate)
         if self.primary_de_results is not None and not self.primary_de_results.empty:
-            out_path = de_result_path(self.output_dir, self.gse_id, label)
+            out_path = run_dir / f"{self.gse_id}_DE_{label}.csv"
             self.primary_de_results.to_csv(out_path, index=False)
             if self.run_record is not None:
                 from kosmic.de.saved import save_run_record
-                save_run_record(out_path, {**self.run_record, 'method': label})
+                save_run_record(out_path, {**self.run_record, 'method': label,
+                                           'counts_source': counts_source})
             self.progress.emit(f"[{label}] Exported DE results for meta-analysis")
 
         # Per-donor pseudobulk for the consensus case-control permutation.
@@ -501,7 +504,7 @@ class MetaExportWorker(BaseWorker):
                 # the same schema -- including the 'role' column the
                 # consensus case-control permutation reads back.
                 pb_df = pseudobulk_frame(pb_matrix, pb_sample_df, pb_genes)
-                pb_path = pseudobulk_path(self.output_dir, self.gse_id)
+                pb_path = run_dir / f"{self.gse_id}_pseudobulk.csv"
                 pb_df.to_csv(pb_path)
                 self.progress.emit(
                     f"Saved pseudobulk: {pb_path.name} "
@@ -557,7 +560,9 @@ class CellTypeBatchWorker(BaseWorker):
         self._cancelled = True
 
     def _run(self):
-        from kosmic.de.batch import batch_summary, run_de_by_cell_type
+        from kosmic.de.batch import (
+            batch_summary, run_counts_source, run_de_by_cell_type, summary_path,
+        )
 
         n_types = len(self.cell_types) if self.cell_types else 0
         adjust = (f", adjusting for {', '.join(self.covariates)}"
@@ -596,12 +601,13 @@ class CellTypeBatchWorker(BaseWorker):
         n_ok = int((summary['status'] == 'ok').sum()) if len(summary) else 0
         n_failed = int((summary['status'] == 'failed').sum()) if len(summary) else 0
 
-        summary_path = de_stats_dir(self.output_dir) / (
-            f"{self.accession}_by_cell_type_summary.csv")
+        out = summary_path(self.output_dir, self.accession,
+                           run_counts_source(self.adata,
+                                             self.pipeline_kwargs.get('counts_layer')))
         try:
-            summary_path.parent.mkdir(parents=True, exist_ok=True)
-            summary.to_csv(summary_path, index=False)
-            self.progress.emit(f"Saved summary: {summary_path.name}")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            summary.to_csv(out, index=False)
+            self.progress.emit(f"Saved summary: {out.name}")
         except Exception as exc:  # noqa: BLE001
             self.progress.emit(f"Warning: could not save summary: {exc}")
 

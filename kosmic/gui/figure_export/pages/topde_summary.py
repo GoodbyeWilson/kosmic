@@ -28,6 +28,7 @@ class _TopDEControls(FigureControls):
 
 
 class TopDESummaryPage(FigurePage):
+    GATE_FROM_RUN = True
     TITLE = "DE Genes by Pathway"
     CHECKS_DE_STALENESS = True
     UNAVAILABLE_MESSAGE = (

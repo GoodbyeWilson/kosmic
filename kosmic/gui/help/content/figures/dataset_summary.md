@@ -2,7 +2,7 @@
 
 A table of the gene sets with at least one significant DE gene, grouped
 by direction. A gene is significant at FDR < 0.05; **Min |log2FC|**
-(default *Off*) also requires its log2 fold change to exceed a value.
+also requires its log2 fold change to exceed a value. It starts from the value the DE run was made with, so the figure counts the same genes as the run's files; a run saved before KOSMIC recorded the value is shown with 0.25, the setting of the time, and the tooltip says the value is assumed.
 
 ## Columns
 

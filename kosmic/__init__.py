@@ -28,7 +28,13 @@ with _CONFIG_PATH.open("rb") as _f:
 
 # Significance thresholds
 DEFAULT_FDR                  = _cfg["significance"]["fdr"]
-DEFAULT_LFC_THRESHOLD        = _cfg["significance"]["lfc_threshold"]
+# The Min |log2FC| controls start Off: significant means FDR < DEFAULT_FDR
+# alone. A fold-change gate is a setting of each DE run, recorded with it,
+# not a project-wide value (ADR-015).
+DEFAULT_LFC_THRESHOLD        = 0.0
+# What a run saved before the gate was recorded was made with: the
+# configuration value of that time.
+LEGACY_LFC_THRESHOLD         = 0.25
 
 # Meta-analysis
 MIN_STUDIES                  = _cfg["meta_analysis"]["min_studies"]

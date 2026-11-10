@@ -7,8 +7,9 @@
 # layer lives in ``kosmic/__init__.py``.
 
 [significance]
-fdr            = 0.05
-lfc_threshold  = 0.25
+fdr            = 0.05     # starting value of the FDR controls
+# A |log2FC| gate is chosen per DE run (Min |log2FC|, Off by default) and
+# recorded with the run, not set here (ADR-015).
 
 [meta_analysis]
 min_studies = 2     # gene must appear in >= N studies to be pooled

@@ -332,7 +332,7 @@ class DEState:
     #: Attributes that belong to one gene DE run.
     RUN_ATTRS = ('de_results', 'pathway_gene_sets', 'geneset_label', 'sample_col',
                  'condition_col', 'disease_label', 'control_label', 'min_cells',
-                 'pathway_coverage', 'counts_source')
+                 'pathway_coverage', 'counts_source', 'significance')
 
     def __init__(self, source: StudySource):
         self._source = source
@@ -458,6 +458,9 @@ class DEState:
             return rec.get('min_cells') or DE_MIN_CELLS
         if name == 'counts_source':
             return rec.get('counts_source', 'raw')
+        if name == 'significance':
+            # (fdr, lfc_threshold, assumed) the run was made with (ADR-015).
+            return saved.run_significance(rec) if self._run is not None else None
         if name == 'pathway_coverage':
             return self._coverage(rec.get('pathway_gene_sets') or {})
         scoring = de_pathway_scoring_dir(study)

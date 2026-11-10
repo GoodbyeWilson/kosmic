@@ -10,25 +10,38 @@ Layout
 ::
 
     project_dir/                     <- Meta workspace root
-        meta_analysis/               <- consensus MA outputs land here
+        meta_analysis/               <- meta-analysis outputs
+            <counts>/                <- the counts the pooled results used
+                <selection>/         <- a cell type, all_cells or mixed
         {accession_1}/               <- one study; a "study_dir"
             raw_data/                <- downloaded source files
             processed_data/          <- pipeline intermediate h5ad files
             figures/                 <- scRNA figure outputs
             results/
                 figures/             <- DE workspace figure exports
-                metabolic_DE_results_all.csv
-                metabolic_DE_results_significant.csv
                 de_analysis/
                     statistics/
-                        {accession_1}_pseudobulk.csv
-                        {accession_1}_DE_deseq2_fast.csv
-                        {accession_1}_DE_welch_cpm.csv
-                        ...
+                        <counts>/    <- original_counts, decontX_counts
+                            {accession_1}_by_cell_type_summary.csv
+                            {accession_1}_DE_deseq2.csv     <- whole-study run
+                            <cell type>/
+                                {accession_1}_{cell type}_DE_deseq2.csv
+                                {accession_1}_{cell type}_DE_deseq2.json
+                                {accession_1}_{cell type}_pseudobulk.csv
+                                {accession_1}_{cell type}_significant_genes.csv
                     pathway_scoring/
                         pathway_de_results.csv
         {accession_2}/
             ...
+
+DE outputs are kept per counts and cell type (ADR-015): ``<counts>`` is
+``original_counts`` for a study's original counts and the layer name for
+corrected counts, so runs on both are kept side by side.
+:func:`de_run_dir` builds a run's folder and :func:`de_output_dirs`
+lists every folder that may hold runs, including ``statistics/`` itself,
+where earlier versions wrote every file. Meta-analysis outputs follow
+the same rule (``kosmic.meta_analysis.io.meta_selection_path``);
+``meta_analysis/<selection>/`` folders of earlier versions stay readable.
 
 The DE workspace operates on a single study at a time -- its
 'project_dir' is one of the '{accession}' folders (a "study_dir").
@@ -92,13 +105,72 @@ def de_stats_dir(study_dir: PathLike) -> Path:
     return de_analysis_dir(study_dir) / "statistics"
 
 
+#: Folder under ``statistics/`` for runs on a study's original counts (ADR-015).
+ORIGINAL_COUNTS_FOLDER = "original_counts"
+
+
+def counts_folder_name(counts_source: Optional[str] = None) -> str:
+    """The ``statistics/`` folder for a run's counts (ADR-015).
+
+    ``counts_source`` is what :func:`kosmic.scrna.counts.loaded_count_source`
+    reports: ``'raw'`` (or None) for the original counts, giving
+    ``original_counts``, else a layer name, which is the folder name
+    (``decontX_counts``).
+    """
+    source = str(counts_source or "raw")
+    return ORIGINAL_COUNTS_FOLDER if source in ("raw", "counts", ORIGINAL_COUNTS_FOLDER) else source
+
+
+def de_run_dir(study_dir: PathLike, counts_source: Optional[str] = None,
+               cell_type: Optional[str] = None) -> Path:
+    """Where a DE run's files go (ADR-015).
+
+    ``{study_dir}/results/de_analysis/statistics/<counts>/`` for a
+    whole-study run, and ``.../<counts>/<cell type>/`` for a run on one
+    cell type, the cell type made file-safe as in its file names.
+    """
+    base = de_stats_dir(study_dir) / counts_folder_name(counts_source)
+    if not cell_type:
+        return base
+    from kosmic.de.batch import slugify_cell_type
+    return base / slugify_cell_type(cell_type)
+
+
+def de_output_dirs(stats_root: PathLike) -> list:
+    """Every folder under a ``statistics/`` root that can hold DE outputs:
+    the root itself (the flat layout of earlier versions), each counts
+    folder and each cell-type folder within it (ADR-015). Existing folders
+    only, root first."""
+    root = Path(stats_root)
+    if not root.is_dir():
+        return []
+    dirs = [root]
+    for counts in sorted(p for p in root.iterdir() if p.is_dir()):
+        dirs.append(counts)
+        dirs.extend(sorted(p for p in counts.iterdir() if p.is_dir()))
+    return dirs
+
+
+def counts_folder_of(path: PathLike) -> Optional[str]:
+    """The counts folder a DE output file sits in (``'decontX_counts'``,
+    ``'original_counts'``), or None for a file directly in ``statistics/``
+    (the flat layout of earlier versions) or outside it."""
+    p = Path(path)
+    for parent in p.parents:
+        if parent.name == "statistics":
+            rel = p.relative_to(parent).parts
+            return rel[0] if len(rel) >= 2 else None
+    return None
+
+
 def de_pathway_scoring_dir(study_dir: PathLike) -> Path:
     """``{study_dir}/results/de_analysis/pathway_scoring`` -- pathway DE CSVs."""
     return de_analysis_dir(study_dir) / "pathway_scoring"
 
 
 def de_result_path(study_dir: PathLike, accession: str, method: str) -> Path:
-    """Path to one DE-method result CSV for a study.
+    """Path to one DE-method result CSV for a study, in the flat layout of
+    the versions before ADR-015; new runs are written to :func:`de_run_dir`.
 
     Produces ``{study_dir}/results/de_analysis/statistics/{accession}_DE_{method}.csv``.
     ``method`` must match the regex in
@@ -119,7 +191,8 @@ def significant_path(study_dir, accession):
 
 
 def pseudobulk_path(study_dir: PathLike, accession: str) -> Path:
-    """Path to the per-study pseudobulk counts CSV.
+    """Path to the per-study pseudobulk counts CSV, in the flat layout of
+    the versions before ADR-015 (see :func:`de_result_path`).
 
     Produces ``{study_dir}/results/de_analysis/statistics/{accession}_pseudobulk.csv``.
     """
@@ -165,10 +238,14 @@ def study_dir(project_dir: PathLike, accession: str) -> Path:
 def meta_output_dir(project_dir: PathLike, selection: Optional[str] = None) -> Path:
     """``{project_dir}/meta_analysis[/{selection}]`` -- meta-analysis output.
 
-    ``selection`` names what was pooled -- a cell type, ``all_cells`` or
-    ``mixed`` (see ``kosmic.meta_analysis.io.meta_selection_folder``) --
-    so each cell type's results and methods record are kept apart
-    (ADR-007). Without it, the top-level folder earlier versions wrote to.
+    ``selection`` is the folder of what was pooled,
+    ``<counts>/<cell type>`` (``kosmic.meta_analysis.io.meta_selection_path``):
+    the counts the study results were made on (ADR-015) and the cell type,
+    ``all_cells`` or ``mixed`` (ADR-007), so each cell type's results and
+    methods record are kept apart, and so are the results on original and
+    corrected counts. A folder of the layout before ADR-015 is the cell
+    type alone. Without ``selection``, the top-level folder earlier
+    versions wrote to.
     """
     base = Path(project_dir) / "meta_analysis"
     return base / selection if selection else base
@@ -291,12 +368,12 @@ def study_status(study_dir: PathLike) -> dict[str, bool]:
     study = Path(study_dir)
     raw = raw_data_dir(study)
     processed = processed_data_dir(study)
-    stats = de_stats_dir(study)
+    dirs = de_output_dirs(de_stats_dir(study))
     return {
         "raw_data": raw.is_dir() and any(raw.iterdir()),
         "processed": processed.is_dir() and any(processed.glob("*.h5ad")),
-        "de_results": stats.is_dir() and any(stats.glob("*_DE_*.csv")),
-        "pseudobulk": stats.is_dir() and any(stats.glob("*_pseudobulk.csv")),
+        "de_results": any(any(d.glob("*_DE_*.csv")) for d in dirs),
+        "pseudobulk": any(any(d.glob("*_pseudobulk.csv")) for d in dirs),
     }
 
 
@@ -308,6 +385,11 @@ __all__ = [
     "results_dir",
     "de_analysis_dir",
     "de_stats_dir",
+    "ORIGINAL_COUNTS_FOLDER",
+    "counts_folder_name",
+    "de_run_dir",
+    "de_output_dirs",
+    "counts_folder_of",
     "de_pathway_scoring_dir",
     "de_result_path",
     "pseudobulk_path",

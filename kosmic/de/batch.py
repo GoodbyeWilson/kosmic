@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
@@ -34,7 +35,7 @@ from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD, DE_MIN_CELLS, DE_MIN_COUNTS,
 )
 from kosmic.paths import (
-    de_result_path, de_stats_dir, pseudobulk_path, significant_path,
+    counts_folder_name, de_run_dir,
 )
 
 
@@ -90,6 +91,13 @@ class CellTypePlan:
     n_control_samples: int
     eligible: bool
     reason: str = ''
+    #: Donors with cells of this type left out for falling below the
+    #: cell or transcript floor.
+    n_donors_excluded: int = 0
+    #: Donors in the contrast with no cells of this type at all.
+    n_donors_without_cells: int = 0
+    #: Median cells per kept donor.
+    median_cells_per_donor: float = 0.0
 
     @property
     def n_samples(self) -> int:
@@ -114,6 +122,20 @@ class CellTypeRun:
     pseudobulk_path: Optional[Path] = None
     design: str = ''
     de_results: Optional[pd.DataFrame] = field(default=None, repr=False)
+    # The summary's other columns (ADR-015).
+    method: str = ''
+    counts: str = ''
+    min_cells: int = 0
+    n_donors_control: int = 0
+    n_donors_disease: int = 0
+    n_donors_excluded: int = 0
+    n_donors_without_cells: int = 0
+    median_cells_per_donor: float = 0.0
+    n_up: int = 0
+    n_down: int = 0
+    fdr: float = 0.0
+    lfc_threshold: float = 0.0
+    saved: str = ''
 
 
 def _role_series(adata) -> pd.Series:
@@ -160,6 +182,9 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
     depths = cell_depths(adata, counts_layer) if min_counts else None
 
     included = included_roles(roles)
+    # Every donor in the contrast, so each cell type's row can say how many
+    # had none of its cells.
+    n_donors_total = int(samples[included].nunique())
     # Unlabelled cells: 'nan' under pandas 2's astype(str), NaN under pandas 3.
     observed = [t for t in pd.unique(labels[included])
                 if pd.notna(t) and t not in ('nan', 'None')]
@@ -172,7 +197,8 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
         if not n_cells:
             plans.append(CellTypePlan(
                 str(cell_type), slugify_cell_type(cell_type), 0, 0, 0,
-                eligible=False, reason='no cells with this label'))
+                eligible=False, reason='no cells with this label',
+                n_donors_without_cells=n_donors_total))
             continue
 
         per_cell = pd.DataFrame({
@@ -188,6 +214,8 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
         kept = counts[passing]
         n_disease = int(sum(1 for (_s, r) in kept.index if r == 'disease'))
         n_control = int(sum(1 for (_s, r) in kept.index if r == 'control'))
+        n_excluded = int((~passing).sum())
+        median_cells = float(kept.median()) if len(kept) else 0.0
 
         eligible = (n_disease >= min_samples_per_arm
                     and n_control >= min_samples_per_arm)
@@ -201,7 +229,10 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
                       f"{n_control} control")
         plans.append(CellTypePlan(
             str(cell_type), slugify_cell_type(cell_type), n_cells,
-            n_disease, n_control, eligible, reason))
+            n_disease, n_control, eligible, reason,
+            n_donors_excluded=n_excluded,
+            n_donors_without_cells=n_donors_total - len(counts),
+            median_cells_per_donor=median_cells))
 
     return plans
 
@@ -302,8 +333,9 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
         min_counts=min_counts,
         counts_layer=pipeline_kwargs.get('counts_layer'))
 
-    if write:
-        de_stats_dir(output_dir).mkdir(parents=True, exist_ok=True)
+    # The counts the DE reads: the layer asked for, else what the dataset
+    # holds. It names the folder the run is written to (ADR-015).
+    counts_source = run_counts_source(adata, pipeline_kwargs.get('counts_layer'))
 
     roles = _role_series(adata)
     labels = adata.obs[cell_type_col].astype(str)
@@ -359,30 +391,43 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                 'no genes survived filtering', n_cells=plan.n_cells))
             continue
 
-        n_sig = int(((de_results['pvals_adj'] < fdr)
-                     & (de_results['abs_logfoldchange'] > lfc)).sum())
+        sig = significant_subset(de_results, fdr, lfc)
+        n_sig = len(sig)
         run = CellTypeRun(
             plan.cell_type, plan.slug, run_accession, 'ok',
             n_cells=plan.n_cells, n_samples=len(sample_df),
             n_genes_tested=len(de_results), n_significant=n_sig,
             design=str(de_results.attrs.get('design', '')),
-            de_results=de_results)
+            de_results=de_results,
+            method=label, counts=counts_folder_name(counts_source), min_cells=min_cells,
+            n_donors_control=plan.n_control_samples,
+            n_donors_disease=plan.n_disease_samples,
+            n_donors_excluded=plan.n_donors_excluded,
+            n_donors_without_cells=plan.n_donors_without_cells,
+            median_cells_per_donor=plan.median_cells_per_donor,
+            n_up=int((sig['logfoldchanges'] > 0).sum()),
+            n_down=int((sig['logfoldchanges'] < 0).sum()),
+            fdr=fdr, lfc_threshold=lfc,
+            saved=datetime.now().isoformat(timespec='seconds'))
 
         if write:
-            run.de_path = de_result_path(output_dir, run_accession, label)
+            run_dir = de_run_dir(output_dir, counts_source, plan.cell_type)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            run.de_path = run_dir / f"{run_accession}_DE_{label}.csv"
             de_results.to_csv(run.de_path, index=False)
             if run_record is not None:
                 from kosmic.de.saved import save_run_record
                 save_run_record(run.de_path, {
                     **run_record, 'method': label, 'cell_type': plan.cell_type,
-                    'cell_type_column': cell_type_col, 'design': run.design})
+                    'cell_type_column': cell_type_col, 'design': run.design,
+                    'counts_source': counts_source, 'saved': run.saved,
+                    'fdr': float(fdr), 'lfc_threshold': float(lfc)})
 
             # The significant subset alongside the full table -- the same
             # selection the counts above report, so nobody has to re-derive
             # it with slightly different thresholds.
-            run.significant_path = significant_path(output_dir, run_accession)
-            significant_subset(de_results, fdr, lfc).to_csv(
-                run.significant_path, index=False)
+            run.significant_path = run_dir / f"{run_accession}_significant_genes.csv"
+            sig.to_csv(run.significant_path, index=False)
 
             # The same counts the DE read, or the exported pseudobulk and
             # the results it accompanies describe different matrices.
@@ -392,7 +437,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                 min_cells=min_cells, min_counts=min_counts, aggregate='sum',
                 counts_layer=pipeline_kwargs.get('counts_layer'))
             if pb_matrix.size:
-                run.pseudobulk_path = pseudobulk_path(output_dir, run_accession)
+                run.pseudobulk_path = run_dir / f"{run_accession}_pseudobulk.csv"
                 pseudobulk_frame(pb_matrix, pb_sample_df, pb_genes).to_csv(
                     run.pseudobulk_path)
 
@@ -405,20 +450,66 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
 
 
 
+#: The batch summary's columns, in order (ADR-015).
+SUMMARY_COLUMNS = (
+    'cell_type', 'status', 'message',
+    'method', 'counts', 'design', 'min_cells',
+    'n_donors_control', 'n_donors_disease', 'n_donors_excluded',
+    'n_donors_without_cells',
+    'n_cells', 'median_cells_per_donor',
+    'n_genes_tested', 'n_significant', 'n_up', 'n_down',
+    'fdr', 'lfc_threshold',
+    'saved',
+)
+
+
 def batch_summary(runs: Sequence[CellTypeRun]) -> pd.DataFrame:
-    """One row per cell type: what ran, what it found, where it landed."""
-    return pd.DataFrame([{
-        'cell_type': r.cell_type,
-        'accession': r.accession,
-        'status': r.status,
-        'n_cells': r.n_cells,
-        'n_samples': r.n_samples,
-        'n_genes_tested': r.n_genes_tested,
-        'n_significant': r.n_significant,
-        'design': r.design,
-        'message': r.message,
-        'de_path': str(r.de_path) if r.de_path else '',
-    } for r in runs])
+    """One row per cell type: how it was run and what it found. The
+    summary sits in ``statistics/<counts>/`` and each run in the folder
+    named after its cell type beside it (:func:`kosmic.paths.de_run_dir`);
+    no path is stored, so the summary stays right when the project is
+    copied."""
+    rows = []
+    for r in runs:
+        ok = r.status == 'ok'
+        rows.append({
+            'cell_type': r.cell_type,
+            'status': r.status,
+            'message': r.message,
+            'method': r.method,
+            'counts': r.counts,
+            'design': r.design,
+            'min_cells': r.min_cells if ok else None,
+            'n_donors_control': r.n_donors_control if ok else None,
+            'n_donors_disease': r.n_donors_disease if ok else None,
+            'n_donors_excluded': r.n_donors_excluded if ok else None,
+            'n_donors_without_cells': r.n_donors_without_cells if ok else None,
+            'n_cells': r.n_cells,
+            'median_cells_per_donor': r.median_cells_per_donor if ok else None,
+            'n_genes_tested': r.n_genes_tested if ok else None,
+            'n_significant': r.n_significant if ok else None,
+            'n_up': r.n_up if ok else None,
+            'n_down': r.n_down if ok else None,
+            'fdr': r.fdr if ok else None,
+            'lfc_threshold': r.lfc_threshold if ok else None,
+            'saved': r.saved,
+        })
+    return pd.DataFrame(rows, columns=list(SUMMARY_COLUMNS))
+
+
+def run_counts_source(adata, counts_layer: Optional[str] = None) -> str:
+    """The counts a DE run reads: *counts_layer* when one is named (other
+    than the original 'counts' layer), else what the dataset holds
+    ('raw' or a layer name; :func:`kosmic.scrna.counts.loaded_count_source`)."""
+    if counts_layer and counts_layer != 'counts':
+        return str(counts_layer)
+    from kosmic.scrna.counts import loaded_count_source
+    return loaded_count_source(adata)
+
+
+def summary_path(output_dir, accession: str, counts_source: Optional[str]) -> Path:
+    """Where a batch run's summary goes: its counts folder (ADR-015)."""
+    return de_run_dir(output_dir, counts_source) / f"{accession}_by_cell_type_summary.csv"
 
 
 def common_tested_genes(runs_or_frames) -> list[str]:

@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from kosmic.de.de_analysis import significant_subset
-from kosmic.paths import de_stats_dir, significant_path
+from kosmic.paths import de_run_dir, significant_path
 
 
 def frame():
@@ -100,8 +100,11 @@ def test_batch_writes_a_significant_file_per_cell_type(tmp_path):
         # The file must agree with the count the run reported.
         assert len(sig) == r.n_significant
 
-    names = {p.name for p in de_stats_dir(tmp_path / "GSE1").iterdir()}
-    assert "GSE1_Endothelial_significant_genes.csv" in names
+    # In the run's counts and cell-type folder, beside its DE table (ADR-015).
+    folder = de_run_dir(tmp_path / "GSE1", "raw", "Endothelial")
+    assert (folder / "GSE1_Endothelial_significant_genes.csv").exists()
+    assert (folder / "GSE1_Endothelial_DE_welch_cpm.csv").exists() or any(
+        folder.glob("GSE1_Endothelial_DE_*.csv"))
 
 
 def test_significant_filename_is_not_mistaken_for_a_de_input():

@@ -53,8 +53,11 @@ class InteractiveTopDEPlot(InteractivePlot):
         self.scene().sigMouseMoved.connect(self.on_mouse_move)
         self.scene().sigMouseClicked.connect(self.on_mouse_click)
 
-    def set_data(self, de_results, pathway_gene_sets, top_n=15):
-        """Store data and show pathway-level view."""
+    def set_data(self, de_results, pathway_gene_sets, top_n=15, fdr=None, lfc=None):
+        """Store data and show pathway-level view. *fdr* and *lfc* are the
+        significance rule of the run shown (the defaults when None)."""
+        self.fdr = DEFAULT_FDR if fdr is None else fdr
+        self.lfc = DEFAULT_LFC_THRESHOLD if lfc is None else lfc
         self.de_results = de_results
         self.pathway_gene_sets = pathway_gene_sets
         self.top_n = top_n
@@ -62,8 +65,9 @@ class InteractiveTopDEPlot(InteractivePlot):
 
     def _get_sig_genes(self):
         df = self.de_results
-        return df[(df['pvals_adj'] < DEFAULT_FDR)
-                  & (df['abs_logfoldchange'] > DEFAULT_LFC_THRESHOLD)].copy()
+        fdr = getattr(self, 'fdr', DEFAULT_FDR)
+        lfc = getattr(self, 'lfc', DEFAULT_LFC_THRESHOLD)
+        return df[(df['pvals_adj'] < fdr) & (df['abs_logfoldchange'] > lfc)].copy()
 
     def show_pathway_level(self):
         """Draw split horizontal bars showing sig up/down counts per pathway."""

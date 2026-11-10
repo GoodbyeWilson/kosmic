@@ -46,7 +46,8 @@ class EnrichmentFigurePage(FigurePage):
         inputs = self._meta_inputs()
         if not inputs:
             return None
-        sel = str(inputs.get('selection') or '').replace('_', ' ')
+        from kosmic.meta_analysis.io import split_selection
+        sel = split_selection(inputs.get('selection'))[1].replace('_', ' ')
         return SimpleNamespace(
             enrichment_results=inputs.get('enrichment_results'),
             gsea_library_results=inputs.get('gsea_library_results'),

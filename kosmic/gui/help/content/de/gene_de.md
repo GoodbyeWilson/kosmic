@@ -20,7 +20,8 @@ analysis is the donor / sample rather than the cell.
 | **Filter genes within each study** | Atlas only -- see below. |
 | **Exclude mitochondrial genes (MT-)** | Removes MT- genes before testing. In single-nucleus data, mitochondrial transcripts come from cytoplasmic carry-over or ambient RNA, so differences between conditions are technical. Off by default. |
 | **Exclude ribosomal protein genes (RPL/RPS)** | Removes cytosolic ribosomal protein genes before testing; mitochondrial ribosomal genes (MRPL/MRPS) are kept. These genes are transcribed in the nucleus, so exclude them only if you treat their changes as technical. Off by default. |
-| **Count source** | Shows which counts are loaded: the original counts, or the DecontX-corrected counts. Choose them under *Counts* on the Load Data page; every step on this page, the per-cell-type run and the exported pseudobulk read the counts loaded. |
+| **FDR** and **Min \|log2FC\|** (Significance card) | The significance rule. A gene is significant when its FDR is below the first and, if Min \|log2FC\| is set, its \|log2FC\| exceeds the second. Min \|log2FC\| is Off by default, so significance rests on FDR alone. Both values are recorded with each run: the significant-genes file, the per-cell-type summary and the Methods text use them, and a saved run reopens with them. A new run starts from FDR < 0.05 with no minimum, not from the values of a saved run shown before it, unless you change them yourself; the output panel says when it resets them. Changing them after a run does not run the test again: press **Apply filters** under the volcano to update the shown results and the run's files: its significant-genes file, its .json record and, for a run of one cell type, its row of the summary table. The DE Results tab states the rule its count uses. A run saved before KOSMIC recorded them reopens with \|log2FC\| > 0.25, the setting of the time, and the output panel says the value is assumed. |
+| **Count source** | Shows which counts are loaded: the original counts, or the DecontX-corrected counts. Choose them under *Counts* on the Load Data page; every step on this page, the per-cell-type run and the exported pseudobulk read the counts loaded. An atlas combined from the studies' DecontX counts holds only those counts, so it shows DecontX-corrected counts here and its runs are saved under `decontX_counts/`. |
 
 Excluded genes take no part in normalisation or the FDR correction, and
 the exclusion is recorded in provenance and on the Methods page. The
@@ -197,8 +198,46 @@ false positives from genes with unusually low variance.
 BH FDR at 5%. The displayed scope depends on which display filters are
 active -- see the **DE Results table** note above.
 
+## Where results are saved
+
+Each run is saved in the study's `results/de_analysis/statistics/`
+folder, in a folder for the counts it used: `original_counts/` for the
+original counts and `decontX_counts/` for the DecontX counts. Runs on
+the two counts are therefore kept side by side and can be compared.
+
+```
+statistics/
+    original_counts/
+        {study}_DE_deseq2.csv                       a whole-study run
+        {study}_by_cell_type_summary.csv
+        Endothelial_Cell/
+            {study}_Endothelial_Cell_DE_deseq2.csv
+            {study}_Endothelial_Cell_DE_deseq2.json
+            {study}_Endothelial_Cell_pseudobulk.csv
+            {study}_Endothelial_Cell_significant_genes.csv
+    decontX_counts/
+        ...
+```
+
+The `.json` file records the run's settings, including the counts and
+the significance rule. The significant-genes file lists the genes that
+pass that rule.
+
+The summary table of **Run per cell type...** has one row per cell
+type: whether it ran and why not, the method, counts, design and
+minimum cells per donor; the donors in each group, those left out
+for having too few cells, and those with none of the cell type's cells
+(together, every donor in the contrast); the cells tested and the median per donor;
+the genes tested, significant, up and down; the FDR and minimum
+|log2FC| used; and when the run was saved. Each cell type's files are in
+the folder named after it beside the summary.
+
+Results saved directly in `statistics/` by earlier versions are still
+listed and opened.
+
 ## Exporting
 
 Use the export buttons in the sidebar to save the full table, the
-significant-only subset, and the analysis settings JSON. The CSVs are
-the inputs the meta-analysis workspace looks for.
+significant-only subset, and the analysis settings JSON. They are saved
+in the folder for the counts loaded. The DE tables are the inputs the
+meta-analysis workspace looks for.
