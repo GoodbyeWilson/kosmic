@@ -167,7 +167,10 @@ def read_counts_adata(h5ad_path, *, counts_layer: Optional[str] = None,
 
     The result is a dataset in the "counts in X, no layers" state every
     KOSMIC reader already understands; ``uns['counts_loaded_from']`` says
-    which counts X holds.
+    which counts X holds. For a dataset combined from a layer of each
+    study, as its provenance records (an atlas built on DecontX counts),
+    ``uns['counts_combined_from']`` names that layer, so the counts are
+    reported as the corrected ones (``kosmic.scrna.counts.loaded_count_source``).
     """
     import anndata as ad
     import h5py
@@ -192,6 +195,12 @@ def read_counts_adata(h5ad_path, *, counts_layer: Optional[str] = None,
         extra = read_elem(f['uns']) if uns and 'uns' in f else {}
     a = ad.AnnData(X=X, obs=obs, var=var, uns=extra)
     a.uns['counts_loaded_from'] = source
+    if counts_layer is None:
+        from kosmic import provenance
+        from kosmic.scrna.counts import combined_counts_layer
+        combined = combined_counts_layer(provenance.load(Path(str(h5ad_path)).parent))
+        if combined:
+            a.uns['counts_combined_from'] = combined
     return a
 
 

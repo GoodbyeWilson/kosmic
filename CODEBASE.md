@@ -139,7 +139,7 @@ count matrix -- and the scRNA workspace releases its copy; only a
 dataset with no file is shared in memory. The count matrix is the
 original counts, or the DecontX-corrected counts
 (`layers['decontX_counts']`) when they are chosen on the Dataset page,
-and `uns['counts_loaded_from']` records which. Every DE step, pathway
+and `uns['counts_loaded_from']` records which. An atlas combined from each study's DecontX counts holds those counts as its own, with no layer; its `combine` provenance stage records the layer, and `uns['counts_combined_from']` carries it so the atlas's DE runs are named and filed as DecontX counts. Every DE step, pathway
 score and export reads that matrix. The hand-off is one-way:
 Differential Expression never modifies the scRNA workspace's state, and
 writes to the study's file only an obs column it adds (Combine

@@ -714,6 +714,9 @@ class GeneDEPage(SidebarTabbedPage):
             " an interval of [1.4, 4.3] supports a weaker claim than"
             " the 2.9 suggests.")
         self.fc_filter.valueChanged.connect(self._mark_filters_dirty)
+        # A value typed here is chosen, not assumed (see _apply_run_significance).
+        self.fc_filter.valueChanged.connect(
+            lambda _v: setattr(self, '_lfc_assumed', False))
         sig_lay.addWidget(SecondaryLabel("Significant when"))
         sig_lay.addWidget(self.pval_filter)
         sig_lay.addWidget(self.fc_filter)
@@ -1473,10 +1476,32 @@ class GeneDEPage(SidebarTabbedPage):
             spin.setValue(value)
             spin.blockSignals(False)
         self.ws.significance = (fdr, lfc, assumed)
+        self._lfc_assumed = assumed
         if assumed:
             self.ws.log_message.emit(
                 f"{Path(str(de_path)).name}: no significance rule recorded; shown "
                 f"with |log2FC| > {lfc:g}, the setting of the time (assumed).")
+
+    def _drop_assumed_rule(self):
+        """Before a new run: a Min |log2FC| filled in from an older run that
+        recorded none (0.25, assumed) was never chosen, so the new run does
+        not inherit it; the box returns to Off and the output panel says so."""
+        from kosmic import DEFAULT_LFC_THRESHOLD
+
+        if not getattr(self, '_lfc_assumed', False):
+            return
+        self._lfc_assumed = False
+        if self.fc_filter.value() == DEFAULT_LFC_THRESHOLD:
+            return
+        assumed = self.fc_filter.value()
+        self.fc_filter.blockSignals(True)
+        self.fc_filter.setValue(DEFAULT_LFC_THRESHOLD)
+        self.fc_filter.blockSignals(False)
+        self._refresh_card_summaries()
+        self.ws.log_message.emit(
+            f"Min |log2FC| reset to Off for this run: {assumed:g} was assumed for "
+            "an older run that recorded no rule, not chosen. Set it under "
+            "Significance to use a minimum.")
 
     def _apply_loaded_results(self, de_results, source_name):
         """Apply loaded DE results to the workspace and refresh the UI."""
@@ -2073,6 +2098,7 @@ class GeneDEPage(SidebarTabbedPage):
             return
         if not self._confirm_mixed_cell_types():
             return
+        self._drop_assumed_rule()
 
         sample_col = self.ws.sample_col
         condition_col = self.ws.condition_col
@@ -2414,6 +2440,7 @@ class GeneDEPage(SidebarTabbedPage):
         return genes
 
     def _start_batch(self, cell_type_col, cell_types):
+        self._drop_assumed_rule()
         gse_id = self.ws.gse_accession or (
             Path(self.ws.h5ad_path).stem if self.ws.h5ad_path else "unknown")
         self._batch_worker = CellTypeBatchWorker(

@@ -440,8 +440,8 @@ class MethodsPage(SimplePage):
             used_refs.add('soupx')
         if 'X_pca_harmony' in obsm:
             used_refs.add('harmony')
-        if ('decontX_counts' in layers
-                or adata.uns.get('counts_loaded_from') == 'layers:decontX_counts'):
+        from kosmic.scrna.counts import loaded_count_source
+        if 'decontX_counts' in layers or loaded_count_source(adata) == 'decontX_counts':
             used_refs.add('decontx')
         # CellTypist's own outputs; other annotation methods also write
         # cell_type_auto, so that column is no evidence of CellTypist.

@@ -65,13 +65,30 @@ def loaded_count_source(adata) -> str:
 
     Reads ``uns['counts_loaded_from']``, which
     :func:`kosmic.scrna.load.h5ad_meta.read_counts_adata` sets; a dataset
-    without it holds its original counts.
+    without it holds its original counts. A dataset combined from a layer
+    of each study (an atlas built on ``'decontX_counts'``) holds those
+    counts as its own, with no layer to load; ``uns['counts_combined_from']``,
+    also set by that reader, names the layer.
     """
     uns = getattr(adata, 'uns', None) or {}
     where = str(uns.get('counts_loaded_from', ''))
     if where.startswith('layers:') and where != 'layers:counts':
         return where.split(':', 1)[1]
+    combined = uns.get('counts_combined_from')
+    if combined and str(combined) != 'counts':
+        return str(combined)
     return 'raw'
+
+
+def combined_counts_layer(record) -> Optional[str]:
+    """The layer a combined dataset was built from (``'decontX_counts'``),
+    from the latest ``combine`` stage of its provenance record, or None."""
+    stages = (record or {}).get('stages') or []
+    for stage in reversed(stages):
+        if stage.get('stage') == 'combine':
+            layer = (stage.get('params') or {}).get('counts_layer')
+            return str(layer) if layer else None
+    return None
 
 
 def has_counts_layer(adata) -> bool:

@@ -432,3 +432,70 @@ def test_apply_on_a_shown_cell_type_run_writes_to_that_run(tmp_path):
     page._shown_de_path = None
     GeneDEPage._auto_export_significant(page)
     assert (de_path.parent.parent / 'S1_significant_genes.csv').is_file()
+
+
+def _counts_file(folder, layers=()):
+    import anndata as ad
+    import numpy as np
+    folder.mkdir(parents=True, exist_ok=True)
+    a = ad.AnnData(X=np.ones((4, 3), dtype=np.float32))
+    for name in layers:
+        a.layers[name] = a.X.copy()
+    path = folder / 'master.h5ad'
+    a.write_h5ad(path)
+    return path
+
+
+def test_an_atlas_combined_on_decontx_counts_reports_them(tmp_path):
+    """The master built from each study's DecontX layer holds those counts
+    with no layer of its own; its runs are named and filed as DecontX."""
+    from kosmic import provenance
+    from kosmic.de.batch import run_counts_source
+    from kosmic.paths import counts_folder_name
+    from kosmic.scrna.counts import loaded_count_source
+    from kosmic.scrna.load.h5ad_meta import read_counts_adata
+    path = _counts_file(tmp_path / '_master' / 'processed_data')
+    provenance.record_stage(path.parent, '_master', 'combine',
+                            {'counts_layer': 'decontX_counts'})
+    a = read_counts_adata(path)
+    assert loaded_count_source(a) == 'decontX_counts'
+    assert counts_folder_name(run_counts_source(a)) == 'decontX_counts'
+
+
+def test_an_atlas_combined_on_original_counts_reports_them(tmp_path):
+    from kosmic import provenance
+    from kosmic.scrna.counts import loaded_count_source
+    from kosmic.scrna.load.h5ad_meta import read_counts_adata
+    path = _counts_file(tmp_path / '_master' / 'processed_data')
+    provenance.record_stage(path.parent, '_master', 'combine', {'counts_layer': None})
+    assert loaded_count_source(read_counts_adata(path)) == 'raw'
+    plain = _counts_file(tmp_path / 'Study' / 'processed_data', layers=('counts',))
+    assert loaded_count_source(read_counts_adata(plain)) == 'raw'      # no provenance
+
+
+def test_a_new_run_does_not_inherit_an_assumed_minimum():
+    """Opening an older run fills Min |log2FC| with the assumed 0.25; the
+    next run starts from Off and says so. A value set by hand is kept."""
+    from types import SimpleNamespace
+    from kosmic.gui.de_analysis.pages.gene_de_page import GeneDEPage
+
+    class Spin:
+        def __init__(self, v):
+            self.v = v
+        def value(self):
+            return self.v
+        def setValue(self, v):
+            self.v = v
+        def blockSignals(self, _b):
+            return None
+
+    logs = []
+    page = SimpleNamespace(fc_filter=Spin(0.25), _lfc_assumed=True,
+                           _refresh_card_summaries=lambda: None,
+                           ws=SimpleNamespace(log_message=SimpleNamespace(emit=logs.append)))
+    GeneDEPage._drop_assumed_rule(page)
+    assert page.fc_filter.value() == 0.0 and 'reset to Off' in logs[0]
+
+    page.fc_filter.v, page._lfc_assumed = 0.5, False           # chosen by hand
+    GeneDEPage._drop_assumed_rule(page)
+    assert page.fc_filter.value() == 0.5
