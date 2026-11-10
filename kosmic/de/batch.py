@@ -94,6 +94,8 @@ class CellTypePlan:
     #: Donors with cells of this type left out for falling below the
     #: cell or transcript floor.
     n_donors_excluded: int = 0
+    #: Donors in the contrast with no cells of this type at all.
+    n_donors_without_cells: int = 0
     #: Median cells per kept donor.
     median_cells_per_donor: float = 0.0
 
@@ -127,6 +129,7 @@ class CellTypeRun:
     n_donors_control: int = 0
     n_donors_disease: int = 0
     n_donors_excluded: int = 0
+    n_donors_without_cells: int = 0
     median_cells_per_donor: float = 0.0
     n_up: int = 0
     n_down: int = 0
@@ -179,6 +182,9 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
     depths = cell_depths(adata, counts_layer) if min_counts else None
 
     included = included_roles(roles)
+    # Every donor in the contrast, so each cell type's row can say how many
+    # had none of its cells.
+    n_donors_total = int(samples[included].nunique())
     # Unlabelled cells: 'nan' under pandas 2's astype(str), NaN under pandas 3.
     observed = [t for t in pd.unique(labels[included])
                 if pd.notna(t) and t not in ('nan', 'None')]
@@ -191,7 +197,8 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
         if not n_cells:
             plans.append(CellTypePlan(
                 str(cell_type), slugify_cell_type(cell_type), 0, 0, 0,
-                eligible=False, reason='no cells with this label'))
+                eligible=False, reason='no cells with this label',
+                n_donors_without_cells=n_donors_total))
             continue
 
         per_cell = pd.DataFrame({
@@ -223,7 +230,9 @@ def plan_cell_types(adata, cell_type_col: str, sample_col: str,
         plans.append(CellTypePlan(
             str(cell_type), slugify_cell_type(cell_type), n_cells,
             n_disease, n_control, eligible, reason,
-            n_donors_excluded=n_excluded, median_cells_per_donor=median_cells))
+            n_donors_excluded=n_excluded,
+            n_donors_without_cells=n_donors_total - len(counts),
+            median_cells_per_donor=median_cells))
 
     return plans
 
@@ -394,6 +403,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
             n_donors_control=plan.n_control_samples,
             n_donors_disease=plan.n_disease_samples,
             n_donors_excluded=plan.n_donors_excluded,
+            n_donors_without_cells=plan.n_donors_without_cells,
             median_cells_per_donor=plan.median_cells_per_donor,
             n_up=int((sig['logfoldchanges'] > 0).sum()),
             n_down=int((sig['logfoldchanges'] < 0).sum()),
@@ -445,18 +455,20 @@ SUMMARY_COLUMNS = (
     'cell_type', 'status', 'message',
     'method', 'counts', 'design', 'min_cells',
     'n_donors_control', 'n_donors_disease', 'n_donors_excluded',
+    'n_donors_without_cells',
     'n_cells', 'median_cells_per_donor',
     'n_genes_tested', 'n_significant', 'n_up', 'n_down',
     'fdr', 'lfc_threshold',
-    'folder', 'saved',
+    'saved',
 )
 
 
 def batch_summary(runs: Sequence[CellTypeRun]) -> pd.DataFrame:
-    """One row per cell type: how it was run, what it found and where it
-    was written. 'folder' is the run's folder relative to
-    ``statistics/<counts>/`` (its cell-type folder), never an absolute
-    path, so the summary stays right when the project is copied."""
+    """One row per cell type: how it was run and what it found. The
+    summary sits in ``statistics/<counts>/`` and each run in the folder
+    named after its cell type beside it (:func:`kosmic.paths.de_run_dir`);
+    no path is stored, so the summary stays right when the project is
+    copied."""
     rows = []
     for r in runs:
         ok = r.status == 'ok'
@@ -471,6 +483,7 @@ def batch_summary(runs: Sequence[CellTypeRun]) -> pd.DataFrame:
             'n_donors_control': r.n_donors_control if ok else None,
             'n_donors_disease': r.n_donors_disease if ok else None,
             'n_donors_excluded': r.n_donors_excluded if ok else None,
+            'n_donors_without_cells': r.n_donors_without_cells if ok else None,
             'n_cells': r.n_cells,
             'median_cells_per_donor': r.median_cells_per_donor if ok else None,
             'n_genes_tested': r.n_genes_tested if ok else None,
@@ -479,7 +492,6 @@ def batch_summary(runs: Sequence[CellTypeRun]) -> pd.DataFrame:
             'n_down': r.n_down if ok else None,
             'fdr': r.fdr if ok else None,
             'lfc_threshold': r.lfc_threshold if ok else None,
-            'folder': r.de_path.parent.name if r.de_path else '',
             'saved': r.saved,
         })
     return pd.DataFrame(rows, columns=list(SUMMARY_COLUMNS))

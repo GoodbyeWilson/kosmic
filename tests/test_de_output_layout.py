@@ -172,13 +172,20 @@ def test_the_summary_describes_each_run(tmp_path):
     runs = _batch(tmp_path)
     s = B.batch_summary(runs).set_index('cell_type')
     endo = s.loc['Endothelial']
-    assert endo['counts'] == 'original_counts' and endo['folder'] == 'Endothelial'
+    assert endo['counts'] == 'original_counts'
+    # C4 has 5 endothelial cells and no fibroblasts; the four donor columns
+    # add up to the seven donors of the contrast.
     assert (endo['n_donors_control'], endo['n_donors_disease'],
-            endo['n_donors_excluded']) == (3, 3, 1)            # C4 has 5 cells
+            endo['n_donors_excluded'], endo['n_donors_without_cells']) == (3, 3, 1, 0)
+    fib = s.loc['Fibroblast']
+    assert (fib['n_donors_control'], fib['n_donors_disease'],
+            fib['n_donors_excluded'], fib['n_donors_without_cells']) == (3, 3, 0, 1)
     assert endo['median_cells_per_donor'] == 30
     assert endo['n_up'] + endo['n_down'] == endo['n_significant']
     assert endo['min_cells'] == 10 and endo['fdr'] == 0.05
-    assert not any(':' in str(v) and '\\' in str(v) for v in s['folder'])   # no absolute paths
+    assert 'folder' not in s.columns
+    assert not any(':' in v and '\\' in v                                  # no paths
+                   for v in s.astype(str).to_numpy().ravel())
     out = B.summary_path(tmp_path / 'GSE1', 'GSE1', 'raw')
     assert out.parent == de_run_dir(tmp_path / 'GSE1', 'raw')
 
@@ -361,9 +368,8 @@ def _cell_type_run(tmp_path):
                               'fdr': 0.05, 'lfc_threshold': 0.0})
     row = dict.fromkeys(SUMMARY_COLUMNS)
     row.update(cell_type='Endothelial Cell', status='ok', method='deseq2',
-               folder=run_dir.name, n_significant=3, n_up=1, n_down=2,
-               fdr=0.05, lfc_threshold=0.0)
-    other = {**row, 'cell_type': 'Fibroblast', 'folder': 'Fibroblast'}
+               n_significant=3, n_up=1, n_down=2, fdr=0.05, lfc_threshold=0.0)
+    other = {**row, 'cell_type': 'Fibroblast'}
     summary = run_dir.parent / 'S1_by_cell_type_summary.csv'
     pd.DataFrame([row, other], columns=list(SUMMARY_COLUMNS)).to_csv(summary, index=False)
     return de_path, de, summary

@@ -262,7 +262,7 @@ def recut_saved_run(de_path, de_results, fdr: float, lfc: float) -> Path:
     its table, is rewritten with the genes that pass the rule. When the
     run's table is saved, its record stores the rule, and for a run of
     one cell type its row of the batch summary in the counts folder
-    (``*_by_cell_type_summary.csv``, matched on folder and method) gets
+    (``*_by_cell_type_summary.csv``, matched on cell type and method) gets
     the new counts and rule, so every file of the run reports the same
     selection.
 
@@ -306,9 +306,12 @@ def recut_saved_run(de_path, de_results, fdr: float, lfc: float) -> Path:
                 table = pd.read_csv(summary)
             except (OSError, ValueError):
                 continue
-            if not {'folder', 'method'} <= set(table.columns):
+            if not {'cell_type', 'method'} <= set(table.columns):
                 continue
-            row = ((table['folder'].astype(str) == de_path.parent.name)
+            # The run's folder is its cell type made file-safe.
+            from kosmic.de.batch import slugify_cell_type
+            row = ((table['cell_type'].astype(str).map(slugify_cell_type)
+                    == de_path.parent.name)
                    & (table['method'].astype(str) == method))
             if not row.any():
                 continue

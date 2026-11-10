@@ -92,12 +92,16 @@ One row per cell type, in this order:
 |---|---|
 | `cell_type`, `status`, `message` | what ran; why a run was skipped or failed |
 | `method`, `counts`, `design`, `min_cells` | how it was run |
-| `n_donors_control`, `n_donors_disease`, `n_donors_excluded` | donors per arm, and donors left out for having fewer than `min_cells` cells |
+| `n_donors_control`, `n_donors_disease`, `n_donors_excluded`, `n_donors_without_cells` | donors per arm, donors left out for having fewer than `min_cells` cells, and donors in the contrast with none of the cell type's cells (added 2026-11-10), so the three add up to the study's donors |
 | `n_cells`, `median_cells_per_donor` | cells tested |
 | `n_genes_tested`, `n_significant`, `n_up`, `n_down` | results under the run's significance rule |
 | `fdr`, `lfc_threshold` | that rule (`lfc_threshold` 0 when no fold-change gate was set) |
-| `folder` | the run's folder relative to `statistics/<counts>/` (replaces the absolute `de_path`) |
 | `saved` | when the run was written; matches its `.json` record |
+
+The summary stores no path (the absolute `de_path` it replaces was wrong
+on another computer): each run is in the folder beside it named after its
+cell type. A `folder` column naming that folder was dropped on 2026-11-10
+as it repeated the cell type.
 
 ### 5. Significance is a setting of each run
 
@@ -163,8 +167,8 @@ tests/` passing.
    source is read from the folder or the record.
 2. **Writers and summary.** The batch and Gene DE writers use the new
    layout; the new summary columns. Tests: files land in
-   `<counts>/<cell type>/`; the summary's donors per arm, counts and
-   relative folder; a copied project still lists its runs.
+   `<counts>/<cell type>/`; the summary's donors per arm and counts, with
+   no stored paths; a copied project still lists its runs.
 3. **Significance per run.** The Min |log2FC| controls, the record
    fields, and every consumer reading them; `lfc_threshold` removed from
    `config.toml`. Tests: Off gives FDR-only counts in the summary,

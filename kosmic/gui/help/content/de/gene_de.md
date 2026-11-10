@@ -225,10 +225,12 @@ pass that rule.
 
 The summary table of **Run per cell type...** has one row per cell
 type: whether it ran and why not, the method, counts, design and
-minimum cells per donor; the donors in each group and those left out
-for having too few cells; the cells tested and the median per donor;
+minimum cells per donor; the donors in each group, those left out
+for having too few cells, and those with none of the cell type's cells
+(together, every donor in the contrast); the cells tested and the median per donor;
 the genes tested, significant, up and down; the FDR and minimum
-|log2FC| used; the cell type's folder; and when the run was saved.
+|log2FC| used; and when the run was saved. Each cell type's files are in
+the folder named after it beside the summary.
 
 Results saved directly in `statistics/` by earlier versions are still
 listed and opened.
