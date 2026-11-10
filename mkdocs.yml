@@ -119,6 +119,7 @@ nav:
       - figures/index.md
       - Dataset summary: figures/dataset_summary.md
       - QC violins: figures/qc_violins.md
+      - Cell filtering: figures/cell_filtering.md
       - Variable genes: figures/variable_genes.md
       - Elbow: figures/elbow.md
       - UMAP: figures/umap.md

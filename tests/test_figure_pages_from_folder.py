@@ -79,7 +79,7 @@ def test_every_scrna_and_de_figure_draws_from_the_folder(app, study):
         assert _draw(app, page), (page.TITLE, page._status_lbl.text())
         drawn.append(page.TITLE)
     assert unavailable == [], unavailable
-    assert len(drawn) == 19
+    assert len(drawn) == 20
 
 
 def test_a_figure_whose_input_was_not_saved_says_what_to_run(app, tmp_path):

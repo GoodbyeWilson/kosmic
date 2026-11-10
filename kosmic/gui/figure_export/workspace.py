@@ -54,7 +54,7 @@ from kosmic.gui.figure_export.pages.meta_figures import (
 )
 from kosmic.gui.figure_export.pages.patient_dotplot import PatientDotplotPage
 from kosmic.gui.figure_export.pages.pathway_bubble import PathwayBubblePage
-from kosmic.gui.figure_export.pages.qc_violins import QCViolinsPage
+from kosmic.gui.figure_export.pages.qc_violins import CellFilteringPage, QCViolinsPage
 from kosmic.gui.figure_export.pages.term_links import TermLinksPage
 from kosmic.gui.figure_export.pages.topde_summary import TopDESummaryPage
 from kosmic.gui.figure_export.pages.umap import UMAPPage
@@ -72,6 +72,7 @@ _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     ("Cell Types", CompositionPage),
     # Single-cell QC
     ("Single-cell QC", QCViolinsPage),
+    ("Single-cell QC", CellFilteringPage),
     ("Single-cell QC", VariableGenesPage),
     # Clustering
     ("Clustering", PCAElbowPage),

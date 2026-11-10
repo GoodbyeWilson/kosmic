@@ -24,7 +24,8 @@ A figure whose results are not available is greyed in the list, and its tooltip 
 |---|---|---|
 | Embeddings | [UMAP / t-SNE](umap.md) | The study's dataset, with an embedding |
 | Cell Types | [Marker Dot Plot](marker_dotplot.md), [Marker Score UMAPs](marker_scores.md), [Cell-Type Composition](composition.md) | The study's dataset and its cell-type labels |
-| Single-cell QC | [QC Violins](qc_violins.md), [Variable Genes](variable_genes.md) | The study's dataset |
+| Single-cell QC | [QC Violins](qc_violins.md), [Variable Genes](variable_genes.md) | The study's dataset; QC Violins also reads the QC limits from the study's provenance record |
+| Single-cell QC | [Cell Filtering](cell_filtering.md) | The study's provenance record, which holds the cells removed at each step |
 | Clustering | [PCA Elbow](elbow.md) | The study's dataset, after PCA |
 | Differential Expression | [Volcano Plot](volcano.md), [Gene Heatmap](gene_heatmap.md), [DE Genes by Pathway](topde_summary.md), [Dataset Summary](dataset_summary.md) | A gene DE run of the study |
 | Pathway Activity | [Pathway Bubble](pathway_bubble.md), [Patient Dotplot](patient_dotplot.md) | The study's pathway DE (scoring) |
@@ -42,7 +43,7 @@ The figures can be made on a computer other than the one that ran the analysis, 
 
 | Section | Reads |
 |---|---|
-| scRNA | The study's `processed_data/` (its dataset file) and `study.json` |
+| scRNA | The study's `processed_data/` (its dataset file and `provenance.json`) and `study.json` |
 | DE | The study's `results/de_analysis/` and its dataset file (the Gene Heatmap reads the counts of its gene sets' genes) |
 | Meta | The project's `meta_analysis/` and each pooled study's `results/de_analysis/statistics/` |
 
