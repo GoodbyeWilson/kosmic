@@ -1893,6 +1893,18 @@ class QCTab(SidebarPage):
         if self.progress_bar:
             self.progress_bar.setValue(0)
 
+        # Per-sample counts come from the dataset as it was before the
+        # filter; the filtered one has no doublets left to count.
+        before = self.adata
+        removed_by_sample = None
+        sample_col = self._doublet_sample_col()
+        if (before is not None and sample_col and sample_col in before.obs
+                and 'predicted_doublet' in before.obs):
+            called = before.obs['predicted_doublet'].astype(bool).to_numpy()
+            removed_by_sample = {
+                str(k): int(v) for k, v in
+                before.obs.loc[called, sample_col].astype(str).value_counts().items()}
+
         self._doublets_removed = int(n_removed)
         self.adata = adata
         self.main_window.set_adata(adata, str(self.h5ad_path))
@@ -1903,6 +1915,7 @@ class QCTab(SidebarPage):
                 'n_cells_before': int(adata.n_obs + n_removed),
                 'n_cells_after': int(adata.n_obs),
                 'n_removed': int(n_removed),
+                'removed_by_sample': removed_by_sample,
             }, data_changed=True)
 
         self.doublet_status.setText(

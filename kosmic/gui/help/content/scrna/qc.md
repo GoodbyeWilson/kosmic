@@ -95,8 +95,11 @@ transcripts.
 The log lists each sample's threshold, doublets called and status, and
 the run is recorded in provenance. The plot switches to the
 doublet-score histogram, with the threshold marked when a single sample
-was scored. **Filter Doublets** removes the called cells. Scores and
-calls stay in `obs` (`doublet_score`, `predicted_doublet`) either way.
+was scored. **Filter Doublets** removes the called cells, and the
+removal is recorded in provenance as its own step (*Doublet removal*:
+cells before, removed per sample, and after), so the methods say the
+calls were removed and not only detected. Scores and calls stay in
+`obs` (`doublet_score`, `predicted_doublet`) either way.
 
 For a deposit whose authors have already removed doublets, Scrublet is
 not needed.
