@@ -479,9 +479,10 @@ def test_an_atlas_combined_on_original_counts_reports_them(tmp_path):
     assert loaded_count_source(read_counts_adata(plain)) == 'raw'      # no provenance
 
 
-def test_a_new_run_does_not_inherit_an_assumed_minimum():
-    """Opening an older run fills Min |log2FC| with the assumed 0.25; the
-    next run starts from Off and says so. A value set by hand is kept."""
+def test_a_new_run_starts_from_the_default_rule():
+    """Reopening a saved run fills the Significance boxes with its rule; the
+    next run starts from FDR < 0.05 and no minimum, and says so. A value
+    set by hand is kept."""
     from types import SimpleNamespace
     from kosmic.gui.de_analysis.pages.gene_de_page import GeneDEPage
 
@@ -496,12 +497,13 @@ def test_a_new_run_does_not_inherit_an_assumed_minimum():
             return None
 
     logs = []
-    page = SimpleNamespace(fc_filter=Spin(0.25), _lfc_assumed=True,
+    page = SimpleNamespace(pval_filter=Spin(0.05), fc_filter=Spin(0.25), _rule_from_run=True,
                            _refresh_card_summaries=lambda: None,
                            ws=SimpleNamespace(log_message=SimpleNamespace(emit=logs.append)))
-    GeneDEPage._drop_assumed_rule(page)
-    assert page.fc_filter.value() == 0.0 and 'reset to Off' in logs[0]
+    GeneDEPage._start_from_default_rule(page)
+    assert (page.pval_filter.value(), page.fc_filter.value()) == (0.05, 0.0)
+    assert 'reset' in logs[0] and '|log2FC| > 0.25' in logs[0]
 
-    page.fc_filter.v, page._lfc_assumed = 0.5, False           # chosen by hand
-    GeneDEPage._drop_assumed_rule(page)
+    page.fc_filter.v, page._rule_from_run = 0.5, False         # set by hand
+    GeneDEPage._start_from_default_rule(page)
     assert page.fc_filter.value() == 0.5

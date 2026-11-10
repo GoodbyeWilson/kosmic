@@ -714,9 +714,11 @@ class GeneDEPage(SidebarTabbedPage):
             " an interval of [1.4, 4.3] supports a weaker claim than"
             " the 2.9 suggests.")
         self.fc_filter.valueChanged.connect(self._mark_filters_dirty)
-        # A value typed here is chosen, not assumed (see _apply_run_significance).
-        self.fc_filter.valueChanged.connect(
-            lambda _v: setattr(self, '_lfc_assumed', False))
+        # A value set here by hand is the user's choice, which a new run
+        # keeps; one filled in from a saved run is not (_start_from_default_rule).
+        for _spin in (self.pval_filter, self.fc_filter):
+            _spin.valueChanged.connect(
+                lambda _v: setattr(self, '_rule_from_run', False))
         sig_lay.addWidget(SecondaryLabel("Significant when"))
         sig_lay.addWidget(self.pval_filter)
         sig_lay.addWidget(self.fc_filter)
@@ -1476,32 +1478,36 @@ class GeneDEPage(SidebarTabbedPage):
             spin.setValue(value)
             spin.blockSignals(False)
         self.ws.significance = (fdr, lfc, assumed)
-        self._lfc_assumed = assumed
+        self._rule_from_run = True
         if assumed:
             self.ws.log_message.emit(
                 f"{Path(str(de_path)).name}: no significance rule recorded; shown "
                 f"with |log2FC| > {lfc:g}, the setting of the time (assumed).")
 
-    def _drop_assumed_rule(self):
-        """Before a new run: a Min |log2FC| filled in from an older run that
-        recorded none (0.25, assumed) was never chosen, so the new run does
-        not inherit it; the box returns to Off and the output panel says so."""
-        from kosmic import DEFAULT_LFC_THRESHOLD
+    def _start_from_default_rule(self):
+        """Before a new run: a rule filled in by reopening a saved run is that
+        run's, not a choice for this one, so the new run starts from the
+        defaults (FDR < 0.05, Min |log2FC| Off) and the output panel says so.
+        A value changed by hand since then is kept."""
+        from kosmic import DEFAULT_FDR, DEFAULT_LFC_THRESHOLD
 
-        if not getattr(self, '_lfc_assumed', False):
+        if not getattr(self, '_rule_from_run', False):
             return
-        self._lfc_assumed = False
-        if self.fc_filter.value() == DEFAULT_LFC_THRESHOLD:
+        self._rule_from_run = False
+        shown = (self.pval_filter.value(), self.fc_filter.value())
+        if shown == (DEFAULT_FDR, DEFAULT_LFC_THRESHOLD):
             return
-        assumed = self.fc_filter.value()
-        self.fc_filter.blockSignals(True)
-        self.fc_filter.setValue(DEFAULT_LFC_THRESHOLD)
-        self.fc_filter.blockSignals(False)
+        for spin, value in ((self.pval_filter, DEFAULT_FDR),
+                            (self.fc_filter, DEFAULT_LFC_THRESHOLD)):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
         self._refresh_card_summaries()
+        lfc = f"|log2FC| > {shown[1]:g}" if shown[1] > 0 else "no |log2FC| minimum"
         self.ws.log_message.emit(
-            f"Min |log2FC| reset to Off for this run: {assumed:g} was assumed for "
-            "an older run that recorded no rule, not chosen. Set it under "
-            "Significance to use a minimum.")
+            f"Significance reset to FDR < {DEFAULT_FDR:g} with no |log2FC| minimum "
+            f"for this run; FDR < {shown[0]:g}, {lfc} was the rule of the saved run "
+            "shown. Set it under Significance to use another.")
 
     def _apply_loaded_results(self, de_results, source_name):
         """Apply loaded DE results to the workspace and refresh the UI."""
@@ -2098,7 +2104,7 @@ class GeneDEPage(SidebarTabbedPage):
             return
         if not self._confirm_mixed_cell_types():
             return
-        self._drop_assumed_rule()
+        self._start_from_default_rule()
 
         sample_col = self.ws.sample_col
         condition_col = self.ws.condition_col
@@ -2440,7 +2446,7 @@ class GeneDEPage(SidebarTabbedPage):
         return genes
 
     def _start_batch(self, cell_type_col, cell_types):
-        self._drop_assumed_rule()
+        self._start_from_default_rule()
         gse_id = self.ws.gse_accession or (
             Path(self.ws.h5ad_path).stem if self.ws.h5ad_path else "unknown")
         self._batch_worker = CellTypeBatchWorker(
