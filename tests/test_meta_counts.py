@@ -241,3 +241,33 @@ def test_the_counts_most_results_were_made_on_are_chosen_first(app, tmp_path):
     ws = _scanned(tmp_path)
     assert ws._counts_combo.currentData() == ""                 # counts not recorded
     assert len(ws._all_gene_datasets) == 6
+
+
+def test_the_discovery_reload_keeps_the_selections_counts(app, two_counts_project):
+    """Before each pooling run the page reloads each study's table for the
+    DE method; it must reload the same counts and keep the entry's keys."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+    ws = _scanned(two_counts_project)
+    ws._counts_combo.setCurrentIndex(ws._counts_combo.findData("decontX_counts"))
+    _choose_cell_type(ws)
+    page = GeneMAPage()
+    page.set_datasets(ws.datasets, ws.dataset_labels, str(two_counts_project),
+                      output_selection=ws.output_selection)
+    n_loaded, _n, _fallback = page._reload_datasets_for_de_method("deseq2")
+    assert n_loaded == 3
+    assert {d["counts"] for d in page._datasets} == {"decontX_counts"}
+    assert all("decontX_counts" in d["path"] for d in page._datasets)
+    assert all(d["df"]["logfoldchanges"].eq(-0.5).all() for d in page._datasets)
+    assert {d["study"] for d in page._datasets} == {"Chaffin", "Guo", "Koenig"}
+    assert page._run_counts() == "decontX_counts"
+
+
+def test_a_run_saved_with_no_counts_uses_its_folders(two_counts_project):
+    """Runs saved before that fix recorded counts None in a counts folder."""
+    from kosmic.meta_analysis.saved import figure_inputs, list_meta_runs
+    names = [f"{s}_{CELL}" for s in ("Chaffin", "Guo", "Koenig")]
+    _save_meta_run(two_counts_project, f"decontX_counts/{CELL}", names, None)
+    run, = list_meta_runs(two_counts_project)
+    studies = figure_inputs(run)["gene_studies"]
+    assert [n for n, _ in studies] == names
+    assert all(df["logfoldchanges"].eq(-0.5).all() for _, df in studies)

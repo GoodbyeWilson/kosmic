@@ -270,6 +270,13 @@ class MetaFigureInputs(Mapping):
             # run saved before they were recorded takes any.
             counts = (params['counts'] if 'counts' in params and level == 'gene'
                       else _ANY_COUNTS)
+            if counts is None and level == 'gene':
+                # Runs saved before a fix to the Discovery step's reload
+                # recorded None although the run's folder names its counts.
+                from kosmic.meta_analysis.io import UNSPECIFIED_COUNTS, split_selection
+                folder_counts = split_selection(self.run.selection)[0]
+                if folder_counts and folder_counts != UNSPECIFIED_COUNTS:
+                    counts = folder_counts
             loaders, missing = (_study_loaders(self.run.project, names, level,
                                                params.get('de_method'), counts)
                                 if names else ({}, []))

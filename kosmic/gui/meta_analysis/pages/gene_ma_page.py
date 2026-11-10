@@ -1038,6 +1038,12 @@ class GeneMAPage(SidebarTabbedPage):
         If a selected study only has files from a different method, it's
         loaded with that method and a warning is logged.
 
+        Only files on the counts the selection was made on are considered
+        (ADR-015): a study can hold runs on its original and its DecontX
+        counts under one name, and picking by name alone could pool the
+        other one. Each reloaded entry keeps the keys the Select Studies
+        page gave it (its study, cell type and counts).
+
         Returns
         -------
         (n_loaded, n_total_discovered, missing_accessions)
@@ -1059,6 +1065,11 @@ class GeneMAPage(SidebarTabbedPage):
         discovered = discover_de_results(Path(self._project_folder))
         de_entries = [e for e in discovered
                       if e.get('file_type') == 'de_results']
+        previous = {d['name']: d for d in self._datasets if not d.get('external')}
+        counts = {d.get('counts') for d in previous.values()}
+        if len(counts) == 1:
+            on_counts = next(iter(counts))
+            de_entries = [e for e in de_entries if e.get('counts') == on_counts]
 
         # Externals were imported from outside the project, so discovery
         # never sees them; carry them through untouched.
@@ -1079,7 +1090,11 @@ class GeneMAPage(SidebarTabbedPage):
                 continue
             try:
                 df = load_de_results(str(entry['path']), dataset_name=acc)
+                kept = {k: v for k, v in previous.get(acc, {}).items()
+                        if k not in ('path', 'name', 'df')}
                 new_datasets.append({
+                    'counts': entry.get('counts'),
+                    **kept,
                     'path': str(entry['path']),
                     'name': acc,
                     'df':   df,
