@@ -294,9 +294,11 @@ class StudySource(QObject):
         path = self.h5ad_path()
         if path is None:
             return None
-        from kosmic.scrna.load.h5ad_meta import read_genes
+        from kosmic.scrna.load.h5ad_meta import combined_from, read_genes
         genes = [str(g) for g in genes]
         layer = None if counts_source in (None, '', 'raw') else counts_source
+        if layer is not None and combined_from(path) == layer:
+            layer = None        # an atlas combined from this layer holds it as its counts
         return self._cached_read(
             ('counts', tuple(genes), layer), path,
             lambda: read_genes(path, genes, source='counts', counts_layer=layer))

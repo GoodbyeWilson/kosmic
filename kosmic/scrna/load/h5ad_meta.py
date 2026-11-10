@@ -151,6 +151,16 @@ def write_obs(h5ad_path, obs: pd.DataFrame) -> None:
         write_elem(f, 'obs', obs)
 
 
+def combined_from(h5ad_path) -> Optional[str]:
+    """The layer a combined dataset was built from (``'decontX_counts'`` for
+    an atlas made from each study's DecontX counts), from the ``combine``
+    stage of the provenance record beside the file; None otherwise. Such a
+    file holds those counts as its own, with no layer of that name."""
+    from kosmic import provenance
+    from kosmic.scrna.counts import combined_counts_layer
+    return combined_counts_layer(provenance.load(Path(str(h5ad_path)).parent))
+
+
 def read_counts_adata(h5ad_path, *, counts_layer: Optional[str] = None,
                       uns: bool = True):
     """An AnnData holding only what pseudobulk analysis needs: obs, var and
@@ -196,9 +206,7 @@ def read_counts_adata(h5ad_path, *, counts_layer: Optional[str] = None,
     a = ad.AnnData(X=X, obs=obs, var=var, uns=extra)
     a.uns['counts_loaded_from'] = source
     if counts_layer is None:
-        from kosmic import provenance
-        from kosmic.scrna.counts import combined_counts_layer
-        combined = combined_counts_layer(provenance.load(Path(str(h5ad_path)).parent))
+        combined = combined_from(h5ad_path)
         if combined:
             a.uns['counts_combined_from'] = combined
     return a

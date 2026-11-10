@@ -42,10 +42,16 @@ class _CountsLoadWorker(BaseWorker):
         self.counts_layer = counts_layer
 
     def _run(self):
-        from kosmic.scrna.load.h5ad_meta import read_counts_adata, read_layer_names
+        from kosmic.scrna.load.h5ad_meta import (
+            combined_from, read_counts_adata, read_layer_names)
         layer, note = self.counts_layer, ""
         if layer is not None and layer not in read_layer_names(self.h5ad_path):
-            note = f"; the file has no '{layer}' layer, so its original counts were loaded"
+            if combined_from(self.h5ad_path) == layer:
+                # An atlas combined from this layer of each study: its own
+                # counts are these.
+                note = f"; the dataset was combined from each study's '{layer}'"
+            else:
+                note = f"; the file has no '{layer}' layer, so its original counts were loaded"
             layer = None
         adata = read_counts_adata(self.h5ad_path, counts_layer=layer)
         msg = (f"{adata.n_obs:,} cells x {adata.n_vars:,} genes "

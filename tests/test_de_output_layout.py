@@ -507,3 +507,33 @@ def test_a_new_run_starts_from_the_default_rule():
     page.fc_filter.v, page._rule_from_run = 0.5, False         # set by hand
     GeneDEPage._start_from_default_rule(page)
     assert page.fc_filter.value() == 0.5
+
+
+def _combined_master(tmp_path):
+    from kosmic import provenance
+    path = _counts_file(tmp_path / '_master' / 'processed_data')
+    provenance.record_stage(path.parent, '_master', 'combine',
+                            {'counts_layer': 'decontX_counts'})
+    return path
+
+
+def test_choosing_decontx_counts_for_a_combined_atlas_says_so(tmp_path):
+    """The atlas has no decontX_counts layer: its own counts are those."""
+    from kosmic.gui.de_analysis.pages.setup_page import _CountsLoadWorker
+    from kosmic.scrna.counts import loaded_count_source
+    path = _combined_master(tmp_path)
+    adata, _path, msg = _CountsLoadWorker(str(path), counts_layer='decontX_counts')._run()
+    assert loaded_count_source(adata) == 'decontX_counts'
+    assert 'combined from' in msg and 'original counts were loaded' not in msg
+
+
+def test_the_gene_heatmap_reads_a_combined_atlas_runs_counts(tmp_path):
+    """A master run records counts_source decontX_counts; Figure Export
+    reads the atlas's own counts for it rather than a missing layer."""
+    from types import SimpleNamespace
+    from kosmic.gui.figure_export.shared.study_source import StudySource
+    path = _combined_master(tmp_path)
+    src = SimpleNamespace(_live_de=lambda: None, h5ad_path=lambda: path,
+                          _cached_read=lambda _key, _p, read: read())
+    out = StudySource.de_counts(src, ['0', '1'], counts_source='decontX_counts')
+    assert out.shape == (4, 2)
