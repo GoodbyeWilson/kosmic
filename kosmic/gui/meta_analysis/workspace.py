@@ -560,11 +560,18 @@ class MetaAnalysisWorkspace(QWidget):
                 norm = next((e for e in entries if e.get('variant') == 'Norm'), None)
                 selected.append(norm or entries[0])
 
-        # Also collect pathway DE results keyed by analysis_folder
-        pathway_de_files = [e for e in discovered if e['file_type'] == 'pathway_de']
-        pw_de_by_folder: dict[str, list] = {}
-        for entry in pathway_de_files:
-            pw_de_by_folder.setdefault(entry['analysis_folder'], []).append(entry)
+        # Pathway DE results, one dataset per run (a study's whole-study run
+        # or one cell type's; ADR-016), on the chosen counts. Results from
+        # before the counts were recorded are kept.
+        chosen_counts = (self._counts_combo.currentData() or None
+                         if self._counts_combo.count() else None)
+        pw_de_by_run: dict[str, list] = {}
+        for entry in discovered:
+            if entry['file_type'] != 'pathway_de':
+                continue
+            if entry.get('counts') not in (None, chosen_counts):
+                continue
+            pw_de_by_run.setdefault(entry['accession'], []).append(entry)
 
         # Rebuild the discovered pool; keep externally imported results
         externals = [d for d in getattr(self, '_all_gene_datasets', [])
@@ -596,8 +603,11 @@ class MetaAnalysisWorkspace(QWidget):
         self._all_gene_datasets.extend(externals)
 
         # Load pathway DE datasets separately
-        for folder, entries in pw_de_by_folder.items():
-            # Prefer base pathway_de_results.csv over parent_
+        for _accession, entries in pw_de_by_run.items():
+            # Prefer this run's own folder (its counts known) over the flat
+            # folder of earlier versions, and pathway_de_results.csv over
+            # parent_.
+            entries = sorted(entries, key=lambda e: e.get('counts') is None)
             base = [e for e in entries if 'parent_' not in e['path'].name]
             entry = base[0] if base else entries[0]
             filepath = str(entry["path"])

@@ -52,7 +52,8 @@ def discover_de_results(project_folder: Path) -> list[dict]:
                 {accession}_GeneStats_{Norm|Raw}.csv
                 {accession}_DE_{method}.csv
         {project_folder}/{analysis_name}/results/de_analysis/pathway_scoring/
-            pathway_de_results.csv
+            [<counts>/[<cell type>/]]
+                pathway_de_results.csv
 
     The '_master' folder is skipped. Its DE results come from the
     combined atlas, which contains the cells of every study, so pooling
@@ -67,7 +68,8 @@ def discover_de_results(project_folder: Path) -> list[dict]:
         stats, DE method name for de_results, '"pathway_de"'), 'path'
         (Path), 'analysis_folder' (str), and 'de_method' (str) and
         'counts' (the counts folder, or None when not known; see
-        'kosmic.de.saved.run_counts') for de_results entries.
+        'kosmic.de.saved.run_counts') for de_results entries, and for
+        pathway_de entries the counts folder they are in (ADR-016).
     """
     project_folder = Path(project_folder)
     if not project_folder.is_dir():
@@ -114,30 +116,65 @@ def discover_de_results(project_folder: Path) -> list[dict]:
                         "analysis_folder": child.name,
                     })
 
-        # Pathway-level DE results in pathway_scoring/
-        scoring_dir = de_pathway_scoring_dir(child)
-        if scoring_dir.is_dir():
-            # Try to infer accession from sibling stats files; fall back
-            # to the folder name.
-            accession = child.name
-            for entry in results:
-                if entry["analysis_folder"] == child.name and entry.get("accession"):
-                    accession = entry["accession"]
-                    break
-
-            for csv_file in sorted(scoring_dir.iterdir()):
-                if not csv_file.is_file() or csv_file.suffix.lower() != ".csv":
-                    continue
-                if _PATHWAY_DE_PATTERN.match(csv_file.name):
-                    results.append({
-                        "accession": accession,
-                        "file_type": "pathway_de",
-                        "variant": "pathway_de",
-                        "path": csv_file.resolve(),
-                        "analysis_folder": child.name,
-                    })
+        # Pathway-level DE results in pathway_scoring/: directly in it
+        # (earlier versions) and in its <counts>/[<cell type>/] folders
+        # (ADR-016), one entry per file with that folder's run as accession.
+        results.extend(_pathway_de_entries(child, results))
 
     return results
+
+
+def _pathway_de_entries(child: Path, gene_entries: list[dict]) -> list[dict]:
+    """The pathway DE tables of one study folder, as 'discover_de_results'
+    entries.
+
+    The accession of a table in a cell type's folder is the accession of
+    the gene DE run in the matching ``statistics/<counts>/<cell type>/``
+    folder ('{study}_{cell type}'), else the study's accession followed by
+    the folder name. 'counts' is the counts folder, None for the flat
+    folder of earlier versions.
+    """
+    root = de_pathway_scoring_dir(child)
+    if not root.is_dir():
+        return []
+    # {(counts, cell type folder): accession} of the study's gene DE runs;
+    # () is statistics/ itself, (counts,) a whole-study run on those counts.
+    stats = de_stats_dir(child).resolve()
+    run_accessions: dict = {}
+    for e in gene_entries:
+        if e["analysis_folder"] != child.name or e["file_type"] != "de_results":
+            continue
+        try:
+            rel = Path(e["path"]).parent.relative_to(stats).parts
+        except ValueError:
+            continue
+        run_accessions.setdefault(rel, e["accession"])
+    # The study's accession: a whole-study run's, else the folder name.
+    study = next((acc for rel, acc in sorted(run_accessions.items()) if len(rel) <= 1),
+                 child.name)
+
+    folders = [(root, None, None)]
+    for counts_dir in sorted(d for d in root.iterdir() if d.is_dir()):
+        folders.append((counts_dir, counts_dir.name, None))
+        folders.extend((d, counts_dir.name, d.name)
+                       for d in sorted(counts_dir.iterdir()) if d.is_dir())
+    entries = []
+    for folder, counts, cell_dir in folders:
+        if cell_dir is None:
+            accession = run_accessions.get((counts,), study) if counts else study
+        else:
+            accession = run_accessions.get((counts, cell_dir), f"{study}_{cell_dir}")
+        for csv_file in sorted(folder.iterdir()):
+            if csv_file.is_file() and _PATHWAY_DE_PATTERN.match(csv_file.name):
+                entries.append({
+                    "accession": accession,
+                    "file_type": "pathway_de",
+                    "variant": "pathway_de",
+                    "counts": counts,
+                    "path": csv_file.resolve(),
+                    "analysis_folder": child.name,
+                })
+    return entries
 
 
 # Choosing which discovered files a run actually uses

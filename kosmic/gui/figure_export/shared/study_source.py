@@ -18,6 +18,8 @@
 #   'set_de_run' serves the run-specific attributes from its table and
 #   record instead. 'available(name)' tells whether an attribute has a
 #   value without reading a table, so filling the figure list stays cheap.
+#   Enrichment, GSEA and pathway outputs are read from the folder of the
+#   selected run's counts and cell type (ADR-016).
 #
 # Everything read from a file is cached against the file's modification
 # time and size, so a file saved again is read again. A read that meets a
@@ -46,6 +48,14 @@ def _signature(path: Path) -> Optional[tuple]:
     except OSError:
         return None
     return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def _read_pathway_de(path: Path):
+    import pandas as pd
+    try:
+        return pd.read_csv(path)
+    except (OSError, ValueError):
+        return None
 
 
 def _empty(value) -> bool:
@@ -432,7 +442,6 @@ class DEState:
 
     def _saved(self, name):
         from kosmic.de import saved
-        from kosmic.paths import de_pathway_scoring_dir
         src, study = self._source, self.project_dir
         if study is None:
             return None
@@ -465,31 +474,45 @@ class DEState:
             return saved.run_significance(rec) if self._run is not None else None
         if name == 'pathway_coverage':
             return self._coverage(rec.get('pathway_gene_sets') or {})
-        scoring = de_pathway_scoring_dir(study)
+        # The outputs of the analyses on the selected run (ADR-016).
+        scoring = self._scoring_dir()
+        key = str(scoring)
         if name == 'pathway_de_results':
-            return src._saved_value(('pathway_de', ''), scoring / 'pathway_de_results.csv',
-                                    lambda: saved.read_pathway_de(study))
+            path = scoring / 'pathway_de_results.csv'
+            return src._saved_value(('pathway_de', key), path,
+                                    lambda: _read_pathway_de(path))
         if name == 'pathway_score_data':
-            from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE
-            return src._saved_value(('scores', ''), scoring / PER_DONOR_SCORES_FILE,
-                                    lambda: saved.read_per_donor_scores(study))
+            from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE, load_per_donor_scores
+            path = scoring / PER_DONOR_SCORES_FILE
+            return src._saved_value(('scores', key), path,
+                                    lambda: load_per_donor_scores(path))
         if name == 'fgsea_results':
-            from kosmic.de.fgsea import FGSEA_RESULTS_FILE
-            return src._saved_value(('fgsea',), scoring / FGSEA_RESULTS_FILE,
-                                    lambda: saved.read_fgsea(study))
+            from kosmic.de.fgsea import FGSEA_RESULTS_FILE, load_fgsea_results
+            path = scoring / FGSEA_RESULTS_FILE
+            return src._saved_value(('fgsea', key), path, lambda: load_fgsea_results(path))
         if name == 'gsea_library_results':
-            return src._saved_value(('gsea',), saved.gsea_library_path(study),
-                                    lambda: saved.read_gsea_library(study))
+            from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE, load_fgsea_results
+            path = scoring / GSEA_LIBRARY_RESULTS_FILE
+            return src._saved_value(('gsea', key), path, lambda: load_fgsea_results(path))
         if name in ('gsea_library_details', 'gsea_library_name'):
-            gsea = saved.gsea_library_path(study)
+            from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+            gsea = scoring / GSEA_LIBRARY_RESULTS_FILE
             details, library = src._saved_value(
-                ('gsea_details',), saved.gsea_details_path(gsea),
+                ('gsea_details', key), saved.gsea_details_path(gsea),
                 lambda: saved.read_gsea_details(gsea)) or (None, '')
             return details if name == 'gsea_library_details' else (library or None)
         if name == 'enrichment_results':
-            return src._saved_value(('ora',), saved.enrichment_path(scoring),
+            return src._saved_value(('ora', key), saved.enrichment_path(scoring),
                                     lambda: saved.read_enrichment(scoring))
         return None
+
+    def _scoring_dir(self) -> Path:
+        """The folder of the outputs of the analyses made on the selected run
+        (ADR-016); a whole-study run's when no run is selected."""
+        from kosmic.de.saved import downstream_dir
+        run = self._run
+        return downstream_dir(self.project_dir, run.counts if run else None,
+                              run.cell_type if run else None)
 
     def _coverage(self, gene_sets: dict):
         """Coverage of the run's gene sets in the study's genes, computed as
@@ -516,8 +539,7 @@ class DEState:
         if self._live_value(name) is not None or self.project_dir is None:
             return None
         from kosmic.de import saved
-        from kosmic.paths import de_pathway_scoring_dir
-        scoring = de_pathway_scoring_dir(self.project_dir)
+        scoring = self._scoring_dir()
         if name == 'de_results':
             return self._run.path if self._run is not None else None
         if name == 'pathway_de_results':
@@ -529,7 +551,8 @@ class DEState:
             from kosmic.de.fgsea import FGSEA_RESULTS_FILE
             return scoring / FGSEA_RESULTS_FILE
         if name in ('gsea_library_results', 'gsea_library_details'):
-            return saved.gsea_library_path(self.project_dir)
+            from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+            return scoring / GSEA_LIBRARY_RESULTS_FILE
         if name == 'enrichment_results':
             return saved.enrichment_path(scoring)
         return None
@@ -545,8 +568,8 @@ class DEState:
         if study is None:
             return False
         from kosmic.de import saved
-        from kosmic.paths import de_pathway_scoring_dir
-        scoring = de_pathway_scoring_dir(study)
+        from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+        scoring = self._scoring_dir()
         if name == 'de_results':
             return self._run is not None and self._run.path.is_file()
         if name in ('pathway_gene_sets', 'geneset_label'):
@@ -567,9 +590,9 @@ class DEState:
             from kosmic.de.fgsea import FGSEA_RESULTS_FILE
             return (scoring / FGSEA_RESULTS_FILE).is_file()
         if name == 'gsea_library_results':
-            return saved.gsea_library_path(study).is_file()
+            return (scoring / GSEA_LIBRARY_RESULTS_FILE).is_file()
         if name == 'gsea_library_details':
-            return saved.gsea_details_path(saved.gsea_library_path(study)).is_file()
+            return saved.gsea_details_path(scoring / GSEA_LIBRARY_RESULTS_FILE).is_file()
         if name == 'enrichment_results':
             return saved.enrichment_path(scoring).is_file()
         return False
