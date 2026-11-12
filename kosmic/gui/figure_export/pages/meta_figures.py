@@ -49,6 +49,14 @@ class MetaFigurePage(FigurePage):
         inputs = self._inputs()
         return inputs.get(f'{self._level()}_studies', []) if inputs else []
 
+    def _labelled_studies(self) -> list:
+        """The run's (name, table) pairs with each name shortened to its
+        study for figure labels (``study_labels``)."""
+        from kosmic.meta_analysis.io import study_labels
+        studies = self._studies()
+        labels = study_labels([n for n, _ in studies], (self._inputs() or {}).get('selection'))
+        return [(label, df) for label, (_, df) in zip(labels, studies)]
+
     def _selection_label(self) -> str:
         inputs = self._inputs() or {}
         from kosmic.meta_analysis.io import split_selection
@@ -228,7 +236,7 @@ class StudyForestPage(_ItemPage):
         item, row = self._item_row()
         if row is None:
             return None
-        studies = self._studies()
+        studies = self._labelled_studies()
         name = self._display_name(item)
         xl = self._controls.x_limit.value() or None
         figsize = self._controls.figsize.get_figsize()
@@ -249,7 +257,7 @@ class StudyForestPage(_ItemPage):
             return []
         from kosmic.visualisation.meta.study_forest import forest_report, study_effects
         text = forest_report(self._display_name(item),
-                             study_effects(item, self._studies()), row)
+                             study_effects(item, self._labelled_studies()), row)
         return self._write_report(fig_path, text)
 
     def _default_export_basename(self) -> str:
@@ -282,7 +290,7 @@ class LeaveOneOutPage(_ItemPage):
         item, row = self._item_row()
         if row is None:
             return None
-        studies = self._studies()
+        studies = self._labelled_studies()
         name = self._display_name(item)
         xl = self._controls.x_limit.value() or None
         figsize = self._controls.figsize.get_figsize()
@@ -303,7 +311,7 @@ class LeaveOneOutPage(_ItemPage):
             return []
         from kosmic.visualisation.meta.study_forest import loo_estimates, loo_report
         text = loo_report(self._display_name(item),
-                          loo_estimates(item, self._studies(), row), row)
+                          loo_estimates(item, self._labelled_studies(), row), row)
         return self._write_report(fig_path, text)
 
     def _default_export_basename(self) -> str:

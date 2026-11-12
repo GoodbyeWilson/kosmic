@@ -555,6 +555,25 @@ def selection_label(selection: Optional[str]) -> str:
     return f"{text}, {counts_text(counts)}" if counts else text
 
 
+def study_labels(names, selection: Optional[str]) -> list:
+    """The study part of each pooled dataset's name, for figure labels.
+
+    A cell-type run names its datasets '<study>_<cell type>'
+    ('Chaffin_Ventricular_Cardiomyocyte'); in the run's selection
+    ('decontX_counts/Ventricular_Cardiomyocyte') the cell type is the same
+    for every dataset, so the label is the study ('Chaffin'). The names are
+    returned unchanged when any of them does not end in the selection's
+    cell type (a mixed selection, an external table) or when two would
+    become the same label.
+    """
+    names = [str(n) for n in names]
+    suffix = '_' + split_selection(selection)[1]
+    if suffix == '_' or not all(n.endswith(suffix) and len(n) > len(suffix) for n in names):
+        return names
+    labels = [n[:-len(suffix)] for n in names]
+    return labels if len(set(labels)) == len(labels) else names
+
+
 def mixed_selection_warning(selection: Optional[str]) -> Optional[str]:
     """The output-panel warning for a selection spanning cell types, or None."""
     counts, rest = split_selection(selection)
