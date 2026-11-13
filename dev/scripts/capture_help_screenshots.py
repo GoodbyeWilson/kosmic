@@ -70,6 +70,16 @@ def _de_setup(window, study: str):
     window._de_workspace.switch_tab(0)
 
 
+def _de_gene_de(window, study: str):
+    """Gene DE in Discovery mode, with the Results for bar listing the
+    study's runs (ADR-016). Shows the bar only when the study has a saved
+    gene DE run on the loaded counts."""
+    _de_setup(window, study)
+    ws = window._de_workspace
+    ws.analysis_mode = 'discovery'
+    ws.switch_tab(2)
+
+
 CAPTURES = [
     # section, image name, setup(window), extra settle seconds
     ("project", "step1_project",  lambda w: _project_step(w, 0), 0),
@@ -88,6 +98,7 @@ CAPTURES = [
     ("scrna",   "decontx",      lambda w: _scrna_tab(w, "GSE292067", 6), 1),
     ("scrna",   "subset",       lambda w: _scrna_tab(w, "GSE292067", 7), 2),
     ("de",      "setup",          lambda w: _de_setup(w, "GSE292067"), 15),
+    ("de",      "results_for",    lambda w: _de_gene_de(w, "GSE292067"), 10),
 ]
 
 

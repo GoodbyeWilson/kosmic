@@ -28,8 +28,10 @@ def test_per_cell_type_files_are_loaded(tmp_path):
     page = SimpleNamespace(
         pval_filter=SimpleNamespace(value=lambda: 0.05),
         fc_filter=SimpleNamespace(value=lambda: 0.25),
-        ws=SimpleNamespace(log_message=SimpleNamespace(emit=print)),
+        ws=SimpleNamespace(log_message=SimpleNamespace(emit=print), gse_accession='GSE1'),
+        counts_folder=lambda: 'original_counts',
     )
+    page._run_from_table = lambda *a, **k: GeneDEPage._run_from_table(page, *a, **k)
 
     runs = GeneDEPage._load_cell_type_runs(page, tmp_path, 'GSE1', 'deseq2')
 
@@ -38,4 +40,6 @@ def test_per_cell_type_files_are_loaded(tmp_path):
     assert [r.slug for r in runs] == ['Fibroblast', 'Ventricular_Cardiomyocyte']
     assert [r.n_significant for r in runs] == [2, 1]
     assert all(r.n_samples == 9 and r.n_genes_tested == 3 for r in runs)
+    # Donors per arm, for the run bar's line (ADR-016).
+    assert all((r.n_donors_disease, r.n_donors_control) == (4, 5) for r in runs)
     assert all(r.de_results is not None for r in runs)

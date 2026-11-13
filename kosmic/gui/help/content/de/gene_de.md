@@ -127,10 +127,20 @@ Y = -log10 FDR. Dots above the horizontal line and beyond the vertical
 lines pass the current significance thresholds. Click a dot to select
 the gene in the table and other tabs.
 
-After **Run per cell type...**, and when a study whose results were
-saved per cell type is reopened, a **Cell type** list appears under the
-volcano. The cell type chosen there is shown in the volcano, the DE
-Results table and the Figures workspace's volcano plot.
+Once the study has a DE run, a **Results for** bar appears at the top of
+Gene DE, Pathway DE, Enrichment and Methods. Its list holds the study's
+runs of the chosen method on the loaded counts: the whole-study run
+first, if there is one, then each cell type with its significant genes
+and donors. A cell type that **Run per cell type...** skipped, or whose
+run failed, is listed with the reason but cannot be chosen. The line
+under the list gives the chosen run's method, counts, donors per arm and
+significant genes under its rule. The run chosen there is shown in the
+volcano and the DE Results table, and is the run that Pathway DE and
+Enrichment use; changing it on one page changes it on all of them. For a
+cell type's run, the Heatmap and Gene Expression tabs show that cell
+type's cells and the donors its run kept. After
+**Run per cell type...** the first cell type that ran is chosen; after
+**Run**, the whole-study run.
 
 ### DE Results table
 

@@ -18,6 +18,12 @@
 # - an over-representation (GO / Enrichr) run's table;
 # - the running-enrichment curves of a library GSEA run, which the
 #   mountain figure draws.
+#
+# The outputs of the analyses made on one gene DE run (pathway DE, the
+# per-donor scores, fgsea, library GSEA, over-representation) are kept in
+# a folder for that run's counts and cell type (ADR-016);
+# 'downstream_dir' finds it, falling back to the flat 'pathway_scoring/'
+# folder of earlier versions for a whole-study run.
 from __future__ import annotations
 
 import json
@@ -333,42 +339,111 @@ def read_run_record(de_path) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-# -- Pathway scoring -------------------------------------------------------------
+# -- Outputs of the analyses on one run (ADR-016) ---------------------------------
 
-def pathway_levels(study_dir) -> list[str]:
+def _has_files(folder: Path) -> bool:
+    return folder.is_dir() and any(p.is_file() for p in folder.iterdir())
+
+
+def downstream_dir(study_dir, counts: Optional[str] = None,
+                   cell_type: Optional[str] = None) -> Path:
+    """The folder holding the outputs of the analyses made on one gene DE
+    run: ``pathway_scoring/<counts>/[<cell type>/]`` (ADR-016).
+
+    Parameters
+    ----------
+    study_dir : path
+    counts : str, optional
+        The run's counts folder ('original_counts', 'decontX_counts') or
+        count source. None for a run whose counts are not known: the first
+        counts folder holding outputs for *cell_type* is used.
+    cell_type : str, optional
+        The run's cell type; None for a whole-study run.
+
+    Returns
+    -------
+    Path
+        The folder, which need not exist. For a whole-study run whose folder
+        holds no files, ``pathway_scoring/`` itself when earlier versions
+        wrote files there.
+    """
+    from kosmic.de.batch import slugify_cell_type
+    from kosmic.paths import counts_folder_name
+
+    root = de_pathway_scoring_dir(study_dir)
+    sub = slugify_cell_type(cell_type) if cell_type else None
+
+    def _in(counts_dir: Path) -> Path:
+        return counts_dir / sub if sub else counts_dir
+
+    if counts:
+        folder = _in(root / counts_folder_name(counts))
+    else:
+        found = ([_in(d) for d in sorted(root.iterdir()) if d.is_dir()]
+                 if root.is_dir() else [])
+        folder = next((d for d in found if _has_files(d)), None)
+        if folder is None:
+            folder = _in(root / counts_folder_name(None))
+    if sub is None and not _has_files(folder) and _has_files(root):
+        return root
+    return folder
+
+
+def pathway_levels(study_dir, counts: Optional[str] = None,
+                   cell_type: Optional[str] = None) -> list[str]:
     """The pathway levels with a saved pathway DE table: '' (pathways)
     and 'parent_' (pathway groups), in that order."""
-    d = de_pathway_scoring_dir(study_dir)
+    d = downstream_dir(study_dir, counts, cell_type)
     return [lv for lv in PATHWAY_LEVELS if (d / f'{lv}pathway_de_results.csv').is_file()]
 
 
-def read_pathway_de(study_dir, level: str = '') -> Optional[pd.DataFrame]:
-    path = de_pathway_scoring_dir(study_dir) / f'{level}pathway_de_results.csv'
+def pathway_de_path(study_dir, level: str = '', counts: Optional[str] = None,
+                    cell_type: Optional[str] = None) -> Path:
+    return downstream_dir(study_dir, counts, cell_type) / f'{level}pathway_de_results.csv'
+
+
+def read_pathway_de(study_dir, level: str = '', counts: Optional[str] = None,
+                    cell_type: Optional[str] = None) -> Optional[pd.DataFrame]:
     try:
-        return pd.read_csv(path)
+        return pd.read_csv(pathway_de_path(study_dir, level, counts, cell_type))
     except (OSError, ValueError):
         return None
 
 
-def read_per_donor_scores(study_dir, level: str = '') -> Optional[dict]:
-    from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE, load_per_donor_scores
-    return load_per_donor_scores(
-        de_pathway_scoring_dir(study_dir) / f'{level}{PER_DONOR_SCORES_FILE}')
+def per_donor_scores_path(study_dir, level: str = '', counts: Optional[str] = None,
+                          cell_type: Optional[str] = None) -> Path:
+    from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE
+    return downstream_dir(study_dir, counts, cell_type) / f'{level}{PER_DONOR_SCORES_FILE}'
 
 
-def read_fgsea(study_dir) -> Optional[pd.DataFrame]:
-    from kosmic.de.fgsea import FGSEA_RESULTS_FILE, load_fgsea_results
-    return load_fgsea_results(de_pathway_scoring_dir(study_dir) / FGSEA_RESULTS_FILE)
+def read_per_donor_scores(study_dir, level: str = '', counts: Optional[str] = None,
+                          cell_type: Optional[str] = None) -> Optional[dict]:
+    from kosmic.de.pathway_scoring import load_per_donor_scores
+    return load_per_donor_scores(per_donor_scores_path(study_dir, level, counts, cell_type))
 
 
-def gsea_library_path(study_dir) -> Path:
-    from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
-    return de_pathway_scoring_dir(study_dir) / GSEA_LIBRARY_RESULTS_FILE
+def fgsea_path(study_dir, counts: Optional[str] = None,
+               cell_type: Optional[str] = None) -> Path:
+    from kosmic.de.fgsea import FGSEA_RESULTS_FILE
+    return downstream_dir(study_dir, counts, cell_type) / FGSEA_RESULTS_FILE
 
 
-def read_gsea_library(study_dir) -> Optional[pd.DataFrame]:
+def read_fgsea(study_dir, counts: Optional[str] = None,
+               cell_type: Optional[str] = None) -> Optional[pd.DataFrame]:
     from kosmic.de.fgsea import load_fgsea_results
-    return load_fgsea_results(gsea_library_path(study_dir))
+    return load_fgsea_results(fgsea_path(study_dir, counts, cell_type))
+
+
+def gsea_library_path(study_dir, counts: Optional[str] = None,
+                      cell_type: Optional[str] = None) -> Path:
+    from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+    return downstream_dir(study_dir, counts, cell_type) / GSEA_LIBRARY_RESULTS_FILE
+
+
+def read_gsea_library(study_dir, counts: Optional[str] = None,
+                      cell_type: Optional[str] = None) -> Optional[pd.DataFrame]:
+    from kosmic.de.fgsea import load_fgsea_results
+    return load_fgsea_results(gsea_library_path(study_dir, counts, cell_type))
 
 
 # -- Library GSEA running-enrichment curves --------------------------------------

@@ -1,6 +1,12 @@
 # Enrichment Page (DE Discovery mode): over-representation analysis of
 # significant DE genes via GO (local elim) or Enrichr-based ORA, run
 # separately for upregulated and downregulated genes.
+#
+# In the DE workspace the page works on the gene DE run chosen in the run
+# bar (ADR-016): it saves its results in that run's folder and, when
+# another run is chosen, clears what it shows and shows that run's saved
+# results. The Meta-Analysis workspace hosts the same page on the pooled
+# gene list and has no run bar.
 
 from PyQt6.QtWidgets import (
     QLabel, QPushButton,
@@ -88,6 +94,9 @@ class EnrichmentPage(SidebarTabbedPage):
         self._results_df = None
         self._lfc_map = {}  # gene -> log2FC for direction annotation
         self._setup_ui()
+        run_changed = getattr(self.ws, 'run_changed', None)
+        if run_changed is not None:
+            run_changed.connect(self._on_run_changed)
 
     def _setup_ui(self):
         # Sidebar lives on self.sidebar_layout (provided by SidebarTabbedPage).
@@ -722,6 +731,8 @@ class EnrichmentPage(SidebarTabbedPage):
             'n_background': len(background or []),
             'n_terms':     n_terms,
             'n_terms_sig': n_sig,
+            # The gene DE run it was made on (ADR-016); the DE workspace only.
+            **(self.ws.run_identity() if hasattr(self.ws, 'run_identity') else {}),
         }
 
     def _record_study_enrichment(self, method):
@@ -744,34 +755,77 @@ class EnrichmentPage(SidebarTabbedPage):
             provenance.record_stage(
                 study_dir, Path(h5ad).stem, 'enrichment', params,
                 consumed_token=(de_stage or {}).get('consumed_token'),
-                replace_matching={'method': method, 'library': params['library']})
+                replace_matching={'method': method, 'library': params['library'],
+                                  'cell_type': params.get('cell_type'),
+                                  'counts': params.get('counts')})
         except Exception as e:  # provenance is best-effort
             self.ws.log_message.emit(f"Could not record enrichment provenance: {e}")
 
     def _results_folder(self):
-        """Where this page saves an over-representation run: the study's
-        pathway-scoring folder, or None to not save it. The meta-analysis
-        host overrides this."""
+        """Where this page saves an over-representation run: the folder of
+        the gene DE run chosen in the run bar (ADR-016), or None to not save
+        it. The meta-analysis host overrides this."""
         if not getattr(self.ws, 'project_dir', None):
             return None
+        run_folder = getattr(self.ws, 'run_folder', None)
+        if run_folder is not None:
+            return run_folder()     # the chosen run's folder (ADR-016)
         from kosmic.paths import de_pathway_scoring_dir
         return de_pathway_scoring_dir(self.ws.project_dir)
 
     def _gsea_results_path(self):
         """Where a library GSEA run is saved, or None to not save it.
 
-        The study's pathway-scoring folder, under the one file name the
+        The chosen run's folder (ADR-016), under the one file name the
         Figure Export library GSEA page reloads; each run replaces the
         last. The meta-analysis host overrides this.
         """
-        if not getattr(self.ws, 'project_dir', None):
+        folder = self._results_folder()
+        if folder is None:
             return None
-        from kosmic.paths import de_pathway_scoring_dir
         from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
-        return de_pathway_scoring_dir(self.ws.project_dir) / GSEA_LIBRARY_RESULTS_FILE
+        return folder / GSEA_LIBRARY_RESULTS_FILE
 
-    def _show_gsea_results(self, res):
-        """Populate the shared table + bar plot with the fgsea (NES) results."""
+    def _on_run_changed(self):
+        """Another gene DE run was chosen (ADR-016): clear what the page
+        shows, then show that run's saved results of the chosen method."""
+        self._results_df = None
+        self._table.setRowCount(0)
+        self._export_btn.setEnabled(False)
+        self._plot_widget.clear_plot_items()
+        self._plot_widget.show_unavailable_message()
+        self._sync_significance()
+        self._update_gene_count()
+        de = self.ws.de_results
+        self._lfc_map = (dict(zip(de['names'], de['logfoldchanges']))
+                         if de is not None and 'logfoldchanges' in de.columns else {})
+        name = self.ws.run_label() or "this run"
+        folder = self.ws.run_saved_folder()
+        if folder is None:
+            self._status_label.setText("")
+            return
+        from kosmic.de import saved
+        from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE, load_fgsea_results
+        if self._method_combo.currentData() == "gsea":
+            res = load_fgsea_results(folder / GSEA_LIBRARY_RESULTS_FILE)
+            if res is not None:
+                details, library = saved.read_gsea_details(folder / GSEA_LIBRARY_RESULTS_FILE)
+                self.ws.gsea_library_details = details or {}
+                self.ws.gsea_library_name = library or None
+                self._show_gsea_results(res, save=False)
+                self._status_label.setText(f"Saved library GSEA of {name} shown.")
+                return
+        else:
+            ora = saved.read_enrichment(folder)
+            if ora is not None:
+                self._show_results(ora)
+                self._status_label.setText(f"Saved over-representation run of {name} shown.")
+                return
+        self._status_label.setText(f"No saved run of this method for {name}.")
+
+    def _show_gsea_results(self, res, save=True):
+        """Populate the shared table + bar plot with the fgsea (NES) results;
+        with 'save', also save them for Figure Export."""
         import pandas as pd
 
         if res is None or res.empty:
@@ -783,7 +837,7 @@ class EnrichmentPage(SidebarTabbedPage):
         self.ws.gsea_library_results = res
 
         # Persist so Figure Export reloads the exact run instead of recomputing.
-        path = self._gsea_results_path()
+        path = self._gsea_results_path() if save else None
         if path is not None:
             from kosmic.de.fgsea import save_fgsea_results
             from kosmic.de.saved import save_gsea_details

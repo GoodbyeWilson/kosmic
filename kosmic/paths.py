@@ -30,7 +30,11 @@ Layout
                                 {accession_1}_{cell type}_pseudobulk.csv
                                 {accession_1}_{cell type}_significant_genes.csv
                     pathway_scoring/
-                        pathway_de_results.csv
+                        <counts>/
+                            enrichment_results.csv, pathway_de_results.csv, ...
+                                                     <- the whole-study run's
+                            <cell type>/
+                                enrichment_results.csv, ...  <- a cell type's run
         {accession_2}/
             ...
 
@@ -39,7 +43,11 @@ DE outputs are kept per counts and cell type (ADR-015): ``<counts>`` is
 corrected counts, so runs on both are kept side by side.
 :func:`de_run_dir` builds a run's folder and :func:`de_output_dirs`
 lists every folder that may hold runs, including ``statistics/`` itself,
-where earlier versions wrote every file. Meta-analysis outputs follow
+where earlier versions wrote every file.
+The analyses made on one gene DE run (enrichment, GSEA, pathway DE) are
+kept in the same way under ``pathway_scoring/`` (ADR-016);
+:func:`de_downstream_dir` builds the folder, and files written directly
+in ``pathway_scoring/`` by earlier versions stay readable. Meta-analysis outputs follow
 the same rule (``kosmic.meta_analysis.io.meta_selection_path``);
 ``meta_analysis/<selection>/`` folders of earlier versions stay readable.
 
@@ -166,6 +174,23 @@ def counts_folder_of(path: PathLike) -> Optional[str]:
 def de_pathway_scoring_dir(study_dir: PathLike) -> Path:
     """``{study_dir}/results/de_analysis/pathway_scoring`` -- pathway DE CSVs."""
     return de_analysis_dir(study_dir) / "pathway_scoring"
+
+
+def de_downstream_dir(study_dir: PathLike, counts_source: Optional[str] = None,
+                      cell_type: Optional[str] = None) -> Path:
+    """Where the analyses made on one gene DE run save their outputs (ADR-016).
+
+    ``{study_dir}/results/de_analysis/pathway_scoring/<counts>/`` for a
+    whole-study run, and ``.../<counts>/<cell type>/`` for a run on one
+    cell type: the folder names :func:`de_run_dir` uses under
+    ``statistics/``. ``counts_source`` is a count source ('raw', a layer
+    name) or a counts folder name.
+    """
+    base = de_pathway_scoring_dir(study_dir) / counts_folder_name(counts_source)
+    if not cell_type:
+        return base
+    from kosmic.de.batch import slugify_cell_type
+    return base / slugify_cell_type(cell_type)
 
 
 def de_result_path(study_dir: PathLike, accession: str, method: str) -> Path:
@@ -391,6 +416,7 @@ __all__ = [
     "de_output_dirs",
     "counts_folder_of",
     "de_pathway_scoring_dir",
+    "de_downstream_dir",
     "de_result_path",
     "pseudobulk_path",
     "de_figures_dir",

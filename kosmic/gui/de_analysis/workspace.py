@@ -6,7 +6,7 @@
 # Can receive adata from the scRNA pipeline or load standalone h5ad files.
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QStackedWidget, QFileDialog,
+    QWidget, QVBoxLayout, QStackedWidget, QFileDialog,
 )
 from PyQt6.QtCore import QSettings, pyqtSignal
 from pathlib import Path
@@ -36,6 +36,7 @@ class DEWorkspace(QWidget):
     dataset_loading = pyqtSignal(str)  # about to load a study file by hand (path): release others first
     mode_changed = pyqtSignal(str)  # "scoring" or "discovery"
     study_change_requested = pyqtSignal(str)  # accession; AppWindow switches study
+    run_changed = pyqtSignal()  # another gene DE run was chosen in the run bar (ADR-016)
     open_scrna_requested = pyqtSignal()  # AppWindow switches to scRNA -> Inspect
 
     # Sidebar step list per analysis mode.
@@ -66,6 +67,9 @@ class DEWorkspace(QWidget):
     _SCORING_MAP = (0, 1, 2, 3, 4, 6)
     _DISCOVERY_MAP = (0, 1, 3, 5, 6)
     _INITIAL_MAP = (0, 1)
+    # Stack pages that show the run bar (ADR-016): Gene DE, Pathway DE,
+    # Enrichment and Methods.
+    _RUN_BAR_PAGES = (3, 4, 5, 6)
 
     @classmethod
     def steps_for_mode(cls, mode):
@@ -129,6 +133,13 @@ class DEWorkspace(QWidget):
         self.current_hierarchy = None
         self.parent_gene_sets = None
 
+        # The study's gene DE runs and the one the steps after gene DE use
+        # (ADR-016): 'kosmic.de.batch.CellTypeRun's, a whole-study run (no
+        # cell type) first. Chosen in the run bar.
+        self.cell_type_runs = []
+        self.run_index = -1
+        self._run_cells = None   # ((dataset id, run index), the run's cells)
+
         # Results
         self.de_results = None
         self.significant_genes = None
@@ -159,7 +170,14 @@ class DEWorkspace(QWidget):
         return self.project_dir.name if self.project_dir else ''
 
     def _setup_ui(self):
-        layout = borderless(QHBoxLayout, self)
+        layout = borderless(QVBoxLayout, self)
+
+        # The run bar above every page (ADR-016); shown by refresh_run_bar.
+        from kosmic.gui.de_analysis.run_bar import RunBar
+        self.run_bar = RunBar(self)
+        self.run_bar.run_chosen.connect(self.select_run)
+        self.run_bar.hide()
+        layout.addWidget(self.run_bar)
 
         self.stack = QStackedWidget()
 
@@ -257,6 +275,10 @@ class DEWorkspace(QWidget):
             page = page_map[index]
             if 0 <= page < self.stack.count():
                 self.stack.setCurrentIndex(page)
+                if (page in self._RUN_BAR_PAGES and not self.cell_type_runs
+                        and self.current_adata is not None and self.de_results is None):
+                    self.gene_de_page._try_load_previous_results()
+                self.refresh_run_bar()
                 self.tab_changed.emit(index)
                 widget = self.stack.widget(page)
                 if hasattr(widget, 'on_activated'):
@@ -264,6 +286,181 @@ class DEWorkspace(QWidget):
 
     def on_sidebar_step(self, index: int) -> None:
         self.switch_tab(index)
+
+    # ------------------------------------------------------------------
+    # The run the steps after gene DE use (ADR-016)
+    # ------------------------------------------------------------------
+
+    @property
+    def shown_run(self):
+        """The chosen 'CellTypeRun', or None."""
+        if 0 <= self.run_index < len(self.cell_type_runs):
+            return self.cell_type_runs[self.run_index]
+        return None
+
+    def set_runs(self, runs, select=None) -> None:
+        """List 'runs' in the run bar and choose one: the run at index
+        'select', else the first that ran. Emits 'run_changed' when a run
+        is chosen."""
+        self.cell_type_runs = list(runs)
+        ok = [i for i, r in enumerate(self.cell_type_runs) if r.status == 'ok']
+        if select is None or select not in ok:
+            select = ok[0] if ok else -1
+        self.run_index = -1
+        self.run_bar.set_runs(self.cell_type_runs, select)
+        if select >= 0:
+            self.select_run(select)
+        else:
+            self.refresh_run_bar()
+
+    def select_run(self, index: int) -> None:
+        """Choose the run at 'index' for every page; a run that did not run
+        cannot be chosen."""
+        runs = self.cell_type_runs
+        if not (0 <= index < len(runs)) or runs[index].status != 'ok':
+            return
+        if index == self.run_index:
+            return
+        self.run_index = index
+        self._run_cells = None
+        self.run_bar.set_runs(runs, index)
+        # Results of the steps after gene DE belong to the run they were made
+        # on; the pages reload the new run's from its folder.
+        self._clear_downstream()
+        # The pages apply the run (Gene DE sets de_results and its rule)
+        # before the bar's line is written from them.
+        self.run_changed.emit()
+        self.refresh_run_bar()
+
+    def _clear_downstream(self) -> None:
+        self.pathway_de_results = None
+        self.parent_stats_df = None
+        self.pathway_score_data = None
+        self.fgsea_results = None
+        self.enrichment_results = None
+        self.gsea_library_results = None
+        self.gsea_library_name = None
+        self.gsea_library_details = None
+
+    def run_record(self) -> dict:
+        """The chosen run's saved '.json' record ({} without one)."""
+        from kosmic.de.saved import read_run_record
+        run = self.shown_run
+        if run is None or run.de_path is None:
+            return {}
+        return read_run_record(run.de_path) or {}
+
+    def run_counts(self) -> str:
+        """The counts folder of the chosen run, else of the loaded counts."""
+        run = self.shown_run
+        if run is not None and run.counts:
+            return run.counts
+        return self.gene_de_page.counts_folder()
+
+    def run_folder(self):
+        """Where the analyses on the chosen run save and find their outputs
+        (ADR-016): 'pathway_scoring/<counts>/[<cell type>/]', or None
+        without a study folder."""
+        from kosmic.paths import de_downstream_dir
+        if not self.project_dir:
+            return None
+        run = self.shown_run
+        return de_downstream_dir(self.project_dir, self.run_counts(),
+                                 run.cell_type if run is not None else None)
+
+    def run_saved_folder(self):
+        """The folder to read the chosen run's saved outputs from: its own,
+        or for a whole-study run the flat folder of earlier versions
+        (kosmic.de.saved.downstream_dir)."""
+        from kosmic.de.saved import downstream_dir
+        if not self.project_dir:
+            return None
+        run = self.shown_run
+        return downstream_dir(self.project_dir, self.run_counts(),
+                              run.cell_type if run is not None else None)
+
+    def run_identity(self) -> dict:
+        """The chosen run's cell type and counts, for provenance records."""
+        run = self.shown_run
+        return {'cell_type': (run.cell_type or None) if run is not None else None,
+                'counts': self.run_counts()}
+
+    def run_cell_type_column(self):
+        """The obs column holding the chosen run's cell type: from its record,
+        else the first candidate column of the loaded dataset whose values
+        include it; None when there is none."""
+        run, adata = self.shown_run, self.current_adata
+        if run is None or not run.cell_type or adata is None:
+            return None
+        col = self.run_record().get('cell_type_column')
+        if col and col in adata.obs.columns:
+            return col
+        ranked, other = self.gene_de_page._cell_type_columns(adata)
+        for c in [*ranked, *other]:
+            if run.cell_type in set(adata.obs[c].astype(str).unique()):
+                return c
+        return None
+
+    def run_adata(self):
+        """The loaded dataset's cells of the chosen run (ADR-016): every cell
+        for a whole-study run, the cell type's cells for a cell type's run.
+        None when no dataset is loaded or the cell type's column cannot be
+        found. A view, made once per run."""
+        adata, run = self.current_adata, self.shown_run
+        if adata is None or run is None or not run.cell_type:
+            return adata
+        cached = getattr(self, '_run_cells', None)
+        if cached is not None and cached[0] == (id(adata), self.run_index):
+            return cached[1]
+        col = self.run_cell_type_column()
+        if col is None:
+            self.log_message.emit(
+                f"No column of the loaded dataset holds the cell type "
+                f"'{run.cell_type}'; its cells cannot be selected.")
+            return None
+        cells = adata[(adata.obs[col].astype(str) == run.cell_type).to_numpy()]
+        self._run_cells = ((id(adata), self.run_index), cells)
+        return cells
+
+    def run_donor_floors(self) -> tuple:
+        """(min_cells, min_counts) the chosen run kept donors with: from its
+        record, else the workspace's settings."""
+        rec = self.run_record()
+        min_cells = rec.get('min_cells')
+        min_counts = rec.get('min_counts')
+        return (int(min_cells) if min_cells is not None else self.min_cells,
+                int(min_counts) if min_counts is not None else self.min_counts)
+
+    def clear_runs(self) -> None:
+        self.cell_type_runs = []
+        self.run_index = -1
+        self._run_cells = None
+        self.run_bar.set_runs([], -1)
+        self.refresh_run_bar()
+
+    def refresh_run_bar(self) -> None:
+        """Show the bar on the pages after gene DE once there is a run, and
+        write its line from the chosen run."""
+        from kosmic.gui.de_analysis.run_bar import detail_text
+        run = self.shown_run
+        show = bool(self.cell_type_runs) and self.stack.currentIndex() in self._RUN_BAR_PAGES
+        self.run_bar.setVisible(show)
+        if run is None:
+            self.run_bar.set_detail("")
+            return
+        if self.significant_genes is not None and self.de_results is run.de_results:
+            run.n_significant = len(self.significant_genes)
+        self.run_bar.set_detail(detail_text(
+            run, method=run.method or self.gene_de_page.method_token(),
+            counts=run.counts or self.gene_de_page.counts_folder(),
+            rule=self.significance))
+
+    def run_label(self) -> str:
+        """The chosen run's name for status lines: a cell type, 'Whole
+        study', or '' when there is no run."""
+        from kosmic.gui.de_analysis.run_bar import run_name
+        run = self.shown_run
+        return run_name(run) if run is not None else ''
 
     # ------------------------------------------------------------------
     # Data loading (called from main.py when scRNA pipeline provides adata)
@@ -362,6 +559,7 @@ class DEWorkspace(QWidget):
             self.results_dataset = None
             self._last_scrna_adata_version = None
             self._manual_load = False
+            self.clear_runs()
             self.de_results = None
             self.significant_genes = None
             self.significance = None
@@ -481,22 +679,27 @@ class DEWorkspace(QWidget):
                 return (f"{n_pw} pathways, {n_genes} genes selected", "success")
             return ("Select gene sets", "warning")
 
+        run = self.run_label()
+        prefix = f"{run}: " if run else ""
+
         if stack_page == 3:  # Gene DE
             if self.de_results is not None:
                 n_sig = len(self.significant_genes) if self.significant_genes is not None else 0
-                return (f"DE complete: {len(self.de_results):,} genes, "
+                return (f"{prefix}DE complete: {len(self.de_results):,} genes, "
                         f"{n_sig} significant", "success")
             method = "DESeq2" if self.de_method == 'deseq2' else "t-test"
             return (f"Ready to run {method} DE", "warning")
 
         if stack_page == 4:  # Pathway DE (scoring)
             if self.pathway_de_results is not None:
-                return (f"Pathway DE complete: {len(self.pathway_de_results)} pathways", "success")
+                return (f"{prefix}Pathway DE complete: "
+                        f"{len(self.pathway_de_results)} pathways", "success")
             return ("Run pathway-level DE", "warning")
 
         if stack_page == 5:  # Enrichment (discovery)
             if self.enrichment_results is not None and not self.enrichment_results.empty:
-                return (f"Enrichment: {len(self.enrichment_results)} terms", "success")
+                return (f"{prefix}Enrichment: {len(self.enrichment_results)} terms",
+                        "success")
             return ("Run enrichment analysis", "warning")
 
         if stack_page == 6:  # Methods
@@ -537,6 +740,7 @@ class DEWorkspace(QWidget):
 
     def refresh_theme(self):
         """Cascade theme refresh to child pages."""
+        self.run_bar.refresh_theme()
         for page in [self.setup_page, self.choose_page, self.gene_set_page,
                      self.gene_de_page, self.pathway_de_page,
                      self.enrichment_page]:

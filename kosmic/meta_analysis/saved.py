@@ -177,7 +177,10 @@ def _study_loaders(project_folder, names, level, de_method, counts=_ANY_COUNTS):
             if entry['file_type'] == 'pathway_de':
                 by_name.setdefault(entry['accession'], []).append(entry)
         for name, entries in by_name.items():
-            # The pathway level, not pathway groups, as the workspace pools.
+            # The run's own folder before the flat one of earlier versions
+            # (ADR-016), and the pathway level, not pathway groups, as the
+            # workspace pools.
+            entries = sorted(entries, key=lambda e: e.get('counts') is None)
             base = [e for e in entries if 'parent_' not in e['path'].name]
             entry = (base or entries)[0]
 

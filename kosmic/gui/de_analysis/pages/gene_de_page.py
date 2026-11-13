@@ -280,6 +280,9 @@ class GeneDEPage(SidebarTabbedPage):
         self._last_run_comparison = None  # settings snapshot at last DE run
         self._setup_ui()
         self.ws.mode_changed.connect(self._on_mode_changed)
+        # The run bar's choice (ADR-016): show that run here and give its
+        # table to the steps after gene DE.
+        self.ws.run_changed.connect(self._apply_shown_run)
 
     def _setup_ui(self):
         left_layout = self.sidebar_layout
@@ -839,23 +842,6 @@ class GeneDEPage(SidebarTabbedPage):
         volcano_controls = QHBoxLayout()
         volcano_controls.setSpacing(8)
 
-        # After a per-cell-type batch there are N result sets and only one
-        # volcano. Without this the run wrote its CSVs and the plot went on
-        # showing whatever preceded it.
-        self._batch_view_label = QLabel("Cell type:")
-        self._batch_view_combo = NoScrollComboBox()
-        self._batch_view_combo.setMinimumWidth(180)
-        self._batch_view_combo.setToolTip(
-            "Which cell type's results to show. Set by the last per-cell-type "
-            "run; every cell type was also written to its own CSV.")
-        self._batch_view_combo.currentIndexChanged.connect(
-            self._on_batch_view_changed)
-        self._batch_view_label.hide()
-        self._batch_view_combo.hide()
-        volcano_controls.addWidget(self._batch_view_label)
-        volcano_controls.addWidget(self._batch_view_combo)
-        volcano_controls.addSpacing(12)
-
         volcano_controls.addWidget(QLabel("Find gene:"))
         volcano_controls.addWidget(self._volcano_gene_search)
         volcano_controls.addSpacing(12)
@@ -1095,6 +1081,7 @@ class GeneDEPage(SidebarTabbedPage):
             # Enrichment and Figures start from this (ADR-015).
             self.ws.significance = (self.pval_filter.value(),
                                     self.fc_filter.value(), False)
+            self.ws.refresh_run_bar()
         # _on_pval_toggle re-rendered the scatter, so re-apply the highlight.
         if hasattr(self, '_volcano_gene_search'):
             self._on_volcano_gene_search(self._volcano_gene_search.text())
@@ -1376,68 +1363,117 @@ class GeneDEPage(SidebarTabbedPage):
         except Exception:
             pass
 
+    def method_token(self) -> str:
+        """The file-name token of the chosen DE method ('deseq2',
+        'welch_cpm', 'welch_cpm_eb')."""
+        if self.ws.de_method == 'ttest':
+            return 'welch_cpm_eb' if self.eb_checkbox.isChecked() else 'welch_cpm'
+        return 'deseq2'
+
+    def counts_folder(self) -> str:
+        """The counts folder of the loaded counts (ADR-015)."""
+        from kosmic.paths import counts_folder_name
+        return counts_folder_name(self._count_source())
+
     def _try_load_previous_results(self):
-        """Load previous DE results -- prefer adata.uns, fall back to CSV on disk."""
+        """List the study's saved runs of the chosen method on the loaded
+        counts in the run bar (ADR-016) and show the first: the whole-study
+        run, from adata.uns or its CSV, else the first cell type."""
         import pandas as pd
 
-        method = self.ws.de_method
-        moderate = self.eb_checkbox.isChecked()
-        if method == 'ttest' and moderate:
-            label = 'welch_cpm_eb'
-        elif method == 'ttest':
-            label = 'welch_cpm'
-        else:
-            label = 'deseq2'
-
+        label = self.method_token()
         adata = self.ws.current_adata
+        whole = None
         if adata is not None and 'de_results' in adata.uns:
             uns_results = adata.uns['de_results']
             if isinstance(uns_results, dict) and label in uns_results:
                 de_df = uns_results[label]
                 if isinstance(de_df, pd.DataFrame) and not de_df.empty and 'names' in de_df.columns:
-                    self._apply_loaded_results(de_df, f"adata.uns['{label}']")
-                    return
+                    whole = self._run_from_table(de_df, None, cell_type='', label=label)
 
         if not self.ws.project_dir:
+            if whole is not None:
+                self.ws.set_runs([whole])
             return
 
         stats_dir = de_stats_dir(self.ws.project_dir)
-        if not stats_dir.is_dir():
-            return
-
         gse_id = self.ws.gse_accession or (
             Path(self.ws.h5ad_path).stem if self.ws.h5ad_path else None
         )
-        if not gse_id:
+        if not gse_id or not stats_dir.is_dir():
+            if whole is not None:
+                self.ws.set_runs([whole])
             return
 
         from kosmic.de.saved import find_de_result
-        from kosmic.paths import counts_folder_name
-        counts = counts_folder_name(self._count_source())
-        path = find_de_result(self.ws.project_dir, gse_id, label, counts=counts)
-        if path is None:
-            # A study analysed per cell type has one result file per cell
-            # type and no whole-study file: offer them in the picker.
-            self._batch_runs = self._load_cell_type_runs(stats_dir, gse_id, label,
-                                                         counts=counts)
-            self._populate_batch_view()
-            return
+        counts = self.counts_folder()
+        if whole is None:
+            path = find_de_result(self.ws.project_dir, gse_id, label, counts=counts)
+            if path is not None:
+                try:
+                    df = pd.read_csv(path)
+                    if not df.empty and 'names' in df.columns:
+                        whole = self._run_from_table(df, path, cell_type='', label=label)
+                except Exception as e:
+                    self.ws.log_message.emit(f"Could not load previous DE results: {e}")
+        # Each cell type's run, and the cell types the batch run did not run.
+        runs = (self._load_cell_type_runs(stats_dir, gse_id, label, counts=counts)
+                + self._not_run_cell_types(gse_id, label, counts))
+        runs.sort(key=lambda r: r.cell_type.lower())
+        self.ws.set_runs(([whole] if whole is not None else []) + runs)
+
+    def _run_from_table(self, df, path, *, cell_type, label, slug='', accession=None):
+        """A 'CellTypeRun' for a saved or in-memory DE table; '' as
+        'cell_type' for a whole-study run."""
+        from kosmic.de.batch import CellTypeRun
+        from kosmic.de.de_analysis import significant_subset
+
+        def _donors(col):
+            return int(df[col].iloc[0]) if col in df.columns and len(df) else 0
+        n_dis, n_ctl = _donors('disease_samples'), _donors('control_samples')
+        return CellTypeRun(
+            cell_type=cell_type, slug=slug,
+            accession=accession or self.ws.gse_accession,
+            status='ok', n_samples=n_dis + n_ctl,
+            n_donors_disease=n_dis, n_donors_control=n_ctl,
+            n_genes_tested=len(df),
+            n_significant=len(significant_subset(
+                df, fdr=self.pval_filter.value(), lfc=self.fc_filter.value())),
+            de_path=Path(path) if path is not None else None, de_results=df,
+            method=label, counts=self.counts_folder() if path is None else '',
+        )
+
+    def _not_run_cell_types(self, accession, label, counts):
+        """The cell types the last batch run on these counts skipped or that
+        failed, from its summary: listed in the run bar but not choosable."""
+        import pandas as pd
+        from kosmic.de.batch import CellTypeRun, slugify_cell_type, summary_path
+
+        path = summary_path(self.ws.project_dir, accession, counts)
         try:
-            de_results = pd.read_csv(path)
-            if de_results.empty or 'names' not in de_results.columns:
-                return
-            self._apply_run_significance(path)
-            self._apply_loaded_results(de_results, path.name)
-        except Exception as e:
-            self.ws.log_message.emit(f"Could not load previous DE results: {e}")
+            summary = pd.read_csv(path)
+        except (OSError, ValueError):
+            return []
+        if 'status' not in summary.columns or 'cell_type' not in summary.columns:
+            return []
+        out = []
+        for _, row in summary[summary['status'] != 'ok'].iterrows():
+            method = row.get('method')
+            if isinstance(method, str) and method and method != label:
+                continue
+            message = row.get('message')
+            out.append(CellTypeRun(
+                cell_type=str(row['cell_type']), slug=slugify_cell_type(row['cell_type']),
+                accession=f"{accession}_{slugify_cell_type(row['cell_type'])}",
+                status=str(row['status']),
+                message=message if isinstance(message, str) else ''))
+        return out
 
     def _load_cell_type_runs(self, stats_dir, accession, label, counts=None):
         """Saved per-cell-type results ('{accession}_{cell type}_DE_{label}.csv'),
         as 'kosmic.de.saved' lists them for Figure Export too. With
         *counts* (a counts folder, ADR-015), only runs on those counts and
         runs from before the counts were recorded."""
-        from kosmic.de.batch import CellTypeRun
-        from kosmic.de.de_analysis import significant_subset
         from kosmic.de.saved import gene_de_runs_in, read_gene_de
 
         runs = []
@@ -1450,18 +1486,11 @@ class GeneDEPage(SidebarTabbedPage):
             if df is None:
                 self.ws.log_message.emit(f"Could not load {saved.path.name}.")
                 continue
-            path = saved.path
-            donors = sum(int(df[c].iloc[0]) for c in
-                         ('disease_samples', 'control_samples') if c in df.columns)
-            runs.append(CellTypeRun(
-                cell_type=saved.cell_type or slug, slug=slug,
-                accession=f"{accession}_{slug}",
-                status='ok', n_samples=donors,
-                n_genes_tested=len(df),
-                n_significant=len(significant_subset(
-                    df, fdr=self.pval_filter.value(), lfc=self.fc_filter.value())),
-                de_path=path, de_results=df,
-            ))
+            run = self._run_from_table(
+                df, saved.path, cell_type=saved.cell_type or slug, label=label,
+                slug=slug, accession=f"{accession}_{slug}")
+            run.counts = saved.counts or ''
+            runs.append(run)
         return runs
 
     def _apply_run_significance(self, de_path):
@@ -2517,49 +2546,42 @@ class GeneDEPage(SidebarTabbedPage):
                 "their gene universes differ. Restrict to the shared genes "
                 "before comparing counts between them.")
 
-        self._batch_runs = [r for r in runs if r.status == 'ok'
-                            and r.de_results is not None]
-        self._populate_batch_view()
-        if self._batch_runs:
-            tail += ("\n\nUse the 'Cell type' picker under the volcano to "
-                     "look at each one.")
+        # The run bar lists the new runs beside the whole-study run and shows
+        # the first cell type that ran (ADR-016).
+        whole = [r for r in self.ws.cell_type_runs if not r.cell_type]
+        listed = sorted((r for r in runs if r.status != 'ok' or r.de_results is not None),
+                        key=lambda r: r.cell_type.lower())
+        first = next((i for i, r in enumerate(listed) if r.status == 'ok'), None)
+        self.ws.set_runs(whole + listed,
+                         select=None if first is None else len(whole) + first)
+        if first is not None:
+            tail += ("\n\nChoose a cell type under 'Results for' at the top of "
+                     "the page; Pathway DE and Enrichment use the one chosen.")
         dialogs.info(self, "Batch DE complete",
                      message + "\n\n" + "\n".join(lines) + tail)
 
-    def _populate_batch_view(self):
-        """Offer the finished cell types, and show the first."""
-        runs = getattr(self, '_batch_runs', [])
-        combo = self._batch_view_combo
-        combo.blockSignals(True)
-        combo.clear()
-        for run in runs:
-            combo.addItem(
-                f"{run.cell_type}  ({run.n_significant:,} sig)", run.cell_type)
-        combo.blockSignals(False)
-
-        show = bool(runs)
-        self._batch_view_label.setVisible(show)
-        combo.setVisible(show)
-        if show:
-            combo.setCurrentIndex(0)
-            self._on_batch_view_changed(0)
-
-    def _on_batch_view_changed(self, index):
-        """Render the chosen cell type's results in the volcano + table.
-
-        Only the DE-results views are switched. The Gene Expression and
-        heatmap tabs read the loaded AnnData, which still holds every
-        cell type -- so they are not showing this contrast's cells. The
-        status line says so rather than letting the two quietly disagree.
-        """
-        runs = getattr(self, '_batch_runs', [])
-        if not runs or not (0 <= index < len(runs)):
+    def _apply_shown_run(self):
+        """Show the run chosen in the run bar (ADR-016): its table, its
+        recorded significance rule, the volcano and the results table. The
+        heatmap and expression plots drawn for the previous run are cleared;
+        they are drawn again from the new run's cells when asked for."""
+        run = self.ws.shown_run
+        if run is None or run.de_results is None:
             return
-        from kosmic.de.de_analysis import significant_subset
-
-        run = runs[index]
+        for plot in (self.interactive_heatmap, self._ge_mean_plot, self._ge_pct_plot,
+                     self._pw_gene_bar_plot):
+            plot.clear_plot_items()
+            plot.show_unavailable_message()
+        if run.de_results is self.ws.de_results:
+            return  # already shown: a run just made here
         if run.de_path is not None:
             self._apply_run_significance(run.de_path)
+        if not run.cell_type:
+            name = run.de_path.name if run.de_path is not None else "adata.uns"
+            self._apply_loaded_results(run.de_results, name)
+            return
+
+        from kosmic.de.de_analysis import significant_subset
         self.ws.de_results = run.de_results
         self.ws.significant_genes = significant_subset(
             run.de_results, fdr=self.pval_filter.value(),
@@ -2568,10 +2590,15 @@ class GeneDEPage(SidebarTabbedPage):
 
         self._populate_results()
         self._on_pval_toggle()
+        if self.ws.analysis_mode == 'scoring':
+            self.ws.mark_step_complete(3)
+        elif self.ws.analysis_mode == 'discovery':
+            self.ws.mark_step_complete(2)
+        self._last_run_comparison = self._current_comparison()
+        self._refresh_run_dirty()
         self.status_label.setText(
-            f"Showing {run.cell_type}: {run.n_significant:,} significant of "
-            f"{run.n_genes_tested:,} tested, {run.n_samples} donors. "
-            f"Per-gene expression tabs still show the whole loaded dataset.")
+            f"Showing {run.cell_type}: {len(self.ws.significant_genes):,} significant of "
+            f"{run.n_genes_tested:,} tested, {run.n_samples} donors.")
 
     def _on_batch_failed(self, message):
         self.run_btn.setEnabled(True)
@@ -2598,11 +2625,6 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.progress_bar.setRange(0, 100)
             self.ws.progress_bar.setValue(0)
 
-        # A whole-dataset run replaces whatever the batch picker showed.
-        self._batch_runs = []
-        if hasattr(self, '_batch_view_combo'):
-            self._populate_batch_view()
-
         self.ws.de_results = de_results
         # The page's rule, which this run records (ADR-015).
         from kosmic.de.de_analysis import significant_subset
@@ -2624,6 +2646,13 @@ class GeneDEPage(SidebarTabbedPage):
         self.ws.gene_de_genome_wide = de_results.attrs.get('genome_wide_ranking')
 
         self._populate_results()
+
+        # The run bar lists this run first, beside the cell types' runs, and
+        # shows it (ADR-016).
+        whole = self._run_from_table(de_results, None, cell_type='',
+                                     label=self.method_token())
+        self.ws.set_runs([whole] + [r for r in self.ws.cell_type_runs if r.cell_type],
+                         select=0)
 
         self._auto_export_significant()
         self._auto_export_pathway_stats()
@@ -3196,11 +3225,17 @@ class GeneDEPage(SidebarTabbedPage):
         because that is an interpretable absolute unit with zeros at zero, where
         VST's arbitrary scale + non-zero floor would mislead. Computed once per
         (dataset, layer, sample/condition col, normalisation) and cached.
+
+        The cells and donors are those of the run chosen in the run bar
+        (ADR-016): a cell type's run uses its cells and the donor floors it
+        was made with.
         """
-        adata = self.ws.current_adata
+        adata = self.ws.run_adata()
         if adata is None or not self.ws.sample_col or not self.ws.condition_col:
             return None
-        key = (id(adata), self.ws.sample_col, self.ws.condition_col, norm)
+        min_cells, min_counts = self.ws.run_donor_floors()
+        key = (id(adata), self.ws.sample_col, self.ws.condition_col, norm,
+               min_cells, min_counts)
         cache = getattr(self, '_expr_cache', None)
         if cache is None:
             cache = self._expr_cache = {}
@@ -3220,7 +3255,7 @@ class GeneDEPage(SidebarTabbedPage):
             df = pseudobulk_expression_matrix(
                 adata, self.ws.sample_col, self.ws.condition_col,
                 normalization=norm,
-                min_cells=self.ws.min_cells, min_counts=self.ws.min_counts)
+                min_cells=min_cells, min_counts=min_counts)
         finally:
             self.status_label.setText("")
             self.ws.status_message.emit("Ready")

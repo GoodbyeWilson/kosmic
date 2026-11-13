@@ -596,6 +596,7 @@ class SetupPage(SimplePage):
         from kosmic.scrna.counts import loaded_count_source
         loaded = (str(Path(path).resolve()), loaded_count_source(adata))
         if loaded != self.ws.results_dataset:
+            self.ws.clear_runs()
             self.ws.de_results = None
             self.ws.significant_genes = None
             self.ws.pathway_coverage = None

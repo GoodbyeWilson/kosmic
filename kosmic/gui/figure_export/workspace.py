@@ -357,7 +357,8 @@ class FigureExportWorkspace(QWidget):
         else:
             live = self.source._live_de()
             if live is not None and getattr(live, 'de_results', None) is not None:
-                choices.append(("Run in the DE workspace", None))
+                from kosmic.gui.figure_export.shared.study_source import live_run_label
+                choices.append((live_run_label(live), None))
             choices += [(run.label, run) for run in self.source.de_runs()]
             chosen = self.source.de_run()
             tip = ("The DE run the DE figures draw: the one in the DE workspace, or\n"

@@ -1,4 +1,7 @@
 # DE Analysis — Pathway DE Page (Step 3)
+# Works on the gene DE run chosen in the run bar (ADR-016): a cell type's
+# run scores that cell type's cells, with the donors its gene DE kept, and
+# its results are saved in that run's folder under pathway_scoring/.
 # Pathway scoring + three interactive plot tabs:
 #   1. Pathway Activity  (bar chart from pathway_de_results)
 #   2. Patient Dotplot   (per-sample scores, pathway + gene combos)
@@ -13,7 +16,6 @@ import pandas as pd
 
 from kosmic.de.pathway_scoring import SCORING_METHODS, SCORING_METHOD_HELP, DEFAULT_METHOD
 from kosmic.scrna.counts import COUNT_SOURCE_TEXT
-from kosmic.paths import de_analysis_dir, de_pathway_scoring_dir
 from kosmic import PATHWAY_GENE_DETECTION_PCT, PATHWAY_MIN_COVERAGE
 from kosmic.gui.shared.theme import get_color, NoScrollComboBox, NoScrollDoubleSpinBox
 from kosmic.gui.shared.plots import InteractivePathwayPlot
@@ -36,6 +38,8 @@ class PathwayDEPage(SidebarTabbedPage):
         self.parent_scoring_worker = None
 
         self._setup_ui()
+        # The run bar's choice (ADR-016).
+        self.ws.run_changed.connect(self._on_run_changed)
 
     def _setup_ui(self):
         # Sidebar lives on self.sidebar_layout (provided by SidebarTabbedPage).
@@ -295,6 +299,8 @@ class PathwayDEPage(SidebarTabbedPage):
             if not self.dotplot_pathway_combo.count():
                 self._populate_pathway_combo()
 
+        self._redraw_stale_pathway_plot()
+
         # If results already in memory, just show status
         if self.ws.pathway_de_results is not None:
             self.status_label.setText("Pathway analysis complete. Click Run to re-analyse.")
@@ -312,21 +318,24 @@ class PathwayDEPage(SidebarTabbedPage):
     # ------------------------------------------------------------------
 
     def _try_load_previous_results(self):
-        """Check disk for previously saved pathway DE results."""
+        """Show the saved pathway DE results of the run chosen in the run bar
+        (ADR-016), with its per-donor scores when they were saved."""
         import pandas as pd
-        if not self.ws.project_dir:
+        folder = self.ws.run_saved_folder()
+        if folder is None:
             return
 
-        # Pathway DE results CSV (in pathway_scoring/ subfolder)
-        csv_path = de_pathway_scoring_dir(self.ws.project_dir) / "pathway_de_results.csv"
+        csv_path = folder / "pathway_de_results.csv"
         if not csv_path.exists():
             return
         try:
             pathway_de = pd.read_csv(csv_path)
             self.ws.pathway_de_results = pathway_de
-            # The CSV holds only summary stats; the per-donor matrix isn't on
-            # disk, so the plot recomputes until the next run.
-            self.ws.pathway_score_data = None
+            from kosmic.de.pathway_scoring import PER_DONOR_SCORES_FILE, load_per_donor_scores
+            self.ws.pathway_score_data = load_per_donor_scores(folder / PER_DONOR_SCORES_FILE)
+            parent = folder / "parent_pathway_de_results.csv"
+            if parent.exists():
+                self.ws.parent_stats_df = pd.read_csv(parent)
             self._pw_cache = {}
 
             # Plot directly from standard format (InteractivePathwayPlot accepts both)
@@ -359,9 +368,56 @@ class PathwayDEPage(SidebarTabbedPage):
         self._start_scoring()
 
     def _get_output_dir(self):
-        if self.ws.project_dir:
-            return de_analysis_dir(self.ws.project_dir)
-        return Path.cwd() / "de_analysis_results"
+        """Where the scoring results are saved: the chosen run's folder
+        (ADR-016)."""
+        folder = self.ws.run_folder()
+        if folder is not None:
+            return folder
+        return Path.cwd() / "de_analysis_results" / "pathway_scoring"
+
+    def _scoring_cells(self):
+        """The chosen run's cells (ADR-016), or None after saying why they
+        cannot be selected."""
+        adata = self.ws.run_adata()
+        if adata is None and self.ws.current_adata is not None:
+            dialogs.warning(
+                self, "Cell type not found",
+                f"No column of the loaded dataset holds the cell type "
+                f"'{self.ws.run_label()}', so its cells cannot be scored. Load the "
+                "dataset the per-cell-type run was made on.")
+        return adata
+
+    def _on_run_changed(self):
+        """Another gene DE run was chosen (ADR-016): clear the results shown,
+        then show that run's saved ones."""
+        self._pw_cache = {}
+        self.interactive_pathway.set_data(None)
+        self.fgsea_pathway_combo.clear()
+        for plot in (self._fgsea_nes_plot, self._fgsea_plot):
+            plot.clear_plot_items()
+            plot.show_unavailable_message()
+        self._try_load_previous_results()
+        folder = self.ws.run_saved_folder()
+        if folder is not None:
+            from kosmic.de.fgsea import FGSEA_RESULTS_FILE, load_fgsea_results
+            res = load_fgsea_results(folder / FGSEA_RESULTS_FILE)
+            if res is not None:
+                self.ws.fgsea_results = res
+                self._draw_fgsea_nes(res)
+        if self.ws.pathway_de_results is None:
+            self.status_label.setText(
+                f"No saved pathway results for {self.ws.run_label() or 'this run'}. "
+                "Select a scoring method and click Run.")
+        # The per-donor plot is drawn for the new run's cells when the page
+        # is next shown, not for every run chosen elsewhere.
+        self._pw_plot_stale = True
+        if self.ws.stack.currentWidget() is self:
+            self._redraw_stale_pathway_plot()
+
+    def _redraw_stale_pathway_plot(self):
+        if getattr(self, '_pw_plot_stale', False) and self.dotplot_pathway_combo.count():
+            self._pw_plot_stale = False
+            self._on_pathway_combo_changed(self.dotplot_pathway_combo.currentText())
 
     # ------------------------------------------------------------------
     # Scoring workers
@@ -429,12 +485,18 @@ class PathwayDEPage(SidebarTabbedPage):
                 self.ws.progress_bar.setValue(0)
             return
 
+        cells = self._scoring_cells()
+        if cells is None:
+            self.run_pathway_btn.setEnabled(True)
+            return
+        min_cells, min_counts = self.ws.run_donor_floors()
         self.scoring_worker = PathwayScoringWorker(
-            self.ws.current_adata, self.ws.sample_col, self.ws.condition_col,
+            cells, self.ws.sample_col, self.ws.condition_col,
             self.ws.control_label, self.ws.disease_label,
             self.ws.pathway_gene_sets, output_dir,
             method=method,
             gene_de_results=gene_de,
+            min_cells=min_cells, min_counts=min_counts,
             **self._coverage_kwargs(),
         )
         if self.ws.progress_bar:
@@ -495,11 +557,17 @@ class PathwayDEPage(SidebarTabbedPage):
     def _start_parent_scoring(self):
         output_dir = self._get_output_dir()
         method = self._get_scoring_method()
+        cells = self.ws.run_adata()
+        if cells is None:
+            self._finalize_analysis()
+            return
+        min_cells, min_counts = self.ws.run_donor_floors()
         self.parent_scoring_worker = PathwayScoringWorker(
-            self.ws.current_adata, self.ws.sample_col, self.ws.condition_col,
+            cells, self.ws.sample_col, self.ws.condition_col,
             self.ws.control_label, self.ws.disease_label,
             self.ws.parent_gene_sets, output_dir,
             level_label='parent_', method=method,
+            min_cells=min_cells, min_counts=min_counts,
             **self._coverage_kwargs(),
         )
         run_worker(
@@ -552,10 +620,16 @@ class PathwayDEPage(SidebarTabbedPage):
                 'min_coverage': round(cov['min_coverage'], 4),
                 'n_gene_sets': len(self.ws.pathway_gene_sets or {}),
                 'mode': getattr(self.ws, 'analysis_mode', None),
+                # The gene DE run it was made on (ADR-016).
+                **self.ws.run_identity(),
             }
+            # One entry per gene DE run (ADR-016): a rerun replaces only the
+            # entry of the same cell type and counts.
             provenance.record_stage(
                 study_dir, Path(h5ad).stem, 'pathway_de', params,
-                consumed_token=upstream)
+                consumed_token=upstream,
+                replace_matching={'cell_type': params.get('cell_type'),
+                                  'counts': params.get('counts')})
         except Exception as e:
             self.ws.log_message.emit(f"Could not record pathway provenance: {e}")
 
@@ -613,8 +687,11 @@ class PathwayDEPage(SidebarTabbedPage):
             return
 
         from kosmic.de.de_analysis import tested_gene_set
+        cells = self.ws.run_adata()
+        if cells is None:
+            return
         self._pw_plot_worker = _PathwayDataWorker(
-            self.ws.current_adata, genes,
+            cells, genes,
             self.ws.sample_col, self.ws.condition_col,
             self.ws.disease_label, self.ws.control_label,
             pathway_name,
@@ -751,7 +828,7 @@ class PathwayDEPage(SidebarTabbedPage):
                 "'Contam. panel' selected, then come back here.")
 
     def _on_run_spillover(self):
-        adata = self.ws.current_adata
+        adata = self._scoring_cells()   # the chosen run's cells (ADR-016)
         if adata is None:
             return
         contam_key = self.spill_metric_combo.currentData()
@@ -902,8 +979,7 @@ class PathwayDEPage(SidebarTabbedPage):
         if getattr(self.ws, 'project_dir', None):
             try:
                 from kosmic.de.fgsea import save_fgsea_results, FGSEA_RESULTS_FILE
-                save_fgsea_results(
-                    res, de_pathway_scoring_dir(self.ws.project_dir) / FGSEA_RESULTS_FILE)
+                save_fgsea_results(res, self.ws.run_folder() / FGSEA_RESULTS_FILE)
             except Exception as e:
                 self.ws.log_message.emit(f"Could not save fgsea results: {e}")
 

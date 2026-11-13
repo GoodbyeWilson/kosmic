@@ -45,6 +45,12 @@ class MethodsPage(SimplePage):
         super().__init__()
         self.ws = workspace
         self._setup_ui()
+        # The sheet describes the run chosen in the run bar (ADR-016).
+        self.ws.run_changed.connect(self._on_run_changed)
+
+    def _on_run_changed(self):
+        if self.ws.stack.currentWidget() is self:
+            self._refresh()
 
     def _setup_ui(self):
         layout = self.body_layout
@@ -115,12 +121,15 @@ class MethodsPage(SimplePage):
         self._scan_evidence_refs(adata, used_refs)
 
         _safe("DATASET", self._dataset_facts)
+        _safe("DE RUN", self._run_facts)
         _safe("PREPROCESSING", lambda: self._preprocessing_facts(used_refs))
         _safe("GENE DIFFERENTIAL EXPRESSION", lambda: self._de_facts(used_refs))
         _safe("FILTERS", lambda: self._filter_facts(used_refs))
         _safe("RESULTS", self._results_facts)
         _safe("PATHWAY DIFFERENTIAL EXPRESSION",
               lambda: self._pathway_de_facts(used_refs))
+        _safe("ENRICHMENT", self._enrichment_facts)
+        _safe("OTHER RUNS", self._other_runs_facts)
 
         ref_lines = self._reference_lines(used_refs)
         if ref_lines:
@@ -346,6 +355,77 @@ class MethodsPage(SimplePage):
                    else f"≥ {int(ms)} donors")
         return (f"CPM above the min-count {mc:g} cutoff in {samples}")
 
+    def _run_facts(self) -> list:
+        """The gene DE run the sheet describes: the one chosen in the run bar
+        (ADR-016)."""
+        run = self.ws.shown_run
+        if run is None:
+            return []
+        from kosmic.gui.de_analysis.run_bar import run_name
+        items = [("Results for:", run_name(run))]
+        col = self.ws.run_cell_type_column()
+        if col:
+            items.append(("Cell-type column:", col))
+        items.append(("Counts:", self.ws.run_counts().replace('_', ' ')))
+        if run.n_donors_control or run.n_donors_disease:
+            items.append(("Donors:", f"{run.n_donors_control} control, "
+                                     f"{run.n_donors_disease} disease"))
+        return items
+
+    def _run_stages(self, prov, stage: str) -> list:
+        """The entries of 'stage' made on the chosen run: the same cell type
+        (None for the whole study) and counts, or no counts recorded."""
+        from kosmic import provenance
+        ident = self.ws.run_identity()
+        out = []
+        for st in (prov or {}).get('stages') or []:
+            if st.get('stage') != stage:
+                continue
+            cell, counts = provenance.stage_run(st)
+            if (cell or None) != ident['cell_type']:
+                continue
+            if counts is not None and counts != ident['counts']:
+                continue
+            out.append(st)
+        return out
+
+    def _enrichment_facts(self) -> list:
+        """The enrichment runs made on the chosen run, one line per method
+        and library, from the provenance."""
+        items = []
+        for st in self._run_stages(self._load_provenance(), 'enrichment'):
+            p = st.get('params') or {}
+            method = {'go': 'GO over-representation', 'ora': 'Over-representation',
+                      'gsea': 'Preranked GSEA'}.get(p.get('method'), str(p.get('method')))
+            found = (f"{p.get('n_terms_sig', 0):,} of {p.get('n_terms', 0):,} terms at "
+                     f"FDR < {p.get('fdr', 0):g}")
+            if p.get('method') != 'gsea':
+                found = f"{p.get('n_genes_in', 0):,} genes in; " + found
+            items.append((f"{method}:", f"{p.get('library', '')}; {found}"))
+        return items
+
+    def _other_runs_facts(self) -> list:
+        """The other gene DE runs of the study that have enrichment or
+        pathway DE results, so the sheet says they exist."""
+        from kosmic import provenance
+        prov = self._load_provenance()
+        ident = self.ws.run_identity()
+        found: dict = {}
+        for st in (prov or {}).get('stages') or []:
+            if st.get('stage') not in ('enrichment', 'pathway_de'):
+                continue
+            cell, counts = provenance.stage_run(st)
+            if (cell or None, counts) == (ident['cell_type'], ident['counts']):
+                continue
+            if 'cell_type' not in (st.get('params') or {}):
+                continue        # made before the run was recorded (ADR-016)
+            what = 'enrichment' if st['stage'] == 'enrichment' else 'pathway DE'
+            found.setdefault((cell or 'Whole study', counts), set()).add(what)
+        return [f"{cell} ({(counts or 'counts not recorded').replace('_', ' ')}): "
+                f"{', '.join(sorted(kinds))}; choose it under Results for"
+                for (cell, counts), kinds in sorted(found.items(),
+                                                    key=lambda kv: (kv[0][0], kv[0][1] or ''))]
+
     def _pathway_de_facts(self, used_refs: set) -> list:
         """Pathway-scoring settings + coverage outcome, when a pathway DE run
         exists. Provenance-first, falling back to the live page state."""
@@ -359,8 +439,8 @@ class MethodsPage(SimplePage):
         prov = self._load_provenance()
         st = None
         if prov:
-            from kosmic import provenance
-            st = provenance.last_stage(prov, 'pathway_de')
+            runs = self._run_stages(prov, 'pathway_de')
+            st = runs[-1] if runs else None
         if st is not None:
             p = st.get('params') or {}
             method_key = p.get('scoring_method')
