@@ -2562,10 +2562,16 @@ class GeneDEPage(SidebarTabbedPage):
 
     def _apply_shown_run(self):
         """Show the run chosen in the run bar (ADR-016): its table, its
-        recorded significance rule, the volcano and the results table."""
+        recorded significance rule, the volcano and the results table. The
+        heatmap and expression plots drawn for the previous run are cleared;
+        they are drawn again from the new run's cells when asked for."""
         run = self.ws.shown_run
         if run is None or run.de_results is None:
             return
+        for plot in (self.interactive_heatmap, self._ge_mean_plot, self._ge_pct_plot,
+                     self._pw_gene_bar_plot):
+            plot.clear_plot_items()
+            plot.show_unavailable_message()
         if run.de_results is self.ws.de_results:
             return  # already shown: a run just made here
         if run.de_path is not None:
@@ -2590,12 +2596,9 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.mark_step_complete(2)
         self._last_run_comparison = self._current_comparison()
         self._refresh_run_dirty()
-        # The Gene Expression and heatmap tabs read the loaded dataset,
-        # which holds every cell type, so they are not this run's cells.
         self.status_label.setText(
             f"Showing {run.cell_type}: {len(self.ws.significant_genes):,} significant of "
-            f"{run.n_genes_tested:,} tested, {run.n_samples} donors. "
-            f"Per-gene expression tabs still show the whole loaded dataset.")
+            f"{run.n_genes_tested:,} tested, {run.n_samples} donors.")
 
     def _on_batch_failed(self, message):
         self.run_btn.setEnabled(True)
@@ -3222,11 +3225,17 @@ class GeneDEPage(SidebarTabbedPage):
         because that is an interpretable absolute unit with zeros at zero, where
         VST's arbitrary scale + non-zero floor would mislead. Computed once per
         (dataset, layer, sample/condition col, normalisation) and cached.
+
+        The cells and donors are those of the run chosen in the run bar
+        (ADR-016): a cell type's run uses its cells and the donor floors it
+        was made with.
         """
-        adata = self.ws.current_adata
+        adata = self.ws.run_adata()
         if adata is None or not self.ws.sample_col or not self.ws.condition_col:
             return None
-        key = (id(adata), self.ws.sample_col, self.ws.condition_col, norm)
+        min_cells, min_counts = self.ws.run_donor_floors()
+        key = (id(adata), self.ws.sample_col, self.ws.condition_col, norm,
+               min_cells, min_counts)
         cache = getattr(self, '_expr_cache', None)
         if cache is None:
             cache = self._expr_cache = {}
@@ -3246,7 +3255,7 @@ class GeneDEPage(SidebarTabbedPage):
             df = pseudobulk_expression_matrix(
                 adata, self.ws.sample_col, self.ws.condition_col,
                 normalization=norm,
-                min_cells=self.ws.min_cells, min_counts=self.ws.min_counts)
+                min_cells=min_cells, min_counts=min_counts)
         finally:
             self.status_label.setText("")
             self.ws.status_message.emit("Ready")

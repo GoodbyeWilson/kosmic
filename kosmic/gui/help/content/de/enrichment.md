@@ -24,7 +24,7 @@ Enrichr libraries are downloaded each time the enrichment runs. Enrichr keeps no
 
 ## What is recorded
 
-Each run is recorded in the provenance, so the methods state which gene sets were used: the method, the library, where it came from (the bundled file and its release, or the Enrichr address), a SHA-1 fingerprint of its content, the number of gene sets and genes, the time it was loaded, the thresholds, and how many terms were tested and significant. A SHA-1 that differs between two runs of the same Enrichr library shows that Enrichr changed it in between. A DE-workspace run is recorded in the study's provenance and a meta-analysis run in the selection's; each keeps one entry per method and library, so running a second library adds an entry rather than replacing the first.
+Each run is recorded in the provenance, so the methods state which gene sets were used: the method, the library, where it came from (the bundled file and its release, or the Enrichr address), a SHA-1 fingerprint of its content, the number of gene sets and genes, the time it was loaded, the thresholds, and how many terms were tested and significant. A SHA-1 that differs between two runs of the same Enrichr library shows that Enrichr changed it in between. A DE-workspace run is recorded in the study's provenance, with the cell type and counts of the DE run it used, and a meta-analysis run in the selection's. Each keeps one entry per method and library, and in the DE workspace per cell type and counts, so running a second library or another cell type adds an entry rather than replacing the first.
 
 An enrichment run describes the DE result or pooled gene list it was run on. When Gene DE, or the gene meta-analysis, is run again, the enrichment runs made before it no longer describe the current result: the methods leave them out and say how many were left out. They remain in the provenance file. Run the enrichment again to include it.
 
@@ -34,7 +34,9 @@ A library GSEA run estimates each gene set's p-value and FDR from 1,000 permutat
 
 ## What is saved
 
-The results of each run are saved for the Figures workspace, which can then draw them without the run in memory: an over-representation run as `enrichment_results.csv`, and a library GSEA run as its results table with the running-enrichment curves beside it. A DE-workspace run is saved in the study's `results/de_analysis/pathway_scoring/` folder, a meta-analysis run in the selection's folder under `meta_analysis/`. Each run replaces the previous one of its kind, except that a meta-analysis library GSEA run is saved per library.
+The results of each run are saved for the Figures workspace, which can then draw them without the run in memory: an over-representation run as `enrichment_results.csv`, and a library GSEA run as its results table with the running-enrichment curves beside it. A DE-workspace run is saved in the folder of the DE run chosen under **Results for**: `results/de_analysis/pathway_scoring/<counts>/` for a whole-study run and `results/de_analysis/pathway_scoring/<counts>/<cell type>/` for a cell type's run, so each cell type keeps its own results. A meta-analysis run is saved in the selection's folder under `meta_analysis/`. Each run replaces the previous one of its kind in its folder, except that a meta-analysis library GSEA run is saved per library.
+
+Choosing another run under **Results for** clears the results shown and shows that run's saved results of the chosen method, if it has any. Results that earlier versions saved directly in `pathway_scoring/` are shown for the whole-study run.
 
 ## Gene symbol matching
 

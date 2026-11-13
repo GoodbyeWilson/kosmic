@@ -138,6 +138,7 @@ class DEWorkspace(QWidget):
         # cell type) first. Chosen in the run bar.
         self.cell_type_runs = []
         self.run_index = -1
+        self._run_cells = None   # ((dataset id, run index), the run's cells)
 
         # Results
         self.de_results = None
@@ -274,6 +275,9 @@ class DEWorkspace(QWidget):
             page = page_map[index]
             if 0 <= page < self.stack.count():
                 self.stack.setCurrentIndex(page)
+                if (page in self._RUN_BAR_PAGES and not self.cell_type_runs
+                        and self.current_adata is not None and self.de_results is None):
+                    self.gene_de_page._try_load_previous_results()
                 self.refresh_run_bar()
                 self.tab_changed.emit(index)
                 widget = self.stack.widget(page)
@@ -318,15 +322,119 @@ class DEWorkspace(QWidget):
         if index == self.run_index:
             return
         self.run_index = index
+        self._run_cells = None
         self.run_bar.set_runs(runs, index)
+        # Results of the steps after gene DE belong to the run they were made
+        # on; the pages reload the new run's from its folder.
+        self._clear_downstream()
         # The pages apply the run (Gene DE sets de_results and its rule)
         # before the bar's line is written from them.
         self.run_changed.emit()
         self.refresh_run_bar()
 
+    def _clear_downstream(self) -> None:
+        self.pathway_de_results = None
+        self.parent_stats_df = None
+        self.pathway_score_data = None
+        self.fgsea_results = None
+        self.enrichment_results = None
+        self.gsea_library_results = None
+        self.gsea_library_name = None
+        self.gsea_library_details = None
+
+    def run_record(self) -> dict:
+        """The chosen run's saved '.json' record ({} without one)."""
+        from kosmic.de.saved import read_run_record
+        run = self.shown_run
+        if run is None or run.de_path is None:
+            return {}
+        return read_run_record(run.de_path) or {}
+
+    def run_counts(self) -> str:
+        """The counts folder of the chosen run, else of the loaded counts."""
+        run = self.shown_run
+        if run is not None and run.counts:
+            return run.counts
+        return self.gene_de_page.counts_folder()
+
+    def run_folder(self):
+        """Where the analyses on the chosen run save and find their outputs
+        (ADR-016): 'pathway_scoring/<counts>/[<cell type>/]', or None
+        without a study folder."""
+        from kosmic.paths import de_downstream_dir
+        if not self.project_dir:
+            return None
+        run = self.shown_run
+        return de_downstream_dir(self.project_dir, self.run_counts(),
+                                 run.cell_type if run is not None else None)
+
+    def run_saved_folder(self):
+        """The folder to read the chosen run's saved outputs from: its own,
+        or for a whole-study run the flat folder of earlier versions
+        (kosmic.de.saved.downstream_dir)."""
+        from kosmic.de.saved import downstream_dir
+        if not self.project_dir:
+            return None
+        run = self.shown_run
+        return downstream_dir(self.project_dir, self.run_counts(),
+                              run.cell_type if run is not None else None)
+
+    def run_identity(self) -> dict:
+        """The chosen run's cell type and counts, for provenance records."""
+        run = self.shown_run
+        return {'cell_type': (run.cell_type or None) if run is not None else None,
+                'counts': self.run_counts()}
+
+    def run_cell_type_column(self):
+        """The obs column holding the chosen run's cell type: from its record,
+        else the first candidate column of the loaded dataset whose values
+        include it; None when there is none."""
+        run, adata = self.shown_run, self.current_adata
+        if run is None or not run.cell_type or adata is None:
+            return None
+        col = self.run_record().get('cell_type_column')
+        if col and col in adata.obs.columns:
+            return col
+        ranked, other = self.gene_de_page._cell_type_columns(adata)
+        for c in [*ranked, *other]:
+            if run.cell_type in set(adata.obs[c].astype(str).unique()):
+                return c
+        return None
+
+    def run_adata(self):
+        """The loaded dataset's cells of the chosen run (ADR-016): every cell
+        for a whole-study run, the cell type's cells for a cell type's run.
+        None when no dataset is loaded or the cell type's column cannot be
+        found. A view, made once per run."""
+        adata, run = self.current_adata, self.shown_run
+        if adata is None or run is None or not run.cell_type:
+            return adata
+        cached = getattr(self, '_run_cells', None)
+        if cached is not None and cached[0] == (id(adata), self.run_index):
+            return cached[1]
+        col = self.run_cell_type_column()
+        if col is None:
+            self.log_message.emit(
+                f"No column of the loaded dataset holds the cell type "
+                f"'{run.cell_type}'; its cells cannot be selected.")
+            return None
+        cells = adata[(adata.obs[col].astype(str) == run.cell_type).to_numpy()]
+        self._run_cells = ((id(adata), self.run_index), cells)
+        return cells
+
+    def run_donor_floors(self) -> tuple:
+        """(min_cells, min_counts) the chosen run kept donors with: from its
+        record, else the workspace's settings."""
+        rec = self.run_record()
+        min_cells = rec.get('min_cells')
+        min_counts = rec.get('min_counts')
+        return (int(min_cells) if min_cells is not None else self.min_cells,
+                int(min_counts) if min_counts is not None else self.min_counts)
+
     def clear_runs(self) -> None:
         self.cell_type_runs = []
         self.run_index = -1
+        self._run_cells = None
         self.run_bar.set_runs([], -1)
         self.refresh_run_bar()
 

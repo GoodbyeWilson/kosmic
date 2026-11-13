@@ -175,10 +175,11 @@ class PathwayScoringWorker(BaseWorker):
 
     def __init__(self, adata, sample_col: str, condition_col: str,
                  control_cond: str, disease_cond: str,
-                 pathway_gene_sets: dict, output_dir: Path,
+                 pathway_gene_sets: dict, scoring_dir: Path,
                  level_label: str = '', method: str = 'score_genes',
                  gene_de_results=None, rho: float = 0.1, counts_layer=None,
-                 gene_detection_pct=None, min_coverage=None):
+                 gene_detection_pct=None, min_coverage=None,
+                 min_cells=None, min_counts=None):
         super().__init__()
         self.adata = adata
         self.sample_col = sample_col
@@ -186,7 +187,9 @@ class PathwayScoringWorker(BaseWorker):
         self.control_cond = control_cond
         self.disease_cond = disease_cond
         self.pathway_gene_sets = pathway_gene_sets
-        self.output_dir = output_dir
+        # The folder the results are saved in: the gene DE run's folder
+        # under pathway_scoring/ (ADR-016).
+        self.scoring_dir = Path(scoring_dir)
         self.level_label = level_label
         self.method = method
         self.gene_de_results = gene_de_results
@@ -194,6 +197,10 @@ class PathwayScoringWorker(BaseWorker):
         self.counts_layer = counts_layer
         self.gene_detection_pct = gene_detection_pct
         self.min_coverage = min_coverage
+        # The donor floors of the gene DE run, so the pseudobulk scores use
+        # the donors it kept.
+        self.min_cells = min_cells
+        self.min_counts = min_counts
 
     def _coverage_kwargs(self):
         """Only override compute_pathway_scores defaults when the GUI set a value."""
@@ -202,6 +209,14 @@ class PathwayScoringWorker(BaseWorker):
             kw['gene_detection_pct'] = self.gene_detection_pct
         if self.min_coverage is not None:
             kw['min_coverage'] = self.min_coverage
+        return kw
+
+    def _donor_kwargs(self):
+        kw = {}
+        if self.min_cells is not None:
+            kw['min_cells'] = self.min_cells
+        if self.min_counts is not None:
+            kw['min_counts'] = self.min_counts
         return kw
 
     def _run(self):
@@ -236,7 +251,7 @@ class PathwayScoringWorker(BaseWorker):
             self.sample_col, self.condition_col,
             normalization=normalization, counts_layer=self.counts_layer,
             standardize_genes=standardize_genes,
-            **self._coverage_kwargs(),
+            **self._coverage_kwargs(), **self._donor_kwargs(),
         )
 
         if score_matrix.size == 0 or not pathway_names:
@@ -272,7 +287,7 @@ class PathwayScoringWorker(BaseWorker):
             self.adata, self.pathway_gene_sets,
             self.sample_col, self.condition_col,
             counts_layer=self.counts_layer,
-            **self._coverage_kwargs(),
+            **self._coverage_kwargs(), **self._donor_kwargs(),
         )
 
         if score_matrix.size == 0 or not pathway_names:
@@ -391,7 +406,7 @@ class PathwayScoringWorker(BaseWorker):
             f"Pathway DE complete: {len(pathway_de)} pathways, {n_sig} significant"
         )
 
-        scoring_dir = self.output_dir / 'pathway_scoring'
+        scoring_dir = self.scoring_dir
         scoring_dir.mkdir(parents=True, exist_ok=True)
         pathway_de.to_csv(
             scoring_dir / f'{self.level_label}pathway_de_results.csv', index=False

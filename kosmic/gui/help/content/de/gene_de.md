@@ -136,7 +136,9 @@ run failed, is listed with the reason but cannot be chosen. The line
 under the list gives the chosen run's method, counts, donors per arm and
 significant genes under its rule. The run chosen there is shown in the
 volcano and the DE Results table, and is the run that Pathway DE and
-Enrichment use; changing it on one page changes it on all of them. After
+Enrichment use; changing it on one page changes it on all of them. For a
+cell type's run, the Heatmap and Gene Expression tabs show that cell
+type's cells and the donors its run kept. After
 **Run per cell type...** the first cell type that ran is chosen; after
 **Run**, the whole-study run.
 
