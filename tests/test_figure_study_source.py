@@ -56,7 +56,19 @@ def test_the_scrna_workspaces_dataset_is_used_when_it_holds_the_study(app, study
     assert src.scrna_expression(['VWF']) is held
 
 
-def test_the_file_is_read_in_the_background_when_no_workspace_holds_it(app, study, tmp_path):
+def test_the_file_is_read_in_the_background_when_no_workspace_holds_it(app, study, tmp_path,
+                                                                     monkeypatch):
+    # The read is held until the in-progress state has been checked: a small
+    # file is otherwise read before the test looks, and the test failed at
+    # random.
+    release = threading.Event()
+    real_read = h5ad_meta.read_figure_meta
+
+    def held_read(path):
+        assert release.wait(10), "the test never released the read"
+        return real_read(path)
+    monkeypatch.setattr(h5ad_meta, 'read_figure_meta', held_read)
+
     other = SimpleNamespace(current_adata=ad.AnnData(np.zeros((2, 2))),
                             current_project_dir=str(tmp_path / 'Other'))
     src = _source(scrna=other)                      # scRNA holds a different study
@@ -65,6 +77,7 @@ def test_the_file_is_read_in_the_background_when_no_workspace_holds_it(app, stud
     src.set_study(study)
     assert src.scrna_adata() is None                # not read yet...
     assert src.scrna_status().startswith('Reading StudyA.h5ad')
+    release.set()
     _settle(app, src)
     meta = src.scrna_adata()                        # ...then the file's
     assert meta is not None and meta.X is None and 'X_umap' in meta.obsm
