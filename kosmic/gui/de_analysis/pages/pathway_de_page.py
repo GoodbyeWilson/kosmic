@@ -623,9 +623,13 @@ class PathwayDEPage(SidebarTabbedPage):
                 # The gene DE run it was made on (ADR-016).
                 **self.ws.run_identity(),
             }
+            # One entry per gene DE run (ADR-016): a rerun replaces only the
+            # entry of the same cell type and counts.
             provenance.record_stage(
                 study_dir, Path(h5ad).stem, 'pathway_de', params,
-                consumed_token=upstream)
+                consumed_token=upstream,
+                replace_matching={'cell_type': params.get('cell_type'),
+                                  'counts': params.get('counts')})
         except Exception as e:
             self.ws.log_message.emit(f"Could not record pathway provenance: {e}")
 

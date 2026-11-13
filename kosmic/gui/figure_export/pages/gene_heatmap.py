@@ -154,11 +154,14 @@ class GeneHeatmapPage(FigurePage):
         counts_source = de.counts_source or 'raw'
         inputs = dict(gene_sets=dict(gs), sample_col=de.sample_col,
                       condition_col=de.condition_col, min_cells=de.min_cells,
-                      allowed=allowed, counts_source=counts_source)
+                      allowed=allowed, counts_source=counts_source,
+                      # A cell type's run draws its cells only (ADR-016).
+                      cells=de.cell_type_filter)
         inputs['signature'] = (self.workspace.data_version(), inputs['sample_col'],
                                inputs['condition_col'], inputs['min_cells'],
                                tuple(sorted(gs)), counts_source,
-                               len(allowed) if allowed is not None else -1)
+                               len(allowed) if allowed is not None else -1,
+                               inputs['cells'])
         return inputs
 
     def _prepare(self, inputs: dict):
@@ -182,6 +185,11 @@ class GeneHeatmapPage(FigurePage):
         adata = src.de_counts(genes, inputs['counts_source'])
         if adata is None:
             return None, {}
+        if inputs['cells'] is not None:
+            col, cell_type = inputs['cells']
+            if col not in adata.obs.columns:
+                return None, {}
+            adata = adata[(adata.obs[col].astype(str) == cell_type).to_numpy()]
         sd, avail = prepare_heatmap_data(
             adata, inputs['gene_sets'], inputs['sample_col'], inputs['condition_col'],
             min_cells=inputs['min_cells'], allowed_genes=inputs['allowed'],

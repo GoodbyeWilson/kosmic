@@ -384,9 +384,13 @@ def _abbrev_value(key: str, value, limit: int = _VALUE_LIMIT) -> str:
 
 
 # Stages whose every entry is a separate result rather than a re-run of
-# the one before: one per subclustering, one per enrichment method and
-# library (record_stage(replace_matching=...)).
+# the one before: one per subclustering, one per enrichment method,
+# library and gene DE run (record_stage(replace_matching=...)).
 _EVERY_ENTRY_STAGES = frozenset({'subcluster', 'enrichment', 'meta_enrichment'})
+
+# Stages whose last entry per gene DE run (cell type and counts) is kept
+# (ADR-016): each cell type's pathway DE is a separate result.
+_PER_RUN_STAGES = frozenset({'pathway_de'})
 
 # Stages computed from another stage's result. An entry made before the
 # latest run of the stage it came from describes a result that no longer
@@ -395,14 +399,45 @@ _EVERY_ENTRY_STAGES = frozenset({'subcluster', 'enrichment', 'meta_enrichment'})
 _DERIVED_FROM = {'enrichment': 'gene_de', 'meta_enrichment': 'meta_gene'}
 
 
+def stage_run(st: dict) -> tuple:
+    """(cell type, counts folder) of the gene DE run a DE-workspace entry
+    belongs to (ADR-016); None for what the entry does not record."""
+    from kosmic.paths import counts_folder_name
+    p = st.get('params') or {}
+    counts = p.get('counts')
+    if counts is None and p.get('count_source') is not None:
+        counts = counts_folder_name(p['count_source'])
+    return p.get('cell_type'), counts
+
+
+def _same_run(derived: dict, source: dict) -> bool:
+    """Whether 'derived' was made on the gene DE run 'source' made: the same
+    cell type (None for the whole study) and, where both record it, the
+    same counts."""
+    d_cell, d_counts = stage_run(derived)
+    s_cell, s_counts = stage_run(source)
+    if (d_cell or None) != (s_cell or None):
+        return False
+    return d_counts is None or s_counts is None or d_counts == s_counts
+
+
 def _superseded(stages: list) -> set:
-    """ids of derived entries made before the latest run of their source."""
-    last = {}
+    """ids of derived entries made before a later run of their source.
+
+    An enrichment is superseded only by a later gene DE run on the same cell
+    type and counts (ADR-016): a whole-study run does not make the
+    enrichments of the cell types' runs out of date."""
+    out = set()
     for i, st in enumerate(stages):
-        last[st.get('stage')] = i
-    return {id(st) for i, st in enumerate(stages)
-            if st.get('stage') in _DERIVED_FROM
-            and i < last.get(_DERIVED_FROM[st['stage']], -1)}
+        source = _DERIVED_FROM.get(st.get('stage'))
+        if source is None:
+            continue
+        later = (x for x in stages[i + 1:] if x.get('stage') == source)
+        if st.get('stage') == 'enrichment':
+            later = (x for x in later if _same_run(st, x))
+        if any(True for _ in later):
+            out.add(id(st))
+    return out
 
 
 def current_subclusterings(stages: list) -> list:
@@ -424,17 +459,25 @@ def _final_stages(stages: list) -> list:
     Re-running clustering or DE overwrites what came before, so listing
     every attempt as an equal makes the document describe settings that
     produced nothing. The count is kept so nothing is hidden silently.
+    A stage in _PER_RUN_STAGES keeps its last run per gene DE run (cell
+    type and counts).
     Every entry of a stage in _EVERY_ENTRY_STAGES is kept, except
     subclusterings an automated annotation has since replaced and
     derived entries (_DERIVED_FROM) made before their source was rerun;
     the source entry counts those in '_n_superseded'.
     """
+    def _key(st):
+        if st.get('stage') in _PER_RUN_STAGES:
+            cell, run_counts = stage_run(st)
+            return (st.get('stage'), cell or None, run_counts)
+        return st.get('stage')
+
     counts = {}
     for st in stages:
-        counts[st.get('stage')] = counts.get(st.get('stage'), 0) + 1
+        counts[_key(st)] = counts.get(_key(st), 0) + 1
     latest = {}
     for st in stages:
-        latest[st.get('stage')] = st
+        latest[_key(st)] = st
     current = {id(st) for st in current_subclusterings(stages)}
     stale = _superseded(stages)
     n_stale = {}
@@ -448,9 +491,9 @@ def _final_stages(stages: list) -> list:
         if st.get('stage') in _EVERY_ENTRY_STAGES:
             if st.get('stage') != 'subcluster' or id(st) in current:
                 out.append(dict(st))
-        elif latest.get(st.get('stage')) is st:
+        elif latest.get(_key(st)) is st:
             entry = dict(st)
-            entry['_n_runs'] = counts.get(st.get('stage'), 1)
+            entry['_n_runs'] = counts.get(_key(st), 1)
             superseded = {derived: n for derived, n in n_stale.items()
                           if _DERIVED_FROM[derived] == st.get('stage')}
             if superseded:

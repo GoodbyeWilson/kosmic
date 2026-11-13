@@ -10,6 +10,9 @@ Each cell is the sample's mean log-normalised expression of the gene
 samples. Only genes tested in Gene DE are shown, and samples with fewer
 cells than the DE minimum are left out.
 
+For a run on one cell type, only that cell type's cells are used, taken
+from the cell-type column the run was made with.
+
 ## Sample order and colours
 
 Samples are ordered control first, then disease; the grey strip under the

@@ -50,6 +50,13 @@ def _signature(path: Path) -> Optional[tuple]:
     return (str(path), st.st_mtime_ns, st.st_size)
 
 
+def live_run_label(ws) -> str:
+    """The Run list's entry for the DE workspace's run: the run chosen in its
+    run bar (ADR-016)."""
+    name = ws.run_label() if hasattr(ws, 'run_label') else ''
+    return f"{name} (DE workspace)" if name else "Run in the DE workspace"
+
+
 def _read_pathway_de(path: Path):
     import pandas as pd
     try:
@@ -341,10 +348,15 @@ class DEState:
     """The DE workspace's attribute names, answered for one study (see the
     module header). Created per use by 'StudySource.de_state()'."""
 
-    #: Attributes that belong to one gene DE run.
+    #: Attributes that belong to one gene DE run, including the outputs of
+    #: the analyses made on it (ADR-016): taken from the DE workspace only
+    #: when its run is the one shown.
     RUN_ATTRS = ('de_results', 'pathway_gene_sets', 'geneset_label', 'sample_col',
                  'condition_col', 'disease_label', 'control_label', 'min_cells',
-                 'pathway_coverage', 'counts_source', 'significance')
+                 'pathway_coverage', 'counts_source', 'significance',
+                 'pathway_de_results', 'parent_stats_df', 'pathway_score_data',
+                 'fgsea_results', 'enrichment_results', 'gsea_library_results',
+                 'gsea_library_details', 'gsea_library_name')
 
     def __init__(self, source: StudySource):
         self._source = source
@@ -396,8 +408,23 @@ class DEState:
     @property
     def run_label(self) -> Optional[str]:
         if self._live_run:
-            return "Run in the DE workspace"
+            return live_run_label(self._live)
         return self._run.label if self._run is not None else None
+
+    @property
+    def cell_type_filter(self) -> Optional[tuple]:
+        """(obs column, cell type) selecting the shown run's cells, or None
+        for a whole-study run or when the column is not known (ADR-016)."""
+        if self._live_run:
+            run = getattr(self._live, 'shown_run', None)
+            if run is None or not run.cell_type:
+                return None
+            col = self._live.run_cell_type_column()  # a DEWorkspace has both
+            return (col, run.cell_type) if col else None
+        if self._run is None or not self._run.cell_type:
+            return None
+        col = self._record().get('cell_type_column')
+        return (col, self._run.cell_type) if col else None
 
     # -- What the study's folder holds -------------------------------------------
 
@@ -508,8 +535,14 @@ class DEState:
 
     def _scoring_dir(self) -> Path:
         """The folder of the outputs of the analyses made on the selected run
-        (ADR-016); a whole-study run's when no run is selected."""
+        (ADR-016): the DE workspace's chosen run when that is the one shown,
+        else the saved run; a whole-study run's when no run is selected."""
         from kosmic.de.saved import downstream_dir
+        saved_folder = getattr(self._live, 'run_saved_folder', None)
+        if self._live_run and saved_folder is not None:
+            folder = saved_folder()
+            if folder is not None:
+                return folder
         run = self._run
         return downstream_dir(self.project_dir, run.counts if run else None,
                               run.cell_type if run else None)

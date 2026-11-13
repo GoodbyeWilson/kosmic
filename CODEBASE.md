@@ -157,10 +157,24 @@ DE figures start from that rule when the run is shown.
 `kosmic/paths.py` (`de_run_dir`, `de_output_dirs`) defines the layout;
 results that earlier versions wrote directly in `statistics/` are still
 read.
+The workspace holds the study's gene DE runs and the one chosen in the
+run bar above its pages (ADR-016): `DEWorkspace.cell_type_runs`,
+`run_index` and the `run_changed` signal. Gene DE, Pathway DE,
+Enrichment and Methods use that run. For a cell type's run, pathway
+scoring and the expression views use only that cell type's cells
+(`DEWorkspace.run_adata`, from the column in the run's record) and the
+donor floors the run recorded. The analyses made on a run save their
+outputs in `results/de_analysis/pathway_scoring/<counts>/` for a
+whole-study run and `.../<counts>/<cell type>/` for a cell type
+(`de_downstream_dir` in `kosmic/paths.py`); files that earlier versions
+wrote directly in `pathway_scoring/` are read as the whole-study run's.
+Their provenance stages record the run's cell type and counts.
 
 **Meta-Analysis** operates on the project. It discovers each study's
 differential expression results and pseudobulk files on disk, pools
 them, and writes its outputs to the project's `meta_analysis/` folder.
+Pathway DE results are discovered once per gene DE run, named
+`{study}_{cell type}` with the counts of their folder (ADR-016).
 It pools results made on one counts source, chosen on Select Studies,
 and writes them under a folder for those counts (ADR-015):
 `meta_analysis/<counts>/`, or `meta_analysis/unspecified_counts/` when
@@ -180,8 +194,10 @@ scRNA or DE workspace's data when that workspace holds the study,
 otherwise the study's folder. From the folder it reads the processed
 file in parts (below) and the DE outputs through `kosmic/de/saved.py`,
 which lists a study's saved gene DE runs and reads each run's table and
-its `.json` record (count source, gene sets, columns), the pathway
-scoring, fgsea, library GSEA and over-representation results. It
+its `.json` record (count source, gene sets, columns), and the pathway
+scoring, fgsea, library GSEA and over-representation results from the
+folder of the run chosen in its Run list (ADR-016). The DE workspace's
+values are used only when its chosen run is the one shown. It
 reads the Meta-Analysis workspace only through
 `MetaAnalysisWorkspace.figure_inputs()` (ADR-010): the pooled gene and
 pathway tables of the latest runs, the studies' own DE tables for the
