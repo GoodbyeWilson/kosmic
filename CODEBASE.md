@@ -30,8 +30,8 @@ rendered in the Developer Reference section of the documentation site.
 ## Core concepts
 
 **Project.** The top-level working directory for an analysis. A project
-contains one or more study folders and a `meta_analysis/` folder for
-project-level outputs. `AppWindow` holds the open project as
+contains one or more study folders, and `meta_analysis/` and
+`methods_comparison/` folders for project-level outputs. `AppWindow` holds the open project as
 `current_project_dir`.
 
 **Study.** One dataset within a project, stored as a folder named by
@@ -45,10 +45,10 @@ provenance record points at its parent dataset; the kind of a folder is
 determined from that record, not from its name.
 
 **Workspace.** One major area of the application: Project, scRNA
-Analysis, Differential Expression, Meta-Analysis or Figures, plus the
-Home page. A workspace operates either on a single study (scRNA,
+Analysis, Differential Expression, Meta-Analysis, Methods Comparison or
+Figures, plus the Home page. A workspace operates either on a single study (scRNA,
 Differential Expression) or on the project as a whole (Project,
-Meta-Analysis). Figures draws one study's figures, from the workspace
+Meta-Analysis, Methods Comparison). Figures draws one study's figures, from the workspace
 that holds it or else from its folder, and the project's meta-analysis
 figures (ADR-014).
 
@@ -77,6 +77,7 @@ kosmic/                 the installable package
   scrna/                loading, gene names, roles, QC, clustering, annotation
   de/                   pseudobulk DE, pathway scoring, enrichment, per-cell-type batch runs
   meta_analysis/        pooling methods, consensus, leave-one-out, permutation calibration
+  comparison/           merged pseudobulk against meta-analysis: design matching, call sets (ADR-017)
   combine/              shared atlas: concatenation, gene merging, label propagation
   visualisation/        matplotlib figures; style.py writes every exported figure (ADR-009)
   reference/            bundled reference data (HGNC, MGI, MSigDB Hallmark, gene sets, markers, GO, GWAS, Olink)
@@ -86,6 +87,7 @@ kosmic/                 the installable package
     scrna/              scRNA Analysis workspace
     de_analysis/        Differential Expression workspace
     meta_analysis/      Meta-Analysis workspace
+    comparison/         Methods Comparison workspace
     figure_export/      Figures workspace
     home/               Home page
     intake/             the Add Data dialog and import workers (opened from Project)
@@ -153,7 +155,9 @@ record, its pseudobulk count matrix and its significant genes beside the
 table; the per-cell-type run's summary table is in the counts folder.
 Each run records the significance rule it was made with (FDR and
 minimum |log2FC|, Off by default), and the DE pages, Enrichment and the
-DE figures start from that rule when the run is shown.
+DE figures start from that rule when the run is shown. Since ADR-017, a
+run also records its gene filters (`filters`) and the genes its FDR
+correction covered (`fdr_scope`).
 `kosmic/paths.py` (`de_run_dir`, `de_output_dirs`) defines the layout;
 results that earlier versions wrote directly in `statistics/` are still
 read.
@@ -198,6 +202,9 @@ its `.json` record (count source, gene sets, columns), and the pathway
 scoring, fgsea, library GSEA and over-representation results from the
 folder of the run chosen in its Run list (ADR-016). The DE workspace's
 values are used only when its chosen run is the one shown. It
+reads the Methods Comparison workspace the same way,
+through `ComparisonWorkspace.figure_inputs()` or else the newest saved
+comparison under `methods_comparison/` (ADR-017). It
 reads the Meta-Analysis workspace only through
 `MetaAnalysisWorkspace.figure_inputs()` (ADR-010): the pooled gene and
 pathway tables of the latest runs, the studies' own DE tables for the
@@ -207,6 +214,27 @@ builds the same keys from a run saved under `meta_analysis/`, loading
 each pooled study's table with the workspace's own loader
 (`load_study_de`). Figures loads no matrix whole and starts no load in
 another workspace, and it never writes a study's dataset file.
+
+**Methods Comparison** operates on the project (ADR-017). For one counts
+source and cell type, it compares the genes called by merged pseudobulk
+with the genes called by REML, SumRank, Stouffer and vote counting.
+Merged pseudobulk is a single DESeq2 model on the shared atlas (`_master`).
+
+- **Merged pseudobulk input.** The workspace reads `_master`'s saved DE
+  run when its recorded design matches the per-study designs, plus
+  `study`. It compares covariates after mapping each study's sex column
+  to the atlas's `sex` (`kosmic/comparison/design.py`). With no saved
+  run, it fits the model with `run_de_by_cell_type` and saves the run in
+  `_master`'s statistics folder. When the designs differ, a dialog lets
+  the user refit with the matched design (Resolve), use the saved run
+  and record the mismatch (Run anyway), or cancel.
+- **Meta-analysis input.** It reads a saved single-method run under
+  `meta_analysis/`. Otherwise it pools the method again from the saved
+  per-study tables.
+- **Output.** It writes the comparison to
+  `methods_comparison/<counts>/<selection>/` (`results.csv`,
+  `pairwise.csv`, `params.json` and `provenance.json`).
+- It does not change the Meta-Analysis workspace's results.
 
 **Combine** is a dialog opened from the Project workspace. It reads the
 selected studies' processed files, writes the shared atlas to

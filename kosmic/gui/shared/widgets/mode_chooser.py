@@ -1,7 +1,7 @@
 # Shared mode-chooser page for workspaces that branch into 2-3 sub-flows.
 #
 # Both the DE workspace ('Scoring' vs 'Discovery') and the Meta-Analysis
-# workspace ('Hypothesis' / 'Discovery' / 'Methods Comparison') used to
+# workspace ('Hypothesis' / 'Discovery' / 'Consensus Overview') used to
 # own their own near-identical 220-line 'Choose*Page' files. This module
 # collapses them into:
 #

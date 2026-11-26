@@ -8,7 +8,7 @@ The scRNA and DE figures show one study, named above the switch (*Study: Chaffin
 
 Each figure draws on the workspace that holds the study when one does, so a change not yet saved, such as an open subclustering, is shown. Otherwise it reads the study's folder: the processed dataset file and the results the DE steps saved. You do not need to open the scRNA or DE workspace, or keep a study loaded, to export its figures. A large study's file takes a few seconds to read; until then its scRNA figures are greyed with *Reading* followed by the file name.
 
-When a study has more than one saved DE run, for example one per cell type, a **Run** list appears above the DE figures. It lists the run chosen under **Results for** in the DE workspace, named by its cell type, when that workspace holds this study, and then each saved run by cell type, method and counts. The enrichment, GSEA and pathway figures draw the results made on the run chosen here: those held in the DE workspace for its run, else the ones saved in that run's folder (`results/de_analysis/pathway_scoring/<counts>/<cell type>/`). The Meta figures have their own **Run** list: the run in the Meta-Analysis workspace, then each meta-analysis run saved in the project, by selection, counts and methods.
+When a study has more than one saved DE run, for example one per cell type, a **Run** list appears above the DE figures. It lists the run chosen under **Results for** in the DE workspace, named by its cell type, when that workspace holds this study, and then each saved run by cell type, method and counts. The enrichment, GSEA and pathway figures draw the results made on the run chosen here: those held in the DE workspace for its run, else the ones saved in that run's folder (`results/de_analysis/pathway_scoring/<counts>/<cell type>/`). The Meta figures have their own **Run** list: the run in the Meta-Analysis workspace, then each meta-analysis run saved in the project, by selection, counts and methods. The Comparison figures have one too: the comparison in the Methods Comparison workspace, then each comparison saved in the project, by cell type and counts.
 
 A DE figure drawn from saved results that are older than the study's dataset file carries the note *These results were made before the study's file was last saved*, with the date. A later step, such as relabelling cell types, may have changed the data since; run the DE step again to update the figure.
 
@@ -16,7 +16,7 @@ Some results are saved only by DE runs made with this version or later: the gene
 
 ## Available figures
 
-The switch above the figure list shows the figures of one workspace at a time: **scRNA**, **DE** or **Meta**. Figure Export opens on the section of the workspace you came from. Within a section the figures are grouped by the analysis they draw on, as in the table below; the enrichment figures are listed in the DE section, where they draw the study's enrichment runs, and again in the Meta section under Pooled Enrichment, where they draw the runs of the Meta-Analysis Enrichment step.
+The switch above the figure list shows the figures of one workspace at a time: **scRNA**, **DE**, **Meta** or **Comparison**. Figure Export opens on the section of the workspace you came from. Within a section the figures are grouped by the analysis they draw on, as in the table below; the enrichment figures are listed in the DE section, where they draw the study's enrichment runs, and again in the Meta section under Pooled Enrichment, where they draw the runs of the Meta-Analysis Enrichment step.
 
 A figure whose results are not available is greyed in the list, and its tooltip names the step to run, or says why the saved results cannot be used; selecting it shows the same message. Tick **Show available only** to hide these figures.
 
@@ -34,6 +34,7 @@ A figure whose results are not available is greyed in the list, and its tooltip 
 | Enrichment | Library Enrichment (GSEA), Library GSEA (running enrichment), [Leading-Edge Heatmap](leading_edge.md) | A preranked GSEA run of the study against a library, from the DE workspace's Enrichment page |
 | Meta-Analysis | [Gene and Pathway Meta-Analysis Volcano](meta_volcano.md), [Gene and Pathway Forest Plot](meta_forest.md), [Leave-One-Out Sensitivity](meta_loo.md), [Study Agreement (Vote Levels)](meta_vote_levels.md) | A gene or pathway meta-analysis, in the Meta-Analysis workspace or saved in the project |
 | Pooled Enrichment | Enriched Terms, Enriched Term Links, Library Enrichment (GSEA), Library GSEA (running enrichment), Leading-Edge Heatmap | An enrichment run of the Meta-Analysis Enrichment step on the pooled gene list, in the Meta-Analysis workspace or saved in the project |
+| Methods Comparison | [Genes Called (Venn)](methods_venn.md) | A comparison of merged pseudobulk with meta-analysis, in the Methods Comparison workspace or saved in the project |
 
 The forest and leave-one-out figures of a saved meta-analysis run read each pooled study's DE table from the project. When one of those tables is no longer in the project, these two figures are greyed and the tooltip names the study.
 
@@ -46,12 +47,13 @@ The figures can be made on a computer other than the one that ran the analysis, 
 | scRNA | The study's `processed_data/` (its dataset file and `provenance.json`) and `study.json` |
 | DE | The study's `results/de_analysis/` and its dataset file (the Gene Heatmap reads the counts of its gene sets' genes) |
 | Meta | The project's `meta_analysis/` and each pooled study's `results/de_analysis/statistics/` |
+| Comparison | The project's `methods_comparison/` |
 
 Only the parts of a dataset file that a figure needs are read, so a large atlas can be exported on a computer with 16 GB of memory.
 
 ## Exporting
 
-**Export figure…** saves the current figure as PNG, PDF or SVG. The save dialog opens in the study's `figures/` folder for the scRNA figures, its `results/figures/` folder for the DE figures, and the selection's folder under `meta_analysis/<counts>/` for the Meta figures. Choose the format in the **Format** list above the button; the save dialog opens with that format selected, and a different file type chosen in the dialog takes precedence. The format applies to every figure page and is remembered between sessions.
+**Export figure…** saves the current figure as PNG, PDF or SVG. The save dialog opens in the study's `figures/` folder for the scRNA figures, its `results/figures/` folder for the DE figures, the selection's folder under `meta_analysis/<counts>/` for the Meta figures, and the comparison's folder under `methods_comparison/<counts>/` for the Comparison figures. Choose the format in the **Format** list above the button; the save dialog opens with that format selected, and a different file type chosen in the dialog takes precedence. The format applies to every figure page and is remembered between sessions.
 
 **Size** sets the figure's width and height in inches. With **Auto** ticked, each figure takes a size suited to its content (for example, more height for more studies), and the boxes show that size. Text sizes are fixed in points, so the same text takes up more of a smaller figure: untick **Auto** and change the size to fit the figure to a panel. The figure stays the same until a size is changed.
 

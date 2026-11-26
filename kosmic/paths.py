@@ -276,6 +276,16 @@ def meta_output_dir(project_dir: PathLike, selection: Optional[str] = None) -> P
     return base / selection if selection else base
 
 
+def comparison_output_dir(project_dir: PathLike, selection: Optional[str] = None) -> Path:
+    """``{project_dir}/methods_comparison[/{selection}]`` -- Methods Comparison output.
+
+    ``selection`` is ``<counts>/<cell type>``, as for :func:`meta_output_dir`,
+    so each counts source and cell type keeps its own comparison (ADR-017).
+    """
+    base = Path(project_dir) / "methods_comparison"
+    return base / selection if selection else base
+
+
 MASTER_ACCESSION = "_master"
 
 
@@ -341,7 +351,7 @@ def scaffold_study(study_dir: PathLike) -> None:
 # ---------------------------------------------------------------------------
 
 # Reserved subfolder names inside a project_dir that are not studies.
-_PROJECT_RESERVED_DIRS = frozenset({"meta_analysis"})
+_PROJECT_RESERVED_DIRS = frozenset({"meta_analysis", "methods_comparison"})
 
 
 def _looks_like_study(path: Path) -> bool:

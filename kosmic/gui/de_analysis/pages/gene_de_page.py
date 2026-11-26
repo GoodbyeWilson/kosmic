@@ -1117,7 +1117,47 @@ class GeneDEPage(SidebarTabbedPage):
                                       ('ribosomal', self.exclude_ribo_check))
                      if box.isChecked())
 
-    def _run_record(self, *, min_cells, min_counts, covariates=()) -> dict:
+    def _filter_settings(self) -> dict:
+        """The gene filters a run is given, as run_de_pipeline names them.
+
+        The same dict is passed to the worker and saved in the run's record,
+        so the record cannot describe filters the run did not use.
+        """
+        return {
+            'detection_min_pct': self.detection_pct_spin.value() / 100.0,
+            'detection_min_donor_frac': self.detection_donor_frac_spin.value() / 100.0,
+            'detection_study_col': self._per_study_filter_col(),
+            'deseq2_independent_filter': self.indep_filter_check.isChecked(),
+            'deseq2_cooks_filter': self.cooks_filter_check.isChecked(),
+            'filter_min_count': self.filter_min_count_spin.value(),
+            'filter_min_samples': int(self.filter_min_samples_spin.value()),
+            'exclude_gene_groups': self._excluded_gene_groups(),
+        }
+
+    def _fdr_scope(self) -> str:
+        """The genes the BH correction runs over, as _committed_fdr_genes
+        chooses them: 'genome', 'gene_sets', 'shared_atlas' or
+        'gene_sets_and_shared_atlas'."""
+        sets = (getattr(self.ws, 'analysis_mode', None) == 'scoring'
+                and bool(self.ws.pathway_gene_sets))
+        atlas = (getattr(self.ws, 'gene_universe', None) == 'shared_atlas'
+                 and bool(self._atlas_genes()))
+        return {(False, False): 'genome', (True, False): 'gene_sets',
+                (False, True): 'shared_atlas',
+                (True, True): 'gene_sets_and_shared_atlas'}[(sets, atlas)]
+
+    def _exported_run_settings(self) -> dict:
+        """The covariates, filters and FDR scope of the run being exported:
+        those the last run on this page used, or none when the results came
+        from elsewhere (a saved run reloaded), whose settings are unknown."""
+        s = getattr(self, '_run_settings', None)
+        if not s:
+            return {}
+        return {'covariates': s['covariates'], 'filters': s['filters'],
+                'fdr_scope': s['fdr_scope']}
+
+    def _run_record(self, *, min_cells, min_counts, covariates=(), filters=None,
+                    fdr_scope=None) -> dict:
         """The settings saved beside each DE table this page writes
         ('kosmic.de.saved'), so figures drawn from the table later use them."""
         from kosmic.de.saved import build_run_record
@@ -1130,7 +1170,8 @@ class GeneDEPage(SidebarTabbedPage):
             pathway_gene_sets=ws.pathway_gene_sets, geneset_label=ws.geneset_label,
             h5ad_path=ws.h5ad_path,
             # The significance rule the run's files and counts use (ADR-015).
-            fdr=self.pval_filter.value(), lfc_threshold=self.fc_filter.value())
+            fdr=self.pval_filter.value(), lfc_threshold=self.fc_filter.value(),
+            filters=filters, fdr_scope=fdr_scope)
 
     def _count_source(self):
         """Which counts the loaded dataset holds: 'raw' or a layer name.
@@ -1543,6 +1584,7 @@ class GeneDEPage(SidebarTabbedPage):
         import pandas as pd
 
         self.ws.de_results = de_results
+        self._run_settings = None   # loaded results: their run's settings are not this page's
         # Disk results carry no preserved genome-wide ranking; clear any stale
         # one so fgsea falls back to these loaded (genome-wide) results.
         self.ws.gene_de_genome_wide = de_results.attrs.get('genome_wide_ranking')
@@ -1650,6 +1692,7 @@ class GeneDEPage(SidebarTabbedPage):
         """Clear current results and try to load stored results for the active method."""
         self.ws.de_results = None
         self.ws.significant_genes = None
+        self._run_settings = None
         self._try_load_previous_results()
         self._refresh_run_dirty()
 
@@ -2154,6 +2197,11 @@ class GeneDEPage(SidebarTabbedPage):
         full_genome = True  # per-cell normalisation needs the full matrix
 
         fdr_genes = self._committed_fdr_genes()
+        filters = self._filter_settings()
+        # What this run used, for the record its export saves: the controls
+        # may change between the run and the export.
+        self._run_settings = {'covariates': tuple(self._selected_covariates()),
+                              'filters': filters, 'fdr_scope': self._fdr_scope()}
 
         self.de_worker = MetabolicDEWorker(
             self.ws.current_adata, sample_col, condition_col,
@@ -2163,17 +2211,9 @@ class GeneDEPage(SidebarTabbedPage):
             de_method=de_method, full_genome=full_genome,
             moderate=self.eb_checkbox.isChecked(),
             unit=self.ws.unit,
-            detection_min_pct=self.detection_pct_spin.value() / 100.0,
-            detection_min_donor_frac=(
-                self.detection_donor_frac_spin.value() / 100.0),
-            detection_study_col=self._per_study_filter_col(),
             fdr_genes=fdr_genes,
-            deseq2_independent_filter=self.indep_filter_check.isChecked(),
-            deseq2_cooks_filter=self.cooks_filter_check.isChecked(),
-            filter_min_count=self.filter_min_count_spin.value(),
-            filter_min_samples=int(self.filter_min_samples_spin.value()),
-            covariates=self._selected_covariates(),
-            exclude_gene_groups=self._excluded_gene_groups(),
+            covariates=list(self._run_settings['covariates']),
+            **filters,
         )
         run_worker(
             self.de_worker,
@@ -2478,6 +2518,7 @@ class GeneDEPage(SidebarTabbedPage):
         self._start_from_default_rule()
         gse_id = self.ws.gse_accession or (
             Path(self.ws.h5ad_path).stem if self.ws.h5ad_path else "unknown")
+        filters = self._filter_settings()
         self._batch_worker = CellTypeBatchWorker(
             self.ws.current_adata, cell_type_col, self.ws.sample_col,
             self.ws.condition_col, self.ws.project_dir, gse_id,
@@ -2491,21 +2532,14 @@ class GeneDEPage(SidebarTabbedPage):
             min_counts=self.min_counts_spin.value(),
             pathway_gene_sets=self.ws.pathway_gene_sets,
             fdr_genes=self._committed_fdr_genes(),
-            detection_min_pct=self.detection_pct_spin.value() / 100.0,
-            detection_min_donor_frac=(
-                self.detection_donor_frac_spin.value() / 100.0),
-            detection_study_col=self._per_study_filter_col(),
-            deseq2_independent_filter=self.indep_filter_check.isChecked(),
-            deseq2_cooks_filter=self.cooks_filter_check.isChecked(),
-            filter_min_count=self.filter_min_count_spin.value(),
-            filter_min_samples=int(self.filter_min_samples_spin.value()),
-            exclude_gene_groups=self._excluded_gene_groups(),
+            **filters,
             # The rule the summary counts and significant-gene files use.
             fdr=self.pval_filter.value(), lfc=self.fc_filter.value(),
             run_record=self._run_record(
                 min_cells=self.min_cells_spin.value(),
                 min_counts=self.min_counts_spin.value(),
-                covariates=self._selected_covariates()),
+                covariates=self._selected_covariates(),
+                filters=filters, fdr_scope=self._fdr_scope()),
         )
         run_worker(
             self._batch_worker,
@@ -2583,6 +2617,7 @@ class GeneDEPage(SidebarTabbedPage):
 
         from kosmic.de.de_analysis import significant_subset
         self.ws.de_results = run.de_results
+        self._run_settings = None
         self.ws.significant_genes = significant_subset(
             run.de_results, fdr=self.pval_filter.value(),
             lfc=self.fc_filter.value())
@@ -2840,7 +2875,8 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.de_results, self.ws.project_dir, gse_id,
             min_counts=self.ws.min_counts,
             run_record=self._run_record(min_cells=self.ws.min_cells,
-                                        min_counts=self.ws.min_counts),
+                                        min_counts=self.ws.min_counts,
+                                        **self._exported_run_settings()),
         )
         if self.ws.progress_bar:
             self.ws.progress_bar.setValue(0)

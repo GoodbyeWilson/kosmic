@@ -32,7 +32,7 @@ nav = mkdocs_gen_files.Nav()
 # moves through it, then the GUI. Flat modules at the package root are
 # grouped under 'core'.
 ORDER = [
-    "core", "scrna", "de", "meta_analysis", "combine",
+    "core", "scrna", "de", "meta_analysis", "comparison", "combine",
     "visualisation", "reference", "gui",
 ]
 CORE_ORDER = ["paths", "manifest", "provenance", "project_workflow", "numerical"]
@@ -40,7 +40,7 @@ CORE_ORDER = ["paths", "manifest", "provenance", "project_workflow", "numerical"
 SUB_ORDER = {
     "scrna": ["load", "inspect", "qc", "cluster", "annotate"],
     "gui": ["shared", "home", "project", "intake", "combine", "scrna",
-            "de_analysis", "meta_analysis", "figure_export", "help"],
+            "de_analysis", "meta_analysis", "comparison", "figure_export", "help"],
 }
 
 
@@ -55,6 +55,7 @@ TITLES = {
     "scrna": "scRNA: single-study processing",
     "de": "Differential expression",
     "meta_analysis": "Meta-analysis",
+    "comparison": "Methods comparison",
     "combine": "Shared atlas (combine)",
     "visualisation": "Visualisation",
     "reference": "Reference data",

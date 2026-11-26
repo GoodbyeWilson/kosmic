@@ -48,6 +48,7 @@ from kosmic.gui.figure_export.pages.gene_heatmap import GeneHeatmapPage
 from kosmic.gui.figure_export.pages.leading_edge import LeadingEdgeHeatmapPage
 from kosmic.gui.figure_export.pages.library_gsea import LibraryGseaPage
 from kosmic.gui.figure_export.pages.library_gsea_mountain import LibraryGseaMountainPage
+from kosmic.gui.figure_export.pages.methods_comparison import MethodsVennPage
 from kosmic.gui.figure_export.pages.meta_figures import (
     LeaveOneOutPage, MetaVolcanoPage, PathwayForestPage, PathwayMetaVolcanoPage,
     StudyForestPage, VoteLevelsPage,
@@ -104,6 +105,8 @@ _PAGE_REGISTRY: list[tuple[str, type[FigurePage]]] = [
     ("Pooled Enrichment", LibraryGseaPage),
     ("Pooled Enrichment", LibraryGseaMountainPage),
     ("Pooled Enrichment", LeadingEdgeHeatmapPage),
+    # Methods Comparison (ADR-017)
+    ("Methods Comparison", MethodsVennPage),
 ]
 
 # Sections of the figure list: (key, switch label, groups). Each group is
@@ -113,6 +116,7 @@ _SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("scrna", "scRNA", ("Embeddings", "Cell Types", "Single-cell QC", "Clustering")),
     ("de", "DE", ("Differential Expression", "Pathway Activity", "Enrichment")),
     ("meta", "Meta", ("Meta-Analysis", "Pooled Enrichment")),
+    ("compare", "Comparison", ("Methods Comparison",)),
 ]
 _SECTION_OF_GROUP = {g: key for key, _label, groups in _SECTIONS for g in groups}
 
@@ -146,6 +150,13 @@ class FigureExportWorkspace(QWidget):
         self._meta_run = None
         self._meta_runs: Optional[list] = None
         self._meta_saved: Optional[tuple] = None
+        # The Methods Comparison workspace (read through figure_inputs(),
+        # ADR-017), the saved comparison chosen (a folder; None: the
+        # workspace's, else the newest saved) and (folder, mtime, bundle)
+        # of the saved comparison last read.
+        self.comparison_ws = None
+        self._comparison_folder: Optional[Path] = None
+        self._comparison_saved: Optional[tuple] = None
 
         self._setup_ui()
 
@@ -163,6 +174,10 @@ class FigureExportWorkspace(QWidget):
         self.meta_ws = ws
         self.bump_data_version()
 
+    def set_comparison_workspace(self, ws):
+        self.comparison_ws = ws
+        self.bump_data_version()
+
     def set_study(self, study_dir) -> None:
         """Show the scRNA and DE figures of 'study_dir' (a study folder)."""
         self.source.set_study(study_dir)
@@ -175,6 +190,7 @@ class FigureExportWorkspace(QWidget):
             return
         self._project = new
         self._meta_run, self._meta_runs, self._meta_saved = None, None, None
+        self._comparison_folder, self._comparison_saved = None, None
         self.bump_data_version()
 
     # -- The Meta figures' run ----------------------------------------------
@@ -222,6 +238,49 @@ class FigureExportWorkspace(QWidget):
             self._meta_saved = (run, sig, figure_inputs(run))
         return self._meta_saved[2]
 
+    # -- The Methods Comparison figures' comparison ---------------------------
+
+    def _held_comparison(self):
+        """The Methods Comparison workspace's comparison, or None."""
+        ws = self.comparison_ws
+        inputs = ws.figure_inputs() if ws is not None else None
+        return inputs if inputs and inputs.get('bundle') is not None else None
+
+    def comparison_runs(self) -> list:
+        """``[(selection, folder)]`` of the project's saved comparisons."""
+        from kosmic.comparison.bundle import list_saved
+        project = self._project_folder()
+        return list_saved(project) if project is not None else []
+
+    def comparison_inputs(self) -> Optional[dict]:
+        """What the Methods Comparison figures draw: the workspace's comparison
+        unless a saved one was chosen, else the newest saved comparison."""
+        held = self._held_comparison()
+        if self._comparison_folder is None and held is not None:
+            return held
+        folder = self._comparison_folder
+        if folder is None:
+            runs = self.comparison_runs()
+            folder = runs[0][1] if runs else None
+        if folder is None:
+            return None
+        try:
+            mtime = (folder / 'results.csv').stat().st_mtime_ns
+        except OSError:
+            return None
+        if self._comparison_saved is None or self._comparison_saved[:2] != (folder, mtime):
+            from kosmic.comparison.bundle import load
+            self._comparison_saved = (folder, mtime, load(folder))
+        bundle = self._comparison_saved[2]
+        return {'bundle': bundle, 'project_folder': self._project_folder()} \
+            if bundle is not None else None
+
+    def _set_comparison_folder(self, folder) -> None:
+        if folder == self._comparison_folder:
+            return
+        self._comparison_folder = folder
+        self._on_source_changed()
+
     def _set_meta_run(self, run) -> None:
         if run == self._meta_run:
             return
@@ -265,12 +324,15 @@ class FigureExportWorkspace(QWidget):
         nav_lay.addWidget(self._study_label)
         self._show_study()
 
-        switch = QHBoxLayout()
+        # Three chips to a row: four do not fit the 220 px pane. Each row
+        # is its own layout, so a long label does not widen a column.
+        switch = QVBoxLayout()
         switch.setSpacing(6)
+        rows: list[QHBoxLayout] = []
         self._section_group = QButtonGroup(self)
         self._section_group.setExclusive(True)
         self._section_buttons: dict[str, QPushButton] = {}
-        for key, label, _groups in _SECTIONS:
+        for i, (key, label, _groups) in enumerate(_SECTIONS):
             btn = QPushButton(label)
             btn.setProperty("role", "filter_chip")
             btn.setCheckable(True)
@@ -278,8 +340,13 @@ class FigureExportWorkspace(QWidget):
             btn.clicked.connect(lambda _c=False, k=key: self.show_section(k))
             self._section_group.addButton(btn)
             self._section_buttons[key] = btn
-            switch.addWidget(btn)
-        switch.addStretch(1)
+            if i % 3 == 0:
+                rows.append(QHBoxLayout())
+                rows[-1].setSpacing(6)
+                switch.addLayout(rows[-1])
+            rows[-1].addWidget(btn)
+        for row in rows:
+            row.addStretch(1)
         nav_lay.addLayout(switch)
 
         # The run the DE or Meta figures draw (two runs or more).
@@ -346,7 +413,16 @@ class FigureExportWorkspace(QWidget):
         run (when it holds one), then each run saved in the project. Shown
         when there is a choice."""
         choices: list[tuple[str, object]] = []
-        if self._section == 'meta':
+        if self._section == 'compare':
+            from kosmic.meta_analysis.io import selection_label
+            if self._held_comparison() is not None:
+                choices.append(("Methods Comparison workspace", None))
+            choices += [(selection_label(sel), folder)
+                        for sel, folder in self.comparison_runs()]
+            chosen = self._comparison_folder
+            tip = ("The comparison the Methods Comparison figures draw: the one in\n"
+                   "the Methods Comparison workspace, or one saved in the project.")
+        elif self._section == 'meta':
             self._meta_runs = None                       # look again
             if self._held_meta_inputs() is not None:
                 choices.append(("Run in the Meta-Analysis workspace", None))
@@ -371,13 +447,16 @@ class FigureExportWorkspace(QWidget):
         index = next((i for i, (_l, run) in enumerate(choices) if run == chosen), 0)
         self._run_combo.setCurrentIndex(index)
         self._run_combo.blockSignals(False)
-        self._run_row.setVisible(self._section in ('de', 'meta') and len(choices) > 1)
+        self._run_row.setVisible(self._section in ('de', 'meta', 'compare')
+                                 and len(choices) > 1)
 
     def _on_run_chosen(self, index: int) -> None:
         if index < 0:
             return
         run = self._run_combo.itemData(index)
-        if self._section == 'meta':
+        if self._section == 'compare':
+            self._set_comparison_folder(run)
+        elif self._section == 'meta':
             self._set_meta_run(run)
         else:
             self.source.set_de_run(run)

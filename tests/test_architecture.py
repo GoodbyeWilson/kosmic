@@ -139,8 +139,8 @@ def _collect_import_targets():
 
     # kosmic/gui/* workspace packages -- importing them requires PyQt6 but no QApplication.
     for sub in ("kosmic/gui/scrna", "kosmic/gui/de_analysis",
-                "kosmic/gui/meta_analysis", "kosmic/gui/figure_export",
-                "kosmic/gui/shared", "kosmic/gui/help"):
+                "kosmic/gui/meta_analysis", "kosmic/gui/comparison",
+                "kosmic/gui/figure_export", "kosmic/gui/shared", "kosmic/gui/help"):
         sub_abs = os.path.join(_ROOT, sub)
         if not os.path.isdir(sub_abs):
             continue
@@ -177,6 +177,7 @@ _WORKSPACE_PREFIXES = (
     "kosmic.gui.scrna",
     "kosmic.gui.de_analysis",
     "kosmic.gui.meta_analysis",
+    "kosmic.gui.comparison",
     "kosmic.gui.figure_export",
     "kosmic.gui.help",
 )
@@ -239,6 +240,7 @@ _PAGE_DIRS = (
     "kosmic/gui/scrna/tabs",
     "kosmic/gui/de_analysis/pages",
     "kosmic/gui/meta_analysis/pages",
+    "kosmic/gui/comparison/pages",
     "kosmic/gui/figure_export/pages",
 )
 

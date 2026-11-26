@@ -282,7 +282,7 @@ def test_a_study_folder_renamed_while_shown_greys_its_figures(app, project):
     ws = _workspace(app, project)
     (project / 'StudyA').rename(project / 'StudyA_old')
     for section, _group, page in ws._entries:
-        if section == 'meta':
+        if section in ('meta', 'compare'):     # project figures, not a study's
             continue
         assert not ws._available(page), page.TITLE
         assert page.unavailable_reason() == (

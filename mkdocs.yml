@@ -112,9 +112,11 @@ nav:
       - Discovery Meta-Analysis: meta/gene_ma.md
       - Pathway meta-analysis: meta/pathway_ma.md
       - Pathway explorer: meta/pathway_explorer.md
-      - Methods Comparison: meta/methods_comparison.md
-      - Methods Comparison results: meta/methods_comparison_results.md
+      - Consensus Overview: meta/methods_comparison.md
+      - Consensus Overview results: meta/methods_comparison_results.md
       - Statistical approach: meta/statistics.md
+  - Methods Comparison:
+      - comparison/index.md
   - Figures:
       - figures/index.md
       - Dataset summary: figures/dataset_summary.md
@@ -138,5 +140,6 @@ nav:
       - Meta-analysis forest plot: figures/meta_forest.md
       - Leave-one-out sensitivity: figures/meta_loo.md
       - Study agreement (vote levels): figures/meta_vote_levels.md
+      - Genes called (Venn): figures/methods_venn.md
   - Glossary: glossary.md
   - Developer reference: reference/

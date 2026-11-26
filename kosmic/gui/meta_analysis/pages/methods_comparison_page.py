@@ -1,4 +1,4 @@
-# Individual Methods Page (Methods Comparison, step 1 of 2).
+# Individual Methods Page (Consensus Overview mode, step 1 of 2).
 #
 # Evaluates each selected pooling method standalone (no intersection).
 # Produces a per-method summary table (n_called at FDR<0.05,
@@ -295,7 +295,7 @@ class IndividualMethodsWorker(BaseWorker):
 # Page UI
 
 class MethodsComparisonPage(QWidget):
-    """Methods Comparison -- step 1: evaluate each method standalone."""
+    """Consensus Overview -- step 1: evaluate each method standalone."""
 
     help_id = "meta/methods_comparison"
 

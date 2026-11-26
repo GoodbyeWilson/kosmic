@@ -76,3 +76,16 @@ def test_option_is_disabled_without_an_atlas(workspace, tmp_path):
     ws.gene_universe = 'shared_atlas'
     page._refresh_atlas_genes_option()
     assert not page.atlas_genes_check.isEnabled() and ws.gene_universe is None
+
+
+def test_the_runs_filter_settings_are_the_pipelines_keywords_and_are_recorded(workspace, tmp_path):
+    import inspect
+
+    from kosmic.de.de_analysis import run_de_pipeline
+    ws, page = _page(workspace, _project(tmp_path, ['TTN', 'MYH7', 'DCN']))
+    filters = page._filter_settings()
+    assert set(filters) <= set(inspect.signature(run_de_pipeline).parameters)
+    assert page._fdr_scope() == 'genome'
+    ws.gene_universe = 'shared_atlas'
+    page._refresh_atlas_genes_option()
+    assert page._fdr_scope() == 'shared_atlas'

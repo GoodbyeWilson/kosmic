@@ -127,6 +127,21 @@ def test_batch_de_saves_a_record_beside_each_table(tmp_path):
     assert {r.cell_type for r in listed} == {r.cell_type for r in runs}
 
 
+def test_a_run_record_keeps_the_gene_filters_and_fdr_scope_only_when_given():
+    filters = {'filter_min_count': 10, 'exclude_gene_groups': ('mitochondrial',)}
+    record = saved.build_run_record(
+        None, method='deseq2', sample_col='sample', condition_col='condition',
+        disease_label='D', control_label='C', filters=filters, fdr_scope='genome')
+    assert record['filters'] == {'filter_min_count': 10,
+                                 'exclude_gene_groups': ['mitochondrial']}
+    assert record['fdr_scope'] == 'genome'
+    json.dumps(record)
+    old = saved.build_run_record(None, method='deseq2', sample_col='sample',
+                                 condition_col='condition', disease_label='D',
+                                 control_label='C')
+    assert 'filters' not in old and 'fdr_scope' not in old   # "not recorded", not a value
+
+
 def test_the_whole_study_export_saves_a_record(app, tmp_path):
     from kosmic.gui.de_analysis.workers import MetaExportWorker
     from tests.study_folder import de_table

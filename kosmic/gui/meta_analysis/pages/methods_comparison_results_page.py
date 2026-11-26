@@ -1,4 +1,4 @@
-# Consensus Evaluation Page (Methods Comparison, step 2 of 2).
+# Consensus Evaluation Page (Consensus Overview mode, step 2 of 2).
 #
 # Pareto-frontier combination explorer. Given the per-method results
 # from Individual Methods, builds and compares arbitrary method
@@ -363,7 +363,7 @@ _METHOD_SHORT = {
 
 
 class MethodsComparisonResultsPage(SimplePage):
-    """Methods Comparison -- Pareto-frontier combination explorer."""
+    """Consensus Overview -- Pareto-frontier combination explorer."""
 
     help_id = "meta/methods_comparison_results"
     SCROLLABLE = True
