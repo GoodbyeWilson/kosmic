@@ -14,4 +14,5 @@ that do not depend on Qt:
 - ``standard``: one long table for every method's result.
 - ``agreement``: the call rules, the shared genes and the pairwise measures.
 - ``bundle``: the comparison as saved in the project and read by Figures.
+- ``run``: the selections that can be compared, and running a comparison.
 """

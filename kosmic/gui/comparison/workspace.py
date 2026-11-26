@@ -39,13 +39,21 @@ class ComparisonWorkspace(QWidget):
         """Set the project from AppWindow.project_changed."""
         if not folder or not Path(folder).is_dir():
             return
+        if Path(folder) != self.project_folder:
+            self.bundle = None
         self.project_folder = Path(folder)
-        self.bundle = None
         self.project_directory_changed.emit(str(folder))
         self.compare_page.set_project(self.project_folder)
 
     def on_activated(self) -> None:
-        """Called by AppWindow each time the workspace is shown."""
+        """Called by AppWindow each time the workspace is shown: list the
+        selections again, since DE runs may have been saved meanwhile."""
+        if self.project_folder is not None and not self.compare_page._busy():
+            self.compare_page.set_project(self.project_folder)
+
+    def set_bundle(self, bundle) -> None:
+        """The comparison shown, for Figures."""
+        self.bundle = bundle
 
     def figure_inputs(self) -> dict:
         """What Figures reads from this workspace: the comparison shown and
