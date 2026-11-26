@@ -45,19 +45,27 @@ def export_format() -> str:
     return fmt if fmt in {ext for _, ext in EXPORT_FORMATS} else 'png'
 
 
-def _fig_to_png_bytes(fig, dpi: int = 150) -> bytes:
+class PreviewPNG(bytes):
+    """A preview's PNG bytes, with the size in inches the figure was drawn
+    at ('size_inches'), which the size boxes show while Auto is on."""
+    size_inches = None
+
+
+def _fig_to_png_bytes(fig, dpi: int = 150) -> PreviewPNG:
     """Serialise a matplotlib Figure to PNG bytes and close it. Axis lines
     are styled as on export ('style_axes'), so the preview matches it."""
     import matplotlib.pyplot as plt
 
     from kosmic.visualisation.style import style_axes
     style_axes(fig)
+    size = tuple(float(v) for v in fig.get_size_inches())
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight',
                 facecolor=fig.get_facecolor(), edgecolor='none')
     plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+    png = PreviewPNG(buf.getvalue())
+    png.size_inches = size
+    return png
 
 
 # Preview renders still running. Qt aborts the process when a QThread is
@@ -323,6 +331,9 @@ class FigurePage(SidebarPage):
         self._cached_data_version = self.workspace.data_version()
         self._preview.set_pixmap(pm)
         self._status_lbl.setText("Ready.")
+        figsize = getattr(getattr(self, '_controls', None), 'figsize', None)
+        if figsize is not None:
+            figsize.show_auto_size(getattr(png_bytes, 'size_inches', None))
 
     def _on_render_failed(self, message: str):
         self._render_worker = None

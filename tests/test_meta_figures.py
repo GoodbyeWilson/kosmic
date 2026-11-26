@@ -102,6 +102,60 @@ def test_pages_read_figure_inputs(qapp, level, tmp_path):
     plt.close(loo._make_render_func()())
 
 
+def test_study_labels_drop_the_runs_cell_type():
+    from kosmic.meta_analysis.io import study_labels
+    names = ['Chaffin_Ventricular_Cardiomyocyte', 'GSE183852_Ventricular_Cardiomyocyte']
+    assert study_labels(names, 'decontX_counts/Ventricular_Cardiomyocyte') == ['Chaffin', 'GSE183852']
+    assert study_labels(names, 'Ventricular_Cardiomyocyte') == ['Chaffin', 'GSE183852']
+    # Kept whole: a mixed selection, a name without the cell type, a clash.
+    assert study_labels(names, 'decontX_counts/mixed') == names
+    assert study_labels(names + ['external'], 'Ventricular_Cardiomyocyte') == names + ['external']
+    assert study_labels(['A_B_Cell', 'A_B_Cell'], 'B_Cell') == ['A_B_Cell', 'A_B_Cell']
+
+
+def test_forest_and_loo_label_studies_without_the_cell_type(qapp, tmp_path):
+    from kosmic.gui.figure_export.pages import meta_figures as mf
+    studies = [(f'{s}_Ventricular_Cardiomyocyte', df) for s, df in _studies()]
+    inputs = {'gene_results': pd.DataFrame([_pooled()]), 'gene_studies': studies,
+              'pathway_results': None, 'pathway_studies': [], 'project_folder': None,
+              'selection': 'decontX_counts/Ventricular_Cardiomyocyte'}
+    ws = SimpleNamespace(meta_ws=SimpleNamespace(figure_inputs=lambda: inputs),
+                         data_version=lambda: 0)
+    forest, loo = mf.StudyForestPage(ws), mf.LeaveOneOutPage(ws)
+    loo._controls.level.blockSignals(True)
+    for page in (forest, loo):
+        page._controls.populate_items(['PKD2'])
+        fig = page._make_render_func()()
+        labels = [t.get_text() for t in fig.axes[0].get_yticklabels()]
+        plt.close(fig)
+        assert set(EFFECTS) <= set(labels)
+        assert not any('Cardiomyocyte' in t for t in labels)
+        report = page._export_companions(tmp_path / f'{page.TITLE}.png')[0].read_text()
+        assert 'Ventricular_Cardiomyocyte' not in report
+
+
+def test_auto_size_boxes_show_the_size_drawn(qapp):
+    """With Auto ticked the boxes show the size the preview was drawn at,
+    and unticking Auto keeps it, so the figure does not change size."""
+    from kosmic.gui.figure_export.pages import meta_figures as mf
+    from kosmic.gui.figure_export.pages._base import _fig_to_png_bytes
+    inputs = {'gene_results': pd.DataFrame([_pooled()]), 'gene_studies': _studies(),
+              'pathway_results': None, 'pathway_studies': [], 'project_folder': None,
+              'selection': 'Cardiomyocyte'}
+    page = mf.StudyForestPage(SimpleNamespace(
+        meta_ws=SimpleNamespace(figure_inputs=lambda: inputs), data_version=lambda: 0))
+    page._controls.populate_items(['PKD2'])
+    size = page._controls.figsize
+    assert size.get_figsize() is None                      # Auto by default
+    png = _fig_to_png_bytes(page._make_render_func()())
+    drawn = png.size_inches
+    page._on_render_finished(png)
+    assert (size.w_spin.value(), size.h_spin.value()) == tuple(round(v, 1) for v in drawn)
+    size.auto_cb.blockSignals(True)
+    size.auto_cb.setChecked(False)
+    assert size.get_figsize() == tuple(round(v, 1) for v in drawn)
+
+
 def test_pages_unavailable_without_meta_workspace(qapp):
     from kosmic.gui.figure_export.pages.meta_figures import MetaVolcanoPage
     page = MetaVolcanoPage(SimpleNamespace(meta_ws=None, data_version=lambda: 0))

@@ -167,7 +167,7 @@ def create_study_forest(name, effects, pooled=None, title=None, figsize=None,
     ax.set_ylim(-0.7, n + 0.7)
     lim = float(x_limit) if x_limit else _sym_limit(np.r_[lo, hi, [p_lo, p_hi] if has_pooled else []])
     ax.set_xlim(-lim, lim)
-    _style_axes(ax, title or f'{name} Expression Across Studies',
+    _style_axes(ax, title or f'{name} expression across studies',
                 'Log2 fold change', 'Studies', font_sizes)
     fig.tight_layout()
     return fig
@@ -213,8 +213,8 @@ def create_loo_plot(name, loo, pooled=None, title=None, figsize=None,
     ax.set_ylim(-0.7, n - 0.3)
     lim = float(x_limit) if x_limit else _sym_limit(np.r_[lo, hi, p_lo, p_hi])
     ax.set_xlim(-lim, lim)
-    _style_axes(ax, title or f'{name}: Leave-One-Out Sensitivity',
-                'Pooled log2 fold change', 'Study Removed', font_sizes)
+    _style_axes(ax, title or f'{name}: leave-one-out sensitivity',
+                'Pooled log2 fold change', 'Study left out', font_sizes)
     fig.tight_layout()
     return fig
 
