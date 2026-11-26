@@ -63,7 +63,35 @@ def test_a_drop_no_stage_accounts_for_is_marked_not_recorded():
                   ('qc', {**QC, 'n_cells_before': 1000, 'n_cells_after': 900}),
                   n_obs=850)
     assert provenance.cell_filtering_steps(rec)[-1] == {
-        'step': 'Not recorded', 'n_cells': 850, 'n_removed': 50}
+        'step': 'Not recorded', 'detail': '', 'n_cells': 850, 'n_removed': 50}
+
+
+def test_each_step_says_what_it_kept_or_removed():
+    rec = _record(('load', {'n_cells': 1000}),
+                  ('filter_dataset', {'column': 'disease', 'kept_values': ['NF', 'DCM'],
+                                      'n_cells_before': 1000, 'n_cells_after': 900}),
+                  ('filter_dataset', {'column': 'donor_id',
+                                      'kept_values': [f'd{i}' for i in range(12)],
+                                      'n_cells_before': 900, 'n_cells_after': 880}),
+                  ('qc', {**QC, 'n_cells_before': 880, 'n_cells_after': 800}),
+                  ('doublets', {'method': 'scrublet', 'expected_doublet_rate': 0.06,
+                                'n_doublets': 10}),
+                  ('doublet_filter', {'n_cells_before': 800, 'n_cells_after': 790}),
+                  ('qc_recheck', {'layer': 'decontX_counts', 'min_genes': 300,
+                                  'min_counts': 500, 'n_cells_before': 790,
+                                  'n_cells_after': 780}))
+    assert [s['detail'] for s in provenance.cell_filtering_steps(rec)] == [
+        '', 'Kept disease: NF, DCM', 'Kept 12 values of donor_id',
+        '300 – 5,000 genes; ≥ 500 counts; < 3% mitochondrial',
+        'Scrublet, expected rate 6%', 'decontX_counts: ≥ 300 genes; ≥ 500 counts']
+
+
+def test_an_inferred_doublet_removal_names_the_detection_method():
+    rec = _record(('load', {'n_cells': 1000}),
+                  ('doublets', {'method': 'scrublet', 'expected_doublet_rate': 0.08,
+                                'n_doublets': 30}),
+                  n_obs=970)
+    assert provenance.cell_filtering_steps(rec)[-1]['detail'] == 'Scrublet, expected rate 8%'
 
 
 def test_a_qc_rerun_that_removed_nothing_is_not_a_step():
@@ -157,6 +185,14 @@ def test_the_filtering_flow_chart_has_a_box_per_count_and_per_step():
     texts = [t.get_text() for t in fig.axes[0].texts]
     assert 'QC limits\n100 removed' in texts and '890 cells' in texts
     assert create_cell_filtering_plot([]) is None
+
+
+def test_the_flow_chart_shows_each_steps_detail():
+    steps = [{'step': 'Loaded', 'detail': '', 'n_cells': 1000, 'n_removed': 0},
+             {'step': 'Pre-analysis filter', 'detail': 'Kept disease: NF, DCM',
+              'n_cells': 900, 'n_removed': 100}]
+    texts = [t.get_text() for t in create_cell_filtering_plot(steps).axes[0].texts]
+    assert 'Pre-analysis filter\nKept disease: NF, DCM\n100 removed' in texts
 
 
 @pytest.fixture(scope='module')

@@ -213,11 +213,55 @@ _FILTER_STEP_NAMES = {
 }
 
 
+def _limit_text(lo, hi, unit: str) -> str:
+    """'300 – 10,000 genes', '≥ 500 counts' or '' for a pair of QC limits (0 = off)."""
+    if lo and hi:
+        return f"{lo:,} – {hi:,} {unit}"
+    if lo:
+        return f"≥ {lo:,} {unit}"
+    return f"≤ {hi:,} {unit}" if hi else ''
+
+
+def _kept_text(column, values) -> str:
+    """'Kept disease: NF, DCM', or the number of values when there are many."""
+    values = [str(v) for v in values or []]
+    if not column or not values:
+        return ''
+    if len(values) <= 4:
+        return f"Kept {column}: {', '.join(values)}"
+    return f"Kept {len(values)} values of {column}"
+
+
+def _step_detail(stage: str, params: dict, doublets: Optional[dict]) -> str:
+    """What a filtering stage kept or removed, from its recorded parameters."""
+    if stage == 'filter_dataset':
+        return _kept_text(params.get('column'), params.get('kept_values'))
+    if stage == 'subset':
+        return _kept_text(params.get('cell_type_column'), params.get('cell_types'))
+    if stage in ('qc', 'qc_recheck'):
+        parts = [_limit_text(params.get('min_genes'), params.get('max_genes'), 'genes'),
+                 _limit_text(params.get('min_counts'), params.get('max_counts'), 'counts')]
+        if params.get('max_mt'):
+            parts.append(f"< {params['max_mt']:g}% mitochondrial")
+        text = '; '.join(p for p in parts if p)
+        layer = params.get('layer') if stage == 'qc_recheck' else None
+        return f"{layer}: {text}" if layer and text else text
+    if stage == 'doublet_filter' and doublets:
+        method = str(doublets.get('method') or '').capitalize()
+        rate = doublets.get('expected_doublet_rate')
+        return f"{method}, expected rate {rate:.0%}" if method and rate else method
+    return ''
+
+
 def cell_filtering_steps(record: Optional[dict]) -> list:
     """The cells left after each step that removed cells, oldest first.
 
-    Returns a list of {'step', 'n_cells', 'n_removed'} dicts, starting with
-    the loaded cells ('n_removed' 0). Read from the stages' recorded counts:
+    Returns a list of {'step', 'detail', 'n_cells', 'n_removed'} dicts,
+    starting with the loaded cells ('n_removed' 0). 'detail' says what the
+    step kept or removed, from its recorded parameters: the column and
+    values a pre-analysis filter or subset kept, the QC limits (and the
+    layer they were re-applied to), the doublet method and expected rate;
+    '' when nothing is recorded. Read from the stages' recorded counts:
     the latest 'load' gives the starting number (a study loaded again is
     processed again, so earlier stages no longer describe it); stages with
     'n_cells_before' and
@@ -232,13 +276,16 @@ def cell_filtering_steps(record: Optional[dict]) -> list:
     steps: list = []
     current = None
     pending_doublets = None
+    doublets = None   # the latest doublet detection's parameters
 
     def gap_to(n_before):
         nonlocal current, pending_doublets
         if current is not None and n_before is not None and n_before < current:
             removed = current - n_before
-            name = 'Doublet removal' if removed == pending_doublets else 'Not recorded'
-            steps.append({'step': name, 'n_cells': int(n_before), 'n_removed': int(removed)})
+            inferred = removed == pending_doublets
+            steps.append({'step': 'Doublet removal' if inferred else 'Not recorded',
+                          'detail': _step_detail('doublet_filter', {}, doublets) if inferred else '',
+                          'n_cells': int(n_before), 'n_removed': int(removed)})
             current = n_before
             pending_doublets = None
 
@@ -247,19 +294,21 @@ def cell_filtering_steps(record: Optional[dict]) -> list:
         if stage == 'load' and params.get('n_cells') is not None:
             # A later load starts the study again: only the latest run counts.
             current = int(params['n_cells'])
-            steps = [{'step': 'Loaded', 'n_cells': current, 'n_removed': 0}]
-            pending_doublets = None
+            steps = [{'step': 'Loaded', 'detail': '', 'n_cells': current, 'n_removed': 0}]
+            pending_doublets = doublets = None
             continue
         if current is None:
             continue
         if stage == 'doublets':
             pending_doublets = params.get('n_doublets')
+            doublets = params
             continue
         before, after = params.get('n_cells_before'), params.get('n_cells_after')
         if before is not None and after is not None:
             gap_to(int(before))
             if after < before:
                 steps.append({'step': _FILTER_STEP_NAMES.get(stage, stage),
+                              'detail': _step_detail(stage, params, doublets),
                               'n_cells': int(after), 'n_removed': int(before - after)})
             current = int(after)
             if stage == 'doublet_filter':
