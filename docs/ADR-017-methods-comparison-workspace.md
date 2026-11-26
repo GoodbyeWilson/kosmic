@@ -87,9 +87,14 @@ of them computes its result.
     counts and cell type when its recorded design matches (§4).
   - When there is no saved run, it fits the model with
     `run_de_by_cell_type` on `master.h5ad`, using the minimum cells and
-    counts per donor that the studies' runs recorded. The studies' runs
-    do not record their gene filters, so the fit uses KOSMIC's default
-    gene filters, applied within each study, and the page says so. When a saved run's design does not match, the user chooses
+    counts per donor, the gene filters and the scope of the FDR
+    correction that the studies' runs recorded. Gene filters are applied
+    within each study.
+  - DE run records gain `filters` and `fdr_scope` for this purpose. A
+    saved merged run matches only if these equal the studies' values.
+    Runs saved before these fields existed do not have them. For those
+    runs, the filters are not compared, a refit uses KOSMIC's default
+    gene filters, and the page says so. When a saved run's design does not match, the user chooses
     what happens in a warning dialog (§4).
   - The run is written to `_master`'s usual statistics folder, so the DE
     workspace lists it as well.

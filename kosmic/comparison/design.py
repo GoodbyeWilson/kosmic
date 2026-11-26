@@ -57,6 +57,9 @@ class StudyDesign:
     min_cells: Optional[int]
     min_counts: Optional[int]
     method: str = 'deseq2'
+    filters: Optional[dict] = None
+    fdr_scope: Optional[str] = None
+    gene_sets: Optional[dict] = None
 
 
 @dataclass
@@ -81,6 +84,9 @@ class Design:
     min_counts: Optional[int]
     warnings: list = field(default_factory=list)
     unresolved: list = field(default_factory=list)
+    filters: Optional[dict] = None
+    fdr_scope: Optional[str] = None
+    gene_sets: Optional[dict] = None
 
     @property
     def formula(self) -> str:
@@ -102,7 +108,27 @@ def study_design(study: str, de_path, record: dict) -> StudyDesign:
         cell_type=record.get('cell_type'),
         cell_type_column=record.get('cell_type_column'),
         min_cells=record.get('min_cells'), min_counts=record.get('min_counts'),
-        method=str(record.get('method') or 'deseq2'))
+        method=str(record.get('method') or 'deseq2'),
+        filters=record.get('filters'), fdr_scope=record.get('fdr_scope'),
+        gene_sets=record.get('pathway_gene_sets') or None)
+
+
+#: Filters that differ between the runs by design: a study filters genes over
+#: its own donors, the merged model within each study.
+_FILTERS_NOT_COMPARED = ('detection_study_col',)
+
+
+def comparable_filters(filters: Optional[dict]) -> Optional[dict]:
+    """``filters`` without the keys that differ between the runs by design."""
+    if filters is None:
+        return None
+    return {k: (sorted(v) if isinstance(v, (list, tuple)) else v)
+            for k, v in filters.items() if k not in _FILTERS_NOT_COMPARED}
+
+
+def uses_gene_sets(fdr_scope: Optional[str]) -> bool:
+    """Whether a run's BH correction ran over the committed gene sets only."""
+    return bool(fdr_scope) and 'gene_sets' in fdr_scope
 
 
 def _is_sex_covariate(name: str, designated: Optional[str]) -> bool:
@@ -267,6 +293,22 @@ def resolve_design(studies: list, study_obs: dict, sex_columns: dict,
             warnings.append(f"The studies' runs differ in {label}: "
                             + ', '.join(sorted(map(str, values))) + '.')
 
+    filters, scope, gene_sets = None, None, None
+    recorded = [comparable_filters(s.filters) for s in studies]
+    if studies and all(f is not None for f in recorded):
+        if all(f == recorded[0] for f in recorded):
+            filters = dict(studies[0].filters)
+        else:
+            detail = '; '.join(f"{s.study}: {f}" for s, f in zip(studies, recorded))
+            warnings.append(f"The studies' runs used different gene filters ({detail}).")
+    scopes = {uses_gene_sets(s.fdr_scope) for s in studies if s.fdr_scope}
+    if len(scopes) > 1:
+        warnings.append("Some studies corrected for multiple testing over the committed "
+                        "gene sets and others over every gene.")
+    elif scopes and studies and all(s.fdr_scope for s in studies):
+        scope = studies[0].fdr_scope
+        gene_sets = studies[0].gene_sets if uses_gene_sets(scope) else None
+
     atlas_covs = list(dict.fromkeys(m for m in mapping.values() if m))
     ct_col = _atlas_cell_type_column(ref.cell_type_column if ref else None, atlas_cols)
     if ref and ref.cell_type and ct_col is None:
@@ -281,7 +323,8 @@ def resolve_design(studies: list, study_obs: dict, sex_columns: dict,
                   counts=ref.counts if ref else None,
                   min_cells=ref.min_cells if ref else None,
                   min_counts=ref.min_counts if ref else None,
-                  warnings=warnings, unresolved=unresolved)
+                  warnings=warnings, unresolved=unresolved,
+                  filters=filters, fdr_scope=scope, gene_sets=gene_sets)
 
 
 def differences(record: Optional[dict], design: Design, counts: Optional[str] = None) -> list:
@@ -312,6 +355,24 @@ def differences(record: Optional[dict], design: Design, counts: Optional[str] = 
         if want is not None and record.get(key) is not None and record.get(key) != want:
             out.append(f"The saved merged run's {label} is {record.get(key)}; "
                        f"the studies used {want}.")
+    want_filters = comparable_filters(design.filters)
+    if want_filters is not None:
+        saved_filters = comparable_filters(record.get('filters'))
+        if saved_filters is None:
+            out.append("The saved merged run did not record its gene filters, so they "
+                       "cannot be checked against the studies'.")
+        elif saved_filters != want_filters:
+            changed = sorted(k for k in set(saved_filters) | set(want_filters)
+                             if saved_filters.get(k) != want_filters.get(k))
+            out.append("The saved merged run's gene filters differ from the studies': "
+                       + ', '.join(changed) + '.')
+    saved_scope = record.get('fdr_scope')
+    if design.fdr_scope and saved_scope and \
+            uses_gene_sets(saved_scope) != uses_gene_sets(design.fdr_scope):
+        over = {True: 'the gene sets', False: 'every gene'}
+        out.append("The saved merged run corrected for multiple testing over "
+                   f"{over[uses_gene_sets(saved_scope)]}; the studies over "
+                   f"{over[uses_gene_sets(design.fdr_scope)]}.")
     sample = record.get('sample_column')
     if sample and sample != design.sample_column:
         out.append(f"The saved merged run identifies donors by '{sample}', "

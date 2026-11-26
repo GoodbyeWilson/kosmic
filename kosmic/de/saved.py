@@ -203,7 +203,9 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
                      covariates=(), pathway_gene_sets: Optional[dict] = None,
                      geneset_label: Optional[str] = None,
                      h5ad_path=None, fdr: Optional[float] = None,
-                     lfc_threshold: Optional[float] = None) -> dict:
+                     lfc_threshold: Optional[float] = None,
+                     filters: Optional[dict] = None,
+                     fdr_scope: Optional[str] = None) -> dict:
     """The settings of a gene DE run, as saved beside its table.
 
     ``counts_source`` is the count matrix the run used: 'raw' for the
@@ -212,11 +214,21 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
     file name of ``h5ad_path`` is kept. ``fdr`` and ``lfc_threshold`` are
     the significance rule the run's counts and files use (ADR-015); 0 for
     ``lfc_threshold`` means no fold-change gate.
+
+    ``filters`` are the gene filters the run was given, as
+    ``run_de_pipeline`` names them (``detection_min_pct``,
+    ``detection_min_donor_frac``, ``detection_study_col``,
+    ``deseq2_independent_filter``, ``deseq2_cooks_filter``,
+    ``filter_min_count``, ``filter_min_samples``, ``exclude_gene_groups``).
+    ``fdr_scope`` is the genes the BH correction ran over: 'genome',
+    'gene_sets', 'shared_atlas' or 'gene_sets_and_shared_atlas'. Both are
+    left out of the record when not given (runs saved before they were
+    recorded), so a reader can tell "not recorded" from a value.
     """
     from kosmic import DEFAULT_FDR, DEFAULT_LFC_THRESHOLD
     from kosmic.scrna.counts import loaded_count_source
 
-    return {
+    record = {
         'saved': datetime.now().isoformat(timespec='seconds'),
         'method': method,
         'cell_type': cell_type,
@@ -237,6 +249,12 @@ def build_run_record(adata, *, method: str, sample_col: str, condition_col: str,
         'lfc_threshold': float(DEFAULT_LFC_THRESHOLD if lfc_threshold is None
                                else lfc_threshold),
     }
+    if filters is not None:
+        record['filters'] = {str(k): list(v) if isinstance(v, (tuple, list, set)) else v
+                             for k, v in filters.items()}
+    if fdr_scope is not None:
+        record['fdr_scope'] = str(fdr_scope)
+    return record
 
 
 def run_significance(record: Optional[dict]) -> tuple:

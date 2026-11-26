@@ -155,7 +155,9 @@ record, its pseudobulk count matrix and its significant genes beside the
 table; the per-cell-type run's summary table is in the counts folder.
 Each run records the significance rule it was made with (FDR and
 minimum |log2FC|, Off by default), and the DE pages, Enrichment and the
-DE figures start from that rule when the run is shown.
+DE figures start from that rule when the run is shown. Since ADR-017, a
+run also records its gene filters (`filters`) and the genes its FDR
+correction covered (`fdr_scope`).
 `kosmic/paths.py` (`de_run_dir`, `de_output_dirs`) defines the layout;
 results that earlier versions wrote directly in `statistics/` are still
 read.

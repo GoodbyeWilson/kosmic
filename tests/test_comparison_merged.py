@@ -94,3 +94,17 @@ def test_run_merged_refuses_counts_the_atlas_does_not_hold(tmp_path):
     _write_atlas(tmp_path)
     with pytest.raises(ValueError, match='decontX counts'):
         run_merged(tmp_path, _design(counts='decontX_counts'))
+
+
+def test_run_merged_uses_and_records_the_studies_filters(tmp_path):
+    _write_atlas(tmp_path)
+    filters = {'detection_min_pct': 0.0, 'detection_min_donor_frac': 0.5,
+               'detection_study_col': None, 'deseq2_independent_filter': False,
+               'deseq2_cooks_filter': True, 'filter_min_count': 10, 'filter_min_samples': 0,
+               'exclude_gene_groups': []}
+    saved = run_merged(tmp_path, _design(filters=filters, fdr_scope='genome'))
+    assert saved.matches
+    assert saved.record['filters'] == {**filters, 'detection_study_col': 'study'}
+    assert saved.record['fdr_scope'] == 'genome'
+    # Independent filtering off: no gene is marked as removed by it.
+    assert 'independent_filter' not in set(saved.read().get('filter_status', []))

@@ -8,12 +8,13 @@ fits it with the DE workspace's own batch function
 (``kosmic.de.batch.run_de_by_cell_type``) and saves it where the DE
 workspace saves the atlas's runs, so the DE workspace lists it too.
 
-The refit uses the minimum cells and counts per donor that the studies'
-runs recorded. The studies' runs do not record their gene filters
-(detection thresholds, DESeq2 independent and Cook's filtering, gene
-groups excluded), so the refit uses KOSMIC's defaults for those, as a
-new DE run does, and filters genes within each study (``study``), as the
-per-study runs filtered within their own donors.
+The refit uses the minimum cells and counts per donor and the gene filters
+(detection thresholds, DESeq2 independent and Cook's filtering, gene groups
+excluded) that the studies' runs recorded, and corrects over the committed
+gene sets when the studies did. Gene filters are applied within each study
+(``study``), as each per-study run filtered over its own donors. Runs saved
+before the filters were recorded give none; the refit then uses KOSMIC's
+defaults, as a new DE run does, and :data:`DEFAULT_FILTERS_NOTE` says so.
 """
 from __future__ import annotations
 
@@ -23,11 +24,13 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from kosmic.comparison.design import ROLE_COLUMN, STUDY_COLUMN, Design, differences
+from kosmic.comparison.design import (
+    ROLE_COLUMN, STUDY_COLUMN, Design, differences, uses_gene_sets,
+)
 
 #: What the refit cannot take from the per-study records, shown with it.
 DEFAULT_FILTERS_NOTE = (
-    "The per-study runs do not record their gene filters, so merged pseudobulk "
+    "The per-study runs did not record their gene filters, so merged pseudobulk "
     "is fitted with KOSMIC's default gene filters, applied within each study.")
 
 
@@ -114,17 +117,27 @@ def run_merged(project, design: Design, *, progress: Optional[Callable[[str], No
     min_cells = DE_MIN_CELLS if design.min_cells is None else int(design.min_cells)
     min_counts = DE_MIN_COUNTS if design.min_counts is None else int(design.min_counts)
     covariates = [*design.covariates, STUDY_COLUMN]
+    filters = {**(design.filters or {}), 'detection_study_col': STUDY_COLUMN}
+    if 'exclude_gene_groups' in filters:
+        filters['exclude_gene_groups'] = tuple(filters['exclude_gene_groups'])
+    if design.filters is None:
+        say(DEFAULT_FILTERS_NOTE)
+    fdr_genes = ({g for members in design.gene_sets.values() for g in members}
+                 if design.gene_sets and uses_gene_sets(design.fdr_scope) else None)
     record = build_run_record(
         adata, method='deseq2', sample_col=design.sample_column, condition_col=ROLE_COLUMN,
         disease_label='disease', control_label='control', min_cells=min_cells,
-        min_counts=min_counts, covariates=covariates, h5ad_path=atlas)
+        min_counts=min_counts, covariates=covariates, h5ad_path=atlas,
+        pathway_gene_sets=design.gene_sets, filters=filters,
+        fdr_scope='gene_sets' if fdr_genes else 'genome')
     say(f"Fitting merged pseudobulk: {design.formula}")
     runs = run_de_by_cell_type(
         adata, design.cell_type_column, design.sample_column, ROLE_COLUMN,
         master_study_dir(project), MASTER_ACCESSION, cell_types=[design.cell_type],
         de_method='deseq2', covariates=covariates, min_cells=min_cells,
-        min_counts=min_counts, counts_layer=None, detection_study_col=STUDY_COLUMN,
-        progress_callback=say, cancelled=cancelled, run_record=record)
+        min_counts=min_counts, counts_layer=None, fdr_genes=fdr_genes,
+        pathway_gene_sets=design.gene_sets, progress_callback=say, cancelled=cancelled,
+        run_record=record, **filters)
     run = runs[0] if runs else None
     if run is None or getattr(run, 'de_path', None) is None:
         reason = (run.message if run is not None else '') or 'no result'

@@ -150,3 +150,67 @@ def test_a_saved_run_on_other_counts_or_covariates_does_not_match():
 
 def test_a_saved_run_without_a_record_does_not_match():
     assert differences(None, _design()) != []
+
+
+FILTERS = {'detection_min_pct': 0.0, 'detection_min_donor_frac': 0.5,
+           'detection_study_col': None, 'deseq2_independent_filter': True,
+           'deseq2_cooks_filter': True, 'filter_min_count': 10, 'filter_min_samples': 0,
+           'exclude_gene_groups': []}
+
+
+def _filtered(name, **changes):
+    from dataclasses import replace
+    return replace(_study(name), filters={**FILTERS, **changes}, fdr_scope='genome')
+
+
+def test_studies_that_recorded_the_same_filters_give_them_to_the_design():
+    names = ['A', 'B']
+    d = resolve_design([_filtered(n) for n in names], _studies_obs(names),
+                       {n: 'sex' for n in names}, _atlas(names))
+    assert d.filters == FILTERS and d.fdr_scope == 'genome' and d.warnings == []
+
+
+def test_studies_with_different_filters_are_reported():
+    names = ['A', 'B']
+    d = resolve_design([_filtered('A'), _filtered('B', filter_min_count=5)],
+                       _studies_obs(names), {n: 'sex' for n in names}, _atlas(names))
+    assert d.filters is None
+    assert any('different gene filters' in w for w in d.warnings)
+
+
+def test_a_study_without_recorded_filters_leaves_them_unknown():
+    names = ['A', 'B']
+    d = resolve_design([_filtered('A'), _study('B')], _studies_obs(names),
+                       {n: 'sex' for n in names}, _atlas(names))
+    assert d.filters is None and d.warnings == []
+
+
+def _filtered_design():
+    d = _design()
+    d.filters, d.fdr_scope = dict(FILTERS), 'genome'
+    return d
+
+
+def test_a_saved_run_with_the_studies_filters_matches_whatever_its_study_column():
+    record = {'covariates': ['sex', 'study'], 'filters': {**FILTERS, 'detection_study_col': 'study'},
+              'fdr_scope': 'genome'}
+    assert differences(record, _filtered_design(), counts='decontX_counts') == []
+
+
+def test_a_saved_run_with_other_filters_does_not_match():
+    record = {'covariates': ['sex', 'study'], 'filters': {**FILTERS, 'filter_min_count': 5}}
+    out = differences(record, _filtered_design(), counts='decontX_counts')
+    assert out == ["The saved merged run's gene filters differ from the studies': "
+                   "filter_min_count."]
+
+
+def test_a_saved_run_without_recorded_filters_cannot_be_confirmed():
+    out = differences({'covariates': ['sex', 'study']}, _filtered_design(),
+                      counts='decontX_counts')
+    assert any('did not record its gene filters' in o for o in out)
+
+
+def test_a_saved_run_corrected_over_other_genes_does_not_match():
+    record = {'covariates': ['sex', 'study'], 'filters': FILTERS, 'fdr_scope': 'gene_sets'}
+    out = differences(record, _filtered_design(), counts='decontX_counts')
+    assert any('over the gene sets; the studies over every gene' in o for o in out)
