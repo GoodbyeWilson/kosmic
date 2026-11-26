@@ -1,5 +1,5 @@
-# Methods Comparison figure pages (ADR-017): the Venn diagram of the genes
-# two or three methods of a comparison call.
+# Methods Comparison figure pages (ADR-017): the area-proportional Venn
+# diagram of the genes two to four methods of a comparison call.
 #
 # Read the comparison through the workspace's comparison_inputs(): the
 # Methods Comparison workspace's comparison (ComparisonWorkspace.
@@ -20,19 +20,21 @@ from kosmic.gui.figure_export.shared.controls_base import FigureControls
 
 _NONE = "None"
 #: The methods the diagram opens on, when the comparison has them.
-_DEFAULT_METHODS = ('pb_merged', 'ma_reml', 'ma_vote')
+_DEFAULT_METHODS = ('pb_merged', 'ma_reml', 'ma_stouffer', 'ma_vote')
+_LABELS = ("First method:", "Second method:", "Third method:", "Fourth method:")
 
 
 class _VennControls(FigureControls):
     def __init__(self):
-        super().__init__(5, 5)
+        super().__init__(8, 5)
         self.method_boxes = []
-        for i, label in enumerate(("First method:", "Second method:", "Third method:")):
+        for label in _LABELS:
             box = QComboBox()
             box.currentIndexChanged.connect(self.changed)
             self.add_row(label, box)
             self.method_boxes.append(box)
-        self.method_boxes[2].setToolTip("None draws a diagram of two methods.")
+        for box in self.method_boxes[2:]:
+            box.setToolTip("None leaves this method out: the diagram draws two to four.")
 
     def populate(self, methods: list):
         """Offer ``methods``; keep the choices made where still offered."""
@@ -42,13 +44,14 @@ class _VennControls(FigureControls):
             prev = box.currentData()
             box.blockSignals(True)
             box.clear()
-            if i == 2:
+            if i >= 2:
                 box.addItem(_NONE, None)
             for m in methods:
                 box.addItem(METHOD_LABELS.get(m, m), m)
             index = box.findData(prev) if chose else -1
             if index < 0:
-                wanted = [m for m in _DEFAULT_METHODS if m in methods] + methods
+                wanted = list(dict.fromkeys(
+                    [m for m in _DEFAULT_METHODS if m in methods] + methods))
                 index = box.findData(wanted[i] if i < len(wanted) else None)
             box.setCurrentIndex(max(index, 0))
             box.blockSignals(False)
@@ -64,7 +67,7 @@ class _VennControls(FigureControls):
 
 
 class MethodsVennPage(FigurePage):
-    """Venn diagram of the genes two or three methods call."""
+    """Area-proportional Venn diagram of the genes two to four methods call."""
 
     TITLE = "Genes Called (Venn)"
     UNAVAILABLE_MESSAGE = ("Run a comparison in the Methods Comparison workspace to view "
@@ -96,21 +99,23 @@ class MethodsVennPage(FigurePage):
         return {m: sets[m] for m in chosen}
 
     def _title(self, bundle) -> str:
-        cell_type = bundle.params.get('cell_type') or 'Genes called'
-        return f"{cell_type}: genes called ({bundle.rule.text})"
+        cell_type = bundle.params.get('cell_type')
+        return f"{cell_type}: genes called" if cell_type else "Genes called"
 
     def _make_render_func(self):
         bundle, sets = self._bundle(), self._sets()
         if bundle is None or sets is None:
             return None
         labels = {m: METHOD_LABELS.get(m, m) for m in sets}
-        n, title = bundle.n_universe, self._title(bundle)
+        n, title, rule = bundle.n_universe, self._title(bundle), bundle.rule.text
         figsize = self._controls.figsize.get_figsize()
         font_sizes = self._font_sizes()
 
-        def _render(sets=sets, labels=labels, n=n, title=title, sz=figsize, f=font_sizes):
+        def _render(sets=sets, labels=labels, n=n, title=title, rule=rule, sz=figsize,
+                    f=font_sizes):
             from kosmic.visualisation.comparison.venn import create_venn_plot
-            return create_venn_plot(sets, labels, n, title=title, figsize=sz, font_sizes=f)
+            return create_venn_plot(sets, labels, n, title=title, rule_text=rule,
+                                    figsize=sz, font_sizes=f)
         return _render
 
     def _export_companions(self, fig_path: Path) -> list[Path]:

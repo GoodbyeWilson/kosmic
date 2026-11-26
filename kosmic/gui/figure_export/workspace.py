@@ -324,12 +324,15 @@ class FigureExportWorkspace(QWidget):
         nav_lay.addWidget(self._study_label)
         self._show_study()
 
-        switch = QHBoxLayout()
+        # Three chips to a row: four do not fit the 220 px pane. Each row
+        # is its own layout, so a long label does not widen a column.
+        switch = QVBoxLayout()
         switch.setSpacing(6)
+        rows: list[QHBoxLayout] = []
         self._section_group = QButtonGroup(self)
         self._section_group.setExclusive(True)
         self._section_buttons: dict[str, QPushButton] = {}
-        for key, label, _groups in _SECTIONS:
+        for i, (key, label, _groups) in enumerate(_SECTIONS):
             btn = QPushButton(label)
             btn.setProperty("role", "filter_chip")
             btn.setCheckable(True)
@@ -337,8 +340,13 @@ class FigureExportWorkspace(QWidget):
             btn.clicked.connect(lambda _c=False, k=key: self.show_section(k))
             self._section_group.addButton(btn)
             self._section_buttons[key] = btn
-            switch.addWidget(btn)
-        switch.addStretch(1)
+            if i % 3 == 0:
+                rows.append(QHBoxLayout())
+                rows[-1].setSpacing(6)
+                switch.addLayout(rows[-1])
+            rows[-1].addWidget(btn)
+        for row in rows:
+            row.addStretch(1)
         nav_lay.addLayout(switch)
 
         # The run the DE or Meta figures draw (two runs or more).
@@ -408,7 +416,7 @@ class FigureExportWorkspace(QWidget):
         if self._section == 'compare':
             from kosmic.meta_analysis.io import selection_label
             if self._held_comparison() is not None:
-                choices.append(("Comparison in the Methods Comparison workspace", None))
+                choices.append(("Methods Comparison workspace", None))
             choices += [(selection_label(sel), folder)
                         for sel, folder in self.comparison_runs()]
             chosen = self._comparison_folder

@@ -29,22 +29,47 @@ def test_venn_regions_name_the_methods_that_call_each_gene():
     assert list(venn_regions(SETS, universe={'A', 'E'})['gene']) == ['A', 'E']
 
 
-@pytest.mark.parametrize('n', [2, 3])
-def test_the_venn_plot_draws_each_region_and_the_note(n):
+FOUR = {'a': set('ABCDEFGH'), 'b': set('ABCDE'), 'c': set('ABXY'), 'd': set('AZ')}
+
+
+@pytest.mark.parametrize('n', [2, 3, 4])
+def test_the_venn_plot_writes_each_non_empty_region_and_a_key(n):
     from kosmic.visualisation.comparison.venn import create_venn_plot
-    sets = dict(list(SETS.items())[:n])
-    fig = create_venn_plot(sets, {m: m.upper() for m in sets}, n_compared=10, title='T')
-    texts = [t.get_text() for t in fig.axes[0].texts]
-    assert len(texts) == n + (2 ** n - 1)        # a label per circle, a count per region
-    assert 'PB_MERGED\n4 genes' in texts
-    assert any('10 genes compared; 5 called by none' in t.get_text() for t in fig.texts)
-    assert not any('$' in t for t in texts)
+    sets = dict(list(FOUR.items())[:n])
+    fig = create_venn_plot(sets, {m: m.upper() for m in sets}, n_compared=20, title='T',
+                           rule_text='adjusted p < 0.05')
+    texts = sorted(t.get_text() for t in fig.axes[0].texts)
+    regions = [v for v in region_counts(sets).values() if v]
+    assert len(texts) <= len(regions)            # a region too thin to draw has no label
+    assert set(texts) <= {f"{v:,}" for v in regions}
+    legend = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    assert legend[0] == 'A (8 genes)' and len(legend) == n
+    note = next(t.get_text() for t in fig.texts if t.get_text().startswith('Called'))
+    assert 'Called: adjusted p < 0.05.' in note and '20 genes compared' in note
+    assert not any('$' in t for t in texts + legend)
 
 
-def test_the_venn_plot_needs_two_or_three_sets():
+def test_the_shapes_are_drawn_in_proportion_to_the_genes_called():
+    from kosmic.visualisation.venn_layout import venn_layout
+    geom, _ = venn_layout({'big': set(range(400)), 'small': set(range(100))})
+    (_, _, r_big, _, _), (_, _, r_small, _, _) = geom
+    assert (r_big / r_small) ** 2 == pytest.approx(4.0)
+
+
+def test_each_count_is_written_inside_its_own_region():
+    # A crescent's mean point lies in the circle it wraps; the label must not.
+    from kosmic.visualisation.comparison.venn import _inside, region_positions
+    from kosmic.visualisation.venn_layout import venn_layout
+    geom, _ = venn_layout({'outer': set(range(1000)), 'inner': set(range(500))})
+    x, y = region_positions(geom, 2)[(1, 0)]
+    inside = _inside(geom, np.array([x]), np.array([y]))[:, 0]
+    assert inside.tolist() == [True, False]
+
+
+def test_the_venn_plot_needs_two_to_four_sets():
     from kosmic.visualisation.comparison.venn import create_venn_plot
     assert create_venn_plot({'a': {'A'}}) is None
-    assert create_venn_plot({k: {'A'} for k in 'abcd'}) is None
+    assert create_venn_plot({k: {'A'} for k in 'abcde'}) is None
 
 
 def _bundle(folder=None):
@@ -93,13 +118,14 @@ def test_the_venn_page_draws_the_chosen_methods_and_exports_its_regions(qapp, tm
     page = next(p for p in ws._pages if isinstance(p, MethodsVennPage))
     assert page.dependencies_met()
     page._controls.populate(page._bundle().methods)
+    # The defaults present in this comparison (it has no Stouffer).
     assert page._controls.chosen() == ['pb_merged', 'ma_reml', 'ma_vote']
-    box = page._controls.method_boxes[2]
-    box.blockSignals(True)
-    box.setCurrentIndex(box.findData(None))        # two methods
-    box.blockSignals(False)
+    for box in page._controls.method_boxes[2:]:
+        box.blockSignals(True)
+        box.setCurrentIndex(box.findData(None))    # two methods
+        box.blockSignals(False)
     fig = page._make_render_func()()
-    assert len(fig.axes[0].texts) == 2 + 3
+    assert len(fig.axes[0].get_legend().get_texts()) == 2
     assert page._default_export_dir() == tmp_path
     csv, params = page._export_companions(tmp_path / 'methods_venn.pdf')
     regions = pd.read_csv(csv)

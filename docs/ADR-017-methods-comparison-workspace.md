@@ -195,8 +195,12 @@ comparison.
   when the workspace holds one. Otherwise it reads the newest saved
   comparison, following the pattern of ADR-010.
 - A new Figures section, Methods Comparison, holds a Venn diagram of
-  the calls of two or three chosen methods. Exporting it also writes a
-  CSV of each region's genes beside the figure.
+  the calls of two to four chosen methods. It is area-proportional, with
+  the layout of the Meta-Analysis workspace's Venn diagram, moved to
+  `kosmic/visualisation/venn_layout.py` so both use it: each shape's
+  area shows how many genes a method calls, and each overlap how many it
+  shares with the others. Exporting it also writes a CSV of each
+  region's genes beside the figure.
 - An UpSet plot of all five methods is planned. The saved table already
   holds the data it needs.
 

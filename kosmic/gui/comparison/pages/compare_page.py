@@ -17,7 +17,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QHeaderView, QListWidget,
-    QListWidgetItem, QSpinBox, QTableWidgetItem,
+    QFrame, QListWidgetItem, QScrollArea, QSpinBox, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from kosmic.comparison.agreement import RULE_LABELS, RULES, Rule, summary
@@ -117,6 +117,7 @@ class ComparePage(SidebarPage):
         self.selection_combo.currentIndexChanged.connect(self._on_selection_changed)
         sel.add_widget(self.selection_combo)
         self.study_list = QListWidget()
+        self.study_list.setMinimumHeight(110)   # about four studies; the sidebar scrolls
         self.study_list.setMaximumHeight(130)
         self.study_list.itemChanged.connect(self._on_studies_changed)
         sel.add_widget(self.study_list)
@@ -164,8 +165,19 @@ class ComparePage(SidebarPage):
         self._sync_rule_inputs()
 
     def _build_content(self):
-        lay = self.content_layout
+        # The tables are as tall as their rows, so the content is taller
+        # than a short window (or one with the output panel raised); it
+        # scrolls rather than being squeezed until its widgets overlap.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setProperty("role", "thin_scroll")
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 8, 0)
         lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setWidget(inner)
+        self.content_layout.addWidget(scroll)
         self.intro = HintLabel("")
         lay.addWidget(self.intro)
         lay.addWidget(SectionHeader("Merged pseudobulk design"))

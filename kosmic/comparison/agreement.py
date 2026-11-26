@@ -155,7 +155,7 @@ def summary(table: pd.DataFrame) -> pd.DataFrame:
 def venn_regions(sets: dict, universe=None) -> pd.DataFrame:
     """Every called gene with the methods that call it, for a Venn diagram.
 
-    ``sets`` maps each method to its called genes (two or three methods, in
+    ``sets`` maps each method to its called genes (two to four methods, in
     drawing order). Returns one row per gene called by at least one of them:
     ``gene``, ``region`` (the methods that call it, joined with ' + ') and a
     boolean column per method. With ``universe``, a gene outside it is left
