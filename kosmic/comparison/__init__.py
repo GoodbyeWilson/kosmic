@@ -9,4 +9,7 @@ that do not depend on Qt:
 - ``design``: the merged model's design, built from the per-study DE run
   records, and the checks that it matches them.
 - ``merged``: the atlas's saved merged pseudobulk run, or a new fit of it.
+- ``ma``: REML, SumRank, Stouffer and vote counting, read from a saved run
+  or pooled again with one set of settings.
+- ``standard``: one long table for every method's result.
 """
