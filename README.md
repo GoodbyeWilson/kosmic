@@ -67,8 +67,10 @@ importing their data, and reviewing how far each has progressed.
 annotated cell populations, and can create a new study containing a
 cell type of interest for downstream analysis. **Differential
 Expression** compares two conditions within a cell type for one study.
-**Meta-Analysis** combines those results across studies. **Figures**
-exports figures from any of them.
+**Meta-Analysis** combines those results across studies. **Methods
+Comparison** compares the genes a meta-analysis calls with those called
+by one DESeq2 model fitted to the donors of every study in the shared
+atlas (merged pseudobulk). **Figures** exports figures from any of them.
 
 Studies are kept separate deliberately. A meta-analysis asks whether
 independent studies agree; merging their cells into one experiment
@@ -84,7 +86,7 @@ studies, annotated once, and the labels transferred back to each study.
 - **Discovery mode** — genome-wide meta-analysis to find the genes that
   are consistently differentially expressed in a cell type across
   studies, followed by enrichment analysis of the pooled result.
-- **Methods comparison** — run every pooling method on the same studies
+- **Consensus Overview** — run every pooling method on the same studies
   and compare their behaviour and reproducibility by leave-one-study-out
   replication.
 

@@ -1,4 +1,4 @@
-# Methods Comparison Results
+# Consensus Overview results
 
 Side-by-side results across methods.
 

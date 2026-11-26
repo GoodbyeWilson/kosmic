@@ -666,7 +666,7 @@ class GeneMAPage(SidebarTabbedPage):
         Set 'hypothesis' or 'exploratory' (Discovery) mode.
 
         Called by the workspace based on the user's mode-chooser selection.
-        Methods Comparison is a separate workflow with its own pages, not
+        Consensus Overview is a separate workflow with its own pages, not
         a mode handled here.
         """
         previous = self._mode

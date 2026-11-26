@@ -221,7 +221,7 @@ class MetaAnalysisWorkspace(QWidget):
                 ),
                 ModeOption(
                     key="comparison", icon_name="bar-chart-2",
-                    title="Methods Comparison",
+                    title="Consensus Overview",
                     subtitle=("Benchmark methods. Which method to trust on "
                               "its own? Is the consensus worth doing? "
                               "Per-method LOO, AUC, meta-discovery yield, "
@@ -277,14 +277,14 @@ class MetaAnalysisWorkspace(QWidget):
         if initial_pathways:
             self._gene_ma_page.set_hypothesis_pathways(initial_pathways)
 
-        # Page 6: Individual Methods (Methods Comparison mode, step 1)
+        # Page 6: Individual Methods (Consensus Overview mode, step 1)
         from kosmic.gui.meta_analysis.pages.methods_comparison_page import (
             MethodsComparisonPage)
         self._methods_comparison_page = MethodsComparisonPage()
         self._methods_comparison_page.log_message.connect(self._log)
         self._master_stack.addWidget(self._methods_comparison_page)
 
-        # Page 7: Consensus Evaluation (Methods Comparison mode, step 2)
+        # Page 7: Consensus Evaluation (Consensus Overview mode, step 2)
         from kosmic.gui.meta_analysis.pages.methods_comparison_results_page import (
             MethodsComparisonResultsPage)
         self._methods_comparison_results_page = MethodsComparisonResultsPage()
@@ -1060,7 +1060,7 @@ class MetaAnalysisWorkspace(QWidget):
         Parameter is a STACK page index (not sidebar step index):
         0=Set Directory, 1=Import Studies, 2=Choose Mode,
         3=Pathway Explorer, 4=Pathway MA, 5=Gene MA (Consensus),
-        6=Methods Comparison, 7=Methods Comparison Results.
+        6=Individual Methods, 7=Consensus Evaluation (Consensus Overview).
         """
         n_ds = len(self.datasets)
 

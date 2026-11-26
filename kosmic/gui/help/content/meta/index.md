@@ -1,6 +1,6 @@
 # Meta-Analysis
 
-Pool DE results across multiple studies. Three modes: discovery, hypothesis (pre-specified pathways), and methods comparison.
+Pool DE results across multiple studies. Three modes: discovery, hypothesis (pre-specified pathways), and Consensus Overview (the meta-analysis methods compared with each other).
 
 ## Pages in this workspace
 

@@ -112,8 +112,8 @@ nav:
       - Discovery Meta-Analysis: meta/gene_ma.md
       - Pathway meta-analysis: meta/pathway_ma.md
       - Pathway explorer: meta/pathway_explorer.md
-      - Methods Comparison: meta/methods_comparison.md
-      - Methods Comparison results: meta/methods_comparison_results.md
+      - Consensus Overview: meta/methods_comparison.md
+      - Consensus Overview results: meta/methods_comparison_results.md
       - Statistical approach: meta/statistics.md
   - Methods Comparison:
       - comparison/index.md

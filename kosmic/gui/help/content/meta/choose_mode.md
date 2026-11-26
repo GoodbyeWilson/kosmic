@@ -1,6 +1,6 @@
 # Choose Mode
 
-Discovery (genome-wide), hypothesis (pre-specified pathways), or methods comparison.
+Discovery (genome-wide), hypothesis (pre-specified pathways), or Consensus Overview (the meta-analysis methods compared with each other).
 
 ## Discovery mode
 
@@ -10,7 +10,7 @@ Discovery (genome-wide), hypothesis (pre-specified pathways), or methods compari
 
 *TODO.*
 
-## Methods comparison
+## Consensus Overview
 
 *TODO.*
 

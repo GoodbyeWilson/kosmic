@@ -4,7 +4,7 @@
 #   'get_analytical_pool_fn(key, min_studies)' returns a callable that
 #   runs one pooling method. Used by both single-method and consensus
 #   gene-level MA ('gene_ma_page'), pathway MA ('pathway_ma_page'),
-#   methods comparison ('methods_comparison_page'), and LOO validation.
+#   the Consensus Overview mode ('methods_comparison_page'), and LOO validation.
 #   Every result carries the per-study direction columns added by
 #   'kosmic.meta_analysis.direction.annotate_direction' (n_up, n_down,
 #   direction_conflict), whichever method produced it.

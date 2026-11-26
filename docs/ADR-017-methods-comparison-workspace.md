@@ -202,6 +202,10 @@ comparison.
 
 ### 7. The Meta-Analysis Methods Comparison mode remains
 
+Amendment (2026-11-26): that mode is renamed Consensus Overview, so the
+two places no longer share a name. Its code and help file names are
+unchanged.
+
 That mode compares meta-analysis methods with each other, using
 leave-one-out replication, held-out AUC and combinations of methods. The
 new workspace answers a different question. The two overlap for the

@@ -16,10 +16,10 @@ The workspace needs an open project with a shared atlas, made with
 *Combine* on the Project page, and a DESeq2 run per cell type in two or more
 studies, made on the same counts.
 
-The Meta-Analysis workspace also has a mode named
-[Methods Comparison](../meta/methods_comparison.md). That mode compares the
-meta-analysis methods with each other, using leave-one-out replication and
-held-out AUC, and does not include merged pseudobulk.
+The Meta-Analysis workspace's [Consensus Overview](../meta/methods_comparison.md)
+mode is different: it compares the meta-analysis methods with each other,
+using leave-one-out replication and held-out AUC, and does not include
+merged pseudobulk.
 
 ## Choosing what to compare
 
