@@ -97,6 +97,7 @@ class NavigationRail(QWidget):
         ("scrna",   "umap",          "scRNA",                    True),
         ("de",      "volcano",       "Differential\nExpression", True),
         ("meta",    "forest-plot",   "Meta",                     True),
+        ("compare", "bar-chart-2",   "Methods\nComparison",     True),
         ("figures", "image",         "Figure\nExport",           True),
     )
 

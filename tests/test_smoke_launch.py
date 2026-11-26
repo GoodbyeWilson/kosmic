@@ -60,6 +60,17 @@ _SMOKE_SCRIPT = textwrap.dedent(
     assert window._de_workspace is not None, "DE not built"
     assert window._meta_workspace is not None, "Meta not built"
     assert window._figures_workspace is not None, "Figures not built"
+    assert window._comparison_workspace is not None, "Methods Comparison not built"
+
+    # Each mode's stack page holds that mode's workspace.
+    for mode, ws in (('meta', window._meta_workspace),
+                     ('compare', window._comparison_workspace),
+                     ('figures', window._figures_workspace)):
+        page = window._stack.widget(window._MODE_DISPATCH[mode][0])
+        assert page is ws or page.isAncestorOf(ws), mode
+    # The rail lists Methods Comparison between Meta and Figure Export.
+    keys = [k for k, *_ in window._nav_rail._MODE_ITEMS]
+    assert keys.index('compare') == keys.index('meta') + 1 == keys.index('figures') - 1
 
     window.close()
     # Flush explicitly before the forced exit -- stdout is captured by the

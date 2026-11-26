@@ -89,6 +89,7 @@ PAGE_FIGURES = 2
 PAGE_META = 3
 PAGE_PROJECT = 4
 PAGE_HOME = 5
+PAGE_COMPARISON = 6
 
 
 # Our main app. All other files moved out of here to clean up
@@ -109,12 +110,14 @@ class AppWindow(QMainWindow):
         self._de_loaded = False
         self._figures_loaded = False
         self._meta_loaded = False
+        self._comparison_loaded = False
         self._project_loaded = False
         self._home_loaded = False
         self._scrna_workspace = None
         self._de_workspace = None
         self._figures_workspace = None
         self._meta_workspace = None
+        self._comparison_workspace = None
         self._project_workspace = None
         self._home_workspace = None
 
@@ -407,6 +410,7 @@ class AppWindow(QMainWindow):
             PAGE_DE:      "de/index",
             PAGE_FIGURES: "figures/index",
             PAGE_META:    "meta/index",
+            PAGE_COMPARISON: "comparison/index",
         }.get(idx, "index")
 
     def _current_page_widget(self):
@@ -487,10 +491,12 @@ class AppWindow(QMainWindow):
                     "_load_figures_mode", "_activate_figures"),
         "meta":    (PAGE_META,    "Meta-Analysis", "_meta_loaded",
                     "_load_meta_mode", "_activate_meta"),
+        "compare": (PAGE_COMPARISON, "Methods Comparison", "_comparison_loaded",
+                    "_load_comparison_mode", "_activate_comparison"),
     }
 
     # Workbenches that require state set on the Project page first.
-    _REQUIRES_PROJECT = {"meta"}                         # needs project dir
+    _REQUIRES_PROJECT = {"meta", "compare"}              # needs project dir
     _REQUIRES_ACTIVE_STUDY = {"scrna", "de", "figures"}  # needs active study
 
     def _on_mode_selected(self, mode: str):
@@ -624,6 +630,14 @@ class AppWindow(QMainWindow):
         self._explorer.set_active_step(ws.current_stack_page())
         if ws.project_folder:
             self._explorer.set_root(ws.project_folder)
+        ws.on_activated()
+
+    def _activate_comparison(self):
+        ws = self._comparison_workspace
+        if not self._activate_workspace_common(PAGE_COMPARISON, ws, []):
+            return
+        if ws.project_folder:
+            self._explorer.set_root(str(ws.project_folder))
         ws.on_activated()
 
     def _sync_scrna_to_de(self, ws, scrna) -> None:
@@ -1043,6 +1057,31 @@ class AppWindow(QMainWindow):
 
         self._swap_placeholder_into_stack("meta", page)
         self._meta_loaded = True
+
+    def _load_comparison_mode(self):
+        try:
+            from kosmic.gui.comparison.workspace import ComparisonWorkspace
+            workspace = ComparisonWorkspace()
+            self._connect_workspace_signals(
+                workspace, progress_bar=self._explorer.progress_panel.progress_bar)
+            self._comparison_workspace = workspace
+            self.project_changed.connect(self._sync_comparison_to_active_project)
+            if self.current_project_dir is not None:
+                workspace.set_project_directory_external(str(self.current_project_dir))
+            page = QWidget()
+            borderless(QVBoxLayout, page).addWidget(workspace)
+        except Exception as e:
+            page = self._build_error_page(
+                f"Methods Comparison module could not be loaded:\n{e}")
+
+        self._swap_placeholder_into_stack("compare", page)
+        self._comparison_loaded = True
+
+    def _sync_comparison_to_active_project(self, project_path):
+        """Retarget the Methods Comparison workspace when the project changes."""
+        if project_path is None or self._comparison_workspace is None:
+            return
+        self._comparison_workspace.set_project_directory_external(str(project_path))
 
     def _sync_meta_to_active_project(self, project_path):
         """Retarget the Meta workspace whenever the active project changes."""

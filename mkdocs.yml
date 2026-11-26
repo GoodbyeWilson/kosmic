@@ -115,6 +115,8 @@ nav:
       - Methods Comparison: meta/methods_comparison.md
       - Methods Comparison results: meta/methods_comparison_results.md
       - Statistical approach: meta/statistics.md
+  - Methods Comparison:
+      - comparison/index.md
   - Figures:
       - figures/index.md
       - Dataset summary: figures/dataset_summary.md
