@@ -150,3 +150,40 @@ def summary(table: pd.DataFrame) -> pd.DataFrame:
                      'n_up': int((called['direction'] > 0).sum()),
                      'n_down': int((called['direction'] < 0).sum())})
     return pd.DataFrame(rows, columns=['method', 'n_tested', 'n_called', 'n_up', 'n_down'])
+
+
+def venn_regions(sets: dict, universe=None) -> pd.DataFrame:
+    """Every called gene with the methods that call it, for a Venn diagram.
+
+    ``sets`` maps each method to its called genes (two or three methods, in
+    drawing order). Returns one row per gene called by at least one of them:
+    ``gene``, ``region`` (the methods that call it, joined with ' + ') and a
+    boolean column per method. With ``universe``, a gene outside it is left
+    out.
+    """
+    methods = list(sets)
+    genes = sorted(set().union(*sets.values()))
+    if universe is not None:
+        genes = [g for g in genes if g in universe]
+    rows = []
+    for g in genes:
+        inside = [m for m in methods if g in sets[m]]
+        rows.append({'gene': g, 'region': ' + '.join(inside),
+                     **{m: g in sets[m] for m in methods}})
+    return pd.DataFrame(rows, columns=['gene', 'region', *methods])
+
+
+def region_counts(sets: dict) -> dict:
+    """``{tuple of membership flags: number of genes}`` for every region of
+    the methods in ``sets``, (1, 0), (0, 1), (1, 1) and so on, the empty
+    region left out."""
+    from itertools import product
+    methods = list(sets)
+    every = set().union(*sets.values())
+    out = {}
+    for flags in product((0, 1), repeat=len(methods)):
+        if not any(flags):
+            continue
+        out[flags] = sum(1 for g in every
+                         if all((g in sets[m]) == bool(f) for m, f in zip(methods, flags)))
+    return out

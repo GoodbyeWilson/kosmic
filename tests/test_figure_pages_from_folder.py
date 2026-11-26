@@ -71,7 +71,7 @@ def test_every_scrna_and_de_figure_draws_from_the_folder(app, study):
     assert ws.scrna_ws is None and ws.de_ws is None
     drawn, unavailable = [], []
     for section, _group, page in ws._entries:
-        if section == 'meta':
+        if section in ('meta', 'compare'):     # project figures, not a study's
             continue
         if not ws._available(page):
             unavailable.append(page.TITLE)

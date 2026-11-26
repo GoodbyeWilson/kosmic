@@ -605,6 +605,7 @@ class AppWindow(QMainWindow):
         ws.set_scrna_workspace(self._scrna_workspace)
         ws.set_de_workspace(self._de_workspace)
         ws.set_meta_workspace(self._meta_workspace)
+        ws.set_comparison_workspace(self._comparison_workspace)
         # The scRNA and DE figures show the active study, or the study
         # 'Open in Figures' named, read from the workspace that holds it or
         # else from its folder (ADR-014).
@@ -612,11 +613,12 @@ class AppWindow(QMainWindow):
         self._figures_study_request = None
         ws.set_project(self.current_project_dir)
         ws.set_study(requested or self.current_study_path)
-        # Coming from scRNA, DE or Meta opens that section of the figure
-        # list ('Open in Figures' the scRNA one); from elsewhere the last
-        # section shown stays.
+        # Coming from scRNA, DE, Meta or Methods Comparison opens that
+        # section of the figure list ('Open in Figures' the scRNA one);
+        # from elsewhere the last section shown stays.
         ws.show_section("scrna" if requested else
-                        {PAGE_SCRNA: "scrna", PAGE_DE: "de", PAGE_META: "meta"}
+                        {PAGE_SCRNA: "scrna", PAGE_DE: "de", PAGE_META: "meta",
+                         PAGE_COMPARISON: "compare"}
                         .get(getattr(self, '_page_before_switch', None)))
         ws.on_activated()
 
