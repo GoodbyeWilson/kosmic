@@ -346,6 +346,7 @@ _STAGE_TITLES = {
     'meta_enrichment': 'Pathway enrichment of the pooled genes',
     'meta_reproducibility': 'Cross-dataset reproducibility',
     'meta_loo': 'Leave-one-study-out validation',
+    'methods_comparison': 'Comparison of merged pseudobulk with meta-analysis',
 }
 
 

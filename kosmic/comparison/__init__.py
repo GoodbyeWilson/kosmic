@@ -12,4 +12,6 @@ that do not depend on Qt:
 - ``ma``: REML, SumRank, Stouffer and vote counting, read from a saved run
   or pooled again with one set of settings.
 - ``standard``: one long table for every method's result.
+- ``agreement``: the call rules, the shared genes and the pairwise measures.
+- ``bundle``: the comparison as saved in the project and read by Figures.
 """
