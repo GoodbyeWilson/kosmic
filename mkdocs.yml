@@ -140,5 +140,6 @@ nav:
       - Meta-analysis forest plot: figures/meta_forest.md
       - Leave-one-out sensitivity: figures/meta_loo.md
       - Study agreement (vote levels): figures/meta_vote_levels.md
+      - Genes called (Venn): figures/methods_venn.md
   - Glossary: glossary.md
   - Developer reference: reference/

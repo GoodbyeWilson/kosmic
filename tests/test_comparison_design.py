@@ -214,3 +214,11 @@ def test_a_saved_run_corrected_over_other_genes_does_not_match():
     record = {'covariates': ['sex', 'study'], 'filters': FILTERS, 'fdr_scope': 'gene_sets'}
     out = differences(record, _filtered_design(), counts='decontX_counts')
     assert any('over the gene sets; the studies over every gene' in o for o in out)
+
+
+def test_studies_the_meta_analysis_leaves_out_are_reported():
+    d = resolve_design([_study('A')], _studies_obs(['A']), {'A': 'sex'}, _atlas(['A', 'B']))
+    assert any('including studies the meta-analysis does not pool: B' in w for w in d.warnings)
+    d = resolve_design([_study(n) for n in 'ABC'], _studies_obs(list('ABC')),
+                       {n: 'sex' for n in 'ABC'}, _atlas(['A', 'B']))
+    assert any('no donors of this cell type from: C' in w for w in d.warnings)

@@ -149,6 +149,9 @@ comparison's parameters. No covariate is removed without a warning.
 - The studies' sample columns differ from the atlas's.
 - A covariate is missing from the atlas, varies within one study only,
   or is confounded with study or condition.
+- The atlas holds donors of studies the meta-analysis does not pool, or a
+  pooled study has no donors of the cell type in the atlas. Merged
+  pseudobulk is fitted to the atlas's studies.
 
 ### 5. The comparison
 

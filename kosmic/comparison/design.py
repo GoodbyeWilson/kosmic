@@ -317,6 +317,19 @@ def resolve_design(studies: list, study_obs: dict, sex_columns: dict,
     donors = _donor_table(atlas_obs, atlas_covs, ct_col, ref.cell_type if ref else None)
     for cov in atlas_covs:
         warnings.extend(_confounding_warnings(donors, cov))
+    # Merged pseudobulk is fitted to every study of the atlas; the
+    # meta-analysis methods pool the studies chosen.
+    if STUDY_COLUMN in donors and studies:
+        atlas_studies = set(donors[STUDY_COLUMN])
+        chosen = {s.study for s in studies}
+        if atlas_studies - chosen:
+            warnings.append("Merged pseudobulk is fitted to every study in the atlas, "
+                            "including studies the meta-analysis does not pool: "
+                            + ', '.join(sorted(atlas_studies - chosen)) + '.')
+        if chosen - atlas_studies:
+            warnings.append("The atlas has no donors of this cell type from: "
+                            + ', '.join(sorted(chosen - atlas_studies))
+                            + '; merged pseudobulk leaves them out.')
 
     return Design(covariates=atlas_covs, mapping=mapping, sample_column=SAMPLE_COLUMN,
                   cell_type_column=ct_col, cell_type=ref.cell_type if ref else None,

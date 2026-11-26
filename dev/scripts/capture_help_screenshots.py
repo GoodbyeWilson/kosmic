@@ -80,6 +80,45 @@ def _de_gene_de(window, study: str):
     ws.switch_tab(2)
 
 
+def _comparison(window, cell_type: str = 'Ventricular Cardiomyocyte'):
+    """Methods Comparison on the first selection of 'cell_type'. When the
+    project has no saved comparison for it, one is run (and saved in the
+    project's methods_comparison/ folder); a saved merged run whose design
+    differs is left alone, since that would ask Resolve or Run anyway."""
+    window._nav_rail.set_active("compare")
+    window._on_mode_selected("compare")
+    page = window._comparison_workspace.compare_page
+    labels = [s.cell_type for s in page.selections]
+    if cell_type in labels:
+        page.selection_combo.setCurrentIndex(labels.index(cell_type))
+    _wait_workers(page)
+    if (window._comparison_workspace.bundle is None and page.checked is not None
+            and not page.checked.needs_choice):
+        page._on_run()
+        _wait_workers(page)
+
+
+def _figures_venn(window):
+    """The Venn diagram of the comparison shown in Methods Comparison."""
+    from kosmic.gui.figure_export.pages.methods_comparison import MethodsVennPage
+    window._nav_rail.set_active("figures")
+    window._on_mode_selected("figures")
+    ws = window._figures_workspace
+    ws.show_section("compare")
+    page = next(p for p in ws._pages if isinstance(p, MethodsVennPage))
+    ws._stack.setCurrentWidget(page)
+    page.on_activated()
+
+
+def _wait_workers(page):
+    app = QApplication.instance()
+    for worker in list(page._workers):
+        while worker.isRunning():
+            app.processEvents()
+            time.sleep(0.05)
+    app.processEvents()
+
+
 CAPTURES = [
     # section, image name, setup(window), extra settle seconds
     ("project", "step1_project",  lambda w: _project_step(w, 0), 0),
@@ -99,6 +138,8 @@ CAPTURES = [
     ("scrna",   "subset",       lambda w: _scrna_tab(w, "GSE292067", 7), 2),
     ("de",      "setup",          lambda w: _de_setup(w, "GSE292067"), 15),
     ("de",      "results_for",    lambda w: _de_gene_de(w, "GSE292067"), 10),
+    ("comparison", "compare",     lambda w: _comparison(w), 2),
+    ("figures", "methods_venn",   lambda w: _figures_venn(w), 4),
 ]
 
 
