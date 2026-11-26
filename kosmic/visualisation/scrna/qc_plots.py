@@ -238,14 +238,16 @@ def create_cell_filtering_plot(
     """Flow chart of the cells left after each filtering step.
 
     The cells remaining after each step are in a box down the left; between
-    two boxes an arrow leads down, and a box beside it names the step and
-    the cells it removed (a CONSORT-style diagram).
+    two boxes an arrow leads down, and a box beside it names the step, what
+    it kept or removed (its ``'detail'``, wrapped to the box) and the cells
+    it removed (a CONSORT-style diagram).
 
     Parameters
     ----------
     steps : list of dict
-        ``{'step', 'n_cells', 'n_removed'}`` per step, the starting cells
-        first, as ``kosmic.provenance.cell_filtering_steps`` returns them.
+        ``{'step', 'detail', 'n_cells', 'n_removed'}`` per step, the
+        starting cells first, as ``kosmic.provenance.cell_filtering_steps``
+        returns them; ``'detail'`` may be missing or empty.
     figsize, font_sizes
         Figure size in inches and the font-size dict
         (``default_font_sizes()`` when None).
@@ -255,6 +257,8 @@ def create_cell_filtering_plot(
     matplotlib.figure.Figure or None
         ``None`` when there are no steps.
     """
+    import textwrap
+
     from matplotlib.patches import FancyBboxPatch
 
     from kosmic.visualisation.style import FG, FG_SECONDARY, MISSING_COLOR
@@ -265,20 +269,24 @@ def create_cell_filtering_plot(
         from kosmic.visualisation import default_font_sizes
         font_sizes = default_font_sizes()
     n = len(steps)
-    fig, ax = plt.subplots(figsize=figsize or (6.0, 1.05 * n + 0.3))
+    detailed = any(s.get('detail') for s in steps[1:])
+    fig, ax = plt.subplots(figsize=figsize or (6.0, (1.3 if detailed else 1.05) * n + 0.3))
     fig.patch.set_facecolor('white')
     ax.axis('off')
     # Data units: x 0-10, each step 2 units tall, the first at the top.
     ax.set_xlim(0, 10)
     ax.set_ylim(-0.7, 2 * (n - 1) + 0.7)
     main_x, main_w, side_x, side_w, box_h = 0.2, 3.8, 5.4, 4.4, 0.9
+    # Characters that fit across a side box: Arial averages about half an em.
+    fs = font_sizes['annotation']
+    wrap = max(20, int(fig.get_size_inches()[0] * side_w / 10 * 72 / (0.5 * fs)) - 4)
 
-    def box(x, y, w, text, fill, colour, weight='normal'):
-        ax.add_patch(FancyBboxPatch((x, y - box_h / 2), w, box_h,
+    def box(x, y, w, text, fill, colour, weight='normal', h=box_h):
+        ax.add_patch(FancyBboxPatch((x, y - h / 2), w, h,
                                     boxstyle='round,pad=0,rounding_size=0.12',
                                     facecolor=fill, edgecolor=colour, linewidth=0.8))
         ax.text(x + w / 2, y, text, ha='center', va='center', color=colour,
-                fontsize=font_sizes['annotation'], fontweight=weight)
+                fontsize=fs, fontweight=weight)
 
     tops = [2 * (n - 1 - i) for i in range(n)]
     for i, (s, y) in enumerate(zip(steps, tops)):
@@ -294,8 +302,18 @@ def create_cell_filtering_plot(
         ax.annotate('', xy=(side_x, mid), xytext=(cx, mid),
                     arrowprops={'arrowstyle': '-|>', 'color': FG_SECONDARY, 'lw': 0.8,
                                 'shrinkA': 0, 'shrinkB': 0})
-        box(side_x, mid, side_w, f"{s['step']}\n{s['n_removed']:,} removed",
-            MISSING_COLOR, FG_SECONDARY)
+        # Break the detail between its '; '-separated parts where they fit.
+        detail = []
+        for part in (s.get('detail') or '').split('; '):
+            if detail and len(detail[-1]) + 2 + len(part) <= wrap:
+                detail[-1] += '; ' + part
+            else:
+                detail.extend(textwrap.wrap(part, wrap))
+        lines = [*textwrap.wrap(s['step'], wrap), *detail, f"{s['n_removed']:,} removed"]
+        # Two lines fit the standard box; each further line adds 0.3, up to
+        # the 2-unit spacing between counts less a gap.
+        box(side_x, mid, side_w, '\n'.join(lines), MISSING_COLOR, FG_SECONDARY,
+            h=min(1.8, box_h + 0.3 * max(0, len(lines) - 2)))
     fig.tight_layout(pad=0.5)
     return fig
 
