@@ -101,6 +101,7 @@ def test_ora_runs_of_two_cell_types_are_saved_separately(ws):
 
 def test_choosing_another_run_clears_and_shows_its_saved_results(ws):
     page = ws.enrichment_page
+    page._method_combo.setCurrentIndex(page._method_combo.findData('ora'))  # GSEA is the default
     _choose(ws, 'Endothelial Cell')
     page._annotate_direction_and_display(ORA)
     assert page._table.rowCount() == 2

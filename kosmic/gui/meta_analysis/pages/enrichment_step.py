@@ -69,6 +69,7 @@ class MetaEnrichmentPage(EnrichmentPage):
     # effect resting on one noisy study does not outrank a
     # well-estimated smaller one.
     rank_column = 'z_stat'
+    RANK_CHOICES = ()     # always the pooled z
 
     def __init__(self, parent: Optional[QWidget] = None):
         self._ctx = _MetaEnrichmentContext()
@@ -102,9 +103,11 @@ class MetaEnrichmentPage(EnrichmentPage):
     def progress_bar(self, bar):
         self._ctx.progress_bar = bar
 
-    def set_meta_results(self, meta_df):
-        """Hand over the pooled table after a discovery run."""
+    def set_meta_results(self, meta_df, run_stem=None):
+        """Hand over the pooled table after a discovery run, with the file
+        stem of the saved run it is ('consensus_reml_analytical'), when known."""
         self._ctx.set_meta_results(meta_df)
+        self._run_stem = run_stem
         self._update_gene_count()
 
     # -- provenance ----------------------------------------------------
@@ -113,10 +116,6 @@ class MetaEnrichmentPage(EnrichmentPage):
     # own behaviour: the meta run writes into the project-level sidecar
     # that the Methods step renders, which the DE workspace has no part
     # in. Both finish handlers funnel through _record_enrichment.
-
-    def _on_go_finished(self, payload):
-        super()._on_go_finished(payload)
-        self._record_enrichment('go')
 
     def _on_enrichr_finished(self, payload):
         super()._on_enrichr_finished(payload)
@@ -134,7 +133,12 @@ class MetaEnrichmentPage(EnrichmentPage):
         return meta_output_dir(self._project_folder, self._selection)
 
     def _gsea_results_path(self):
-        """The selection's meta-analysis folder, one file per library.
+        """The selection's meta-analysis folder, one file per pooling run
+        and library: '<run>_gsea_<library>.csv', where <run> is the saved
+        run's stem ('consensus_reml_analytical'), so a GSEA of REML's ranking
+        and one of Stouffer's are kept apart and each is read with its own
+        run (kosmic.meta_analysis.saved). Without a known run, the name of
+        earlier versions, one file per library.
 
         The DE page's location is a study folder; the project root is not
         one, and a single file name let each library's run replace the
@@ -144,9 +148,12 @@ class MetaEnrichmentPage(EnrichmentPage):
             return None
         from kosmic.paths import meta_output_dir
         from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE
+        folder = meta_output_dir(self._project_folder, self._selection)
+        run_stem = getattr(self, '_run_stem', None)
+        if run_stem:
+            return folder / f"{run_stem}_gsea_{self._gsea_library_id}.csv"
         stem = Path(GSEA_LIBRARY_RESULTS_FILE).stem
-        return (meta_output_dir(self._project_folder, self._selection)
-                / f"{stem}_{self._gsea_library_id}.csv")
+        return folder / f"{stem}_{self._gsea_library_id}.csv"
 
     def _record_enrichment(self, method):
         """One entry per method and library in the selection's record:

@@ -82,20 +82,18 @@ def gwop_fast(datasets, r=None, min_studies=MIN_STUDIES, proportion_top=1.0,
     pathway_map: Dict[str, str] = {}
 
     for ds_i, df in enumerate(datasets):
-        pval_col = 'pvals_adj' if 'pvals_adj' in df.columns else 'pvals'
+        # Raw p-values (ADR-018); adjusted ones only for a table without them.
+        pval_col = 'pvals' if 'pvals' in df.columns else 'pvals_adj'
         if pval_col not in df.columns:
             continue
         for _, row in df.iterrows():
             gene = row['names']
             pv = row[pval_col]
             se = row.get('se', np.nan)
-            if not np.isfinite(pv) or pv <= 0:
+            if not np.isfinite(pv) or pv < 0:
                 continue
-            # Floor per-study p at 1/n_genes. No single study has more
-            # precision than its own multiple-testing burden; without this,
-            # combined-p methods produce absurdly small pooled values (1e-30)
-            # from multiplying tail artifacts.
-            pv = max(pv, 1.0 / max(len(df), 1))
+            # Used as it is; 1e-300 only keeps a p of 0 (an underflow) finite.
+            pv = max(pv, 1e-300)
             # Per-gene weight: 1/SE (or 1.0 if SE missing).
             w = 1.0 / se if np.isfinite(se) and se > 0 else 1.0
             if gene not in gene_data:

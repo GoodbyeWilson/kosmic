@@ -53,13 +53,26 @@ an alternative estimator and the Hartung–Knapp–Sidik–Jonkman
 adjustment (IntHout et al., *BMC Medical Research Methodology* 2014)
 available for small numbers of studies.
 
+I² is the share of the total variation that comes from between-study
+heterogeneity (Higgins & Thompson, *Statistics in Medicine* 2002):
+τ² / (τ² + s²), where s² is the typical within-study variance,
+(k − 1) Σw / ((Σw)² − Σw²) with w = 1 / SE². This is how metafor
+computes it for every τ² estimator. For DerSimonian–Laird it equals
+(Q − df) / Q; for REML it uses the REML τ².
+
 Two other families are implemented alongside it, because they make
 different assumptions and fail in different ways:
 
 - **Rank aggregation** — SumRank, and gwOP — which pool the *ranking*
   of genes within each study and are insensitive to effect-size scale.
 - **p-value combination** — Fisher's method (unsigned) and Stouffer's
-  (signed) — which pool evidence without an effect size.
+  (signed) — which pool evidence without an effect size. Both are the
+  textbook methods: each study's p-value is used as it is, with no floor,
+  and a study with p = 1 counts (it adds z = 0 to Stouffer's sum). The
+  only limit is numerical: a p-value that underflowed to 0 is taken as
+  10⁻³⁰⁰. With p-values as small as single-cell studies give, the pooled
+  p-value of the strongest genes can therefore be very small; their order
+  is still informative.
 - **Vote counting** — the number of studies that call a gene
   significant in the same direction. See
   [Vote counting](#vote-counting).
@@ -72,8 +85,8 @@ them. It is a consensus of statistical methods on the same data, not an
 independent validation; the Validation step's proteomics (Olink) and
 GWAS comparisons are the external evidence.
 
-With two studies, the DerSimonian–Laird and REML estimates coincide
-(τ² has one degree of freedom), Hartung–Knapp has one degree of freedom
+With two studies, τ² rests on a single difference between them and is
+very uncertain whichever estimator is used, Hartung–Knapp has one degree of freedom
 in its t-distribution and finds nothing, and the rank methods have
 almost no resolution. Two studies is the minimum that runs; five or
 more is where the method choice starts to matter.
@@ -138,17 +151,76 @@ as a disagreement between studies, not as a consistent change.
 
 ## Permutation calibration
 
-Analytical p-values from pooled single-cell DE are anticonservative
-when the per-study tests share structure. KOSMIC calibrates them by
-case–control permutation: shuffling the disease/control labels within
-each study, re-running DE and the pooling, and building an empirical
-null for each gene. Re-fitting DESeq2 per permutation is not tractable,
-so the permutation loop reuses each gene's dispersion estimated once on
-the observed data and refits only the coefficients — an accelerator
-validated head-to-head against the full model
-(`dev/simulations/validate_deseq2_fast.py`). The assumption this makes,
-that dispersions are fixed across label shuffles, is recorded here so
-that it can be stated in a methods section.
+The analytical p-value of a pooling method rests on assumptions about
+the per-study tests that pseudobulk DE does not always meet. KOSMIC can
+calibrate the p-values by case–control permutation. On each permutation
+the disease and control labels are shuffled among the donors of each
+study, the study-level DE is repeated on the shuffled labels, and the
+studies are pooled by each method. The pooled statistics of all genes and
+all permutations form one null distribution. Each observed pooled
+statistic then receives the permutation p-value
+
+(1 + *n*<sub>extreme</sub>) / (1 + *n*<sub>null</sub>),
+
+where *n*<sub>extreme</sub> is the number of null values at least as
+extreme as the observed one and *n*<sub>null</sub> is the number of null
+values. The observed statistic counts as one draw of its own null, so a
+calibrated p-value is never zero.
+
+Three engines can produce the study-level DE on the shuffled labels.
+
+**Exact.** Every permutation re-runs the study's own DE: the same
+function the DE workspace uses, the same design including the covariates
+the run adjusted for (for example `sex_inferred`), the same expression
+filter, and dispersions estimated again from the shuffled labels. Donors
+with role *exclude* are not in the analysis and do not take part. When
+the design has covariates, the roles are shuffled within each combination
+of covariate levels, so the covariate-by-condition table of every study
+is the same on every permutation. The covariates come from the
+`cov:<name>` columns of the pseudobulk file; a study whose DE run
+adjusted for covariates but whose pseudobulk file has none must have its
+DE run repeated. A permutation takes about 30–40 s per study on one core
+for a small cell type and several minutes for five studies of a large
+one, so the default is 200 permutations. Each finished permutation is
+saved in the `cc_permutation/` folder beside the results, and a stopped
+run continues from them.
+
+**Fast.** The same model, the same shuffles and the same saved
+permutations as the exact engine, with the fit of each study written as
+array code over genes (`kosmic/meta_analysis/vec_deseq2.py`). It follows
+PyDESeq2 step by step, including the dispersion fits, the Cook's outlier
+refit and the Wald test, and returns the same log2 fold changes, standard
+errors and p-values. It takes a fifth to a tenth of the time (4.9 s against 31.9 s per permutation of
+five studies on 14 cores for DCM cardiomyocytes; 30 s against 307 s per
+permutation on one core for endothelial cells), so the default is
+1,000 permutations, saved in `cc_permutation_vec/`. It uses scipy's own
+L-BFGS-B through a private scipy function; KOSMIC checks at run time that
+the function behaves as expected and, if it does not, uses the
+approximation below and says so. On the DCM endothelial cells (five
+studies, 1,000 permutations, the same shuffles for every engine) the exact
+and fast engines gave identical numbers of genes at a Benjamini–Hochberg
+FDR below 0.05 for every method, and null tail fractions equal to within
+0.00001.
+
+**Approximate.** Used only where the fast engine cannot run. The
+dispersions are estimated once on the observed labels, and each
+permutation refits a vectorised two-group model (condition only, no
+covariates) with them. A permutation of five studies takes under a second.
+Its null has heavier tails than the exact null, so it calls fewer genes. On
+the same cells:
+
+| Method | Exact | Fast | Approximate |
+|---|---|---|---|
+| DL | 4,350 | 4,350 | 4,251 |
+| REML | 4,287 | 4,287 | 4,158 |
+| SumRank, top 50% | 291 | 291 | 178 |
+| gwOP | 5,951 | 5,951 | 5,492 |
+| Fisher | 7,447 | 7,447 | 6,790 |
+| Stouffer | 6,612 | 6,612 | 6,306 |
+
+This is one cell type, so the size of the difference in another data set
+is not known. Leave-one-study-out validation repeats the pipeline once
+per study and always uses the approximate engine.
 
 ## Pathway-level testing
 
@@ -175,9 +247,8 @@ what genome-wide discovery misses:
 
 Over-representation and gene-set enrichment on discovery results use
 Fisher's exact test against the tested-gene background and preranked
-GSEA respectively; Gene Ontology enrichment uses the topGO-style *elim*
-algorithm, which removes the genes of a significant child term before
-testing its parents.
+GSEA respectively, against the chosen library (the Gene Ontology
+libraries among them).
 
 ## Gene identity across studies
 

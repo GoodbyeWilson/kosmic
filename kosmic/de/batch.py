@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,7 @@ from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD, DE_MIN_CELLS, DE_MIN_COUNTS,
 )
 from kosmic.paths import (
+    PSEUDOBULK_COVARIATE_PREFIX, PSEUDOBULK_META_COLUMNS,
     counts_folder_name, de_run_dir,
 )
 
@@ -248,6 +249,11 @@ def pseudobulk_frame(matrix: np.ndarray, sample_df: pd.DataFrame,
     canonical disease/control assignment: the consensus case-control
     permutation refuses to run without it rather than guess which raw
     condition label is the disease arm.
+
+    Every further column of 'sample_df' is a sample-level covariate of the
+    DE run (ADR-018). It is written after 'role' as 'cov:<name>', a prefix
+    no gene symbol carries, so the exact case-control permutation can fit
+    the design the run used and a reader cannot mistake it for a gene.
     """
     df = pd.DataFrame(
         matrix, columns=[str(g) for g in genes],
@@ -261,6 +267,13 @@ def pseudobulk_frame(matrix: np.ndarray, sample_df: pd.DataFrame,
         pos += 1
     if 'role' in sample_df.columns:
         df.insert(pos, 'role', [str(r) for r in sample_df['role'].values])
+        pos += 1
+    for col in sample_df.columns:
+        if col in PSEUDOBULK_META_COLUMNS:
+            continue
+        df.insert(pos, f"{PSEUDOBULK_COVARIATE_PREFIX}{col}",
+                  [str(v) for v in sample_df[col].values])
+        pos += 1
     return df
 
 
@@ -302,7 +315,10 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
     factors and dispersion trend -- and only the BH denominator narrows
     to the committed list, with results subset to it. Passing neither
     runs discovery, which is what this did for every mode before they
-    were threaded through.
+    were threaded through. A mapping of cell type -> genes gives each
+    cell type its own list (e.g. the genes each cell type's meta-analysis
+    tested, kosmic.meta_analysis.gene_set); a cell type missing from it
+    is skipped rather than run genome-wide.
 
     Extra keyword arguments are forwarded to 'run_de_pipeline', so
     detection thresholds and DESeq2 filter settings can be kept identical
@@ -358,6 +374,17 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                 plan.reason, n_cells=plan.n_cells))
             continue
 
+        type_fdr_genes = fdr_genes
+        if isinstance(fdr_genes, Mapping):
+            type_fdr_genes = fdr_genes.get(plan.cell_type)
+            if not type_fdr_genes:
+                reason = 'no FDR gene list for this cell type'
+                _progress(f"{head}: skipped -- {reason}")
+                runs.append(CellTypeRun(
+                    plan.cell_type, plan.slug, run_accession, 'skipped',
+                    reason, n_cells=plan.n_cells))
+                continue
+
         _progress(f"{head}: {plan.n_cells:,} cells, "
                   f"{plan.n_disease_samples} disease / "
                   f"{plan.n_control_samples} control donors")
@@ -374,7 +401,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                 min_cells=min_cells, min_counts=min_counts,
                 de_method=de_method, full_genome=True,
                 moderate=moderate, covariates=covariates,
-                fdr_genes=fdr_genes,
+                fdr_genes=type_fdr_genes,
                 progress_callback=lambda m, h=head: _progress(f"{h}: {m}"),
                 **pipeline_kwargs)
         except Exception as exc:  # noqa: BLE001 - one bad type must not stop the batch
@@ -435,7 +462,8 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
             pb_matrix, pb_sample_df, pb_genes = create_pseudobulk(
                 subset, gene_names, sample_col, condition_col,
                 min_cells=min_cells, min_counts=min_counts, aggregate='sum',
-                counts_layer=pipeline_kwargs.get('counts_layer'))
+                counts_layer=pipeline_kwargs.get('counts_layer'),
+                covariates=covariates)
             if pb_matrix.size:
                 run.pseudobulk_path = run_dir / f"{run_accession}_pseudobulk.csv"
                 pseudobulk_frame(pb_matrix, pb_sample_df, pb_genes).to_csv(

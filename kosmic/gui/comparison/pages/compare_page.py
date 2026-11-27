@@ -2,8 +2,9 @@
 #
 # Sidebar: the counts source and cell type, the studies, the methods and
 # the call rule, and Run comparison. Content: the merged design and its
-# warnings, where each method's result came from, a summary per method and
-# the pairwise agreement.
+# warnings, where each method's result came from, a summary per method,
+# the pairwise agreement, and the genes each group of methods calls with
+# what the studies and REML say about them.
 #
 # Choosing a selection checks its merged design in a worker (the atlas's
 # obs are read) and shows the saved comparison for it, if there is one.
@@ -153,6 +154,17 @@ class ComparePage(SidebarPage):
         self.top_spin.setValue(100)
         self.top_spin.valueChanged.connect(self._on_rule_changed)
         rule.add_row("Top N genes", self.top_spin)
+        self.fdr_compared_check = QCheckBox("FDR over the genes compared")
+        self.fdr_compared_check.setToolTip(
+            "Ticked (default): each method's raw p-values are corrected again,\n"
+            "with Benjamini-Hochberg, over the genes every method tested, so\n"
+            "every method's FDR has the same denominator. Merged pseudobulk is\n"
+            "then corrected over the same genes as the meta-analysis without\n"
+            "fitting it again.\n\n"
+            "Unticked: each method's adjusted p-value as the method gave it.")
+        self.fdr_compared_check.setChecked(True)
+        self.fdr_compared_check.toggled.connect(self._on_rule_changed)
+        rule.add_widget(self.fdr_compared_check)
         self.sidebar_layout.addWidget(rule)
 
         self.run_btn = PrimaryButton("Run comparison")
@@ -197,6 +209,19 @@ class ComparePage(SidebarPage):
         self.pairwise_table = _table(["Methods", "Both call", "Jaccard",
                                       "Same direction", "Rank correlation"])
         lay.addWidget(self.pairwise_table)
+        lay.addWidget(SectionHeader("Genes by the methods that call them"))
+        self.groups_hint = HintLabel(
+            "Each row is the genes called by exactly those methods. Same direction: "
+            "every study's log2 fold change has the same sign. Prediction interval: "
+            "REML's 95% interval for the effect in a new study, pooled ± "
+            "t(k−2)·√(SE² + τ²), lies wholly above or below 0. No single "
+            "study: no study's own FDR is below the threshold.")
+        lay.addWidget(self.groups_hint)
+        self.groups_table = _table(["Methods calling", "Genes", "Same direction",
+                                    "Median |log2FC| (REML)", "Median I\u00b2",
+                                    "Prediction interval excludes 0",
+                                    "No single study"])
+        lay.addWidget(self.groups_table)
         self.notes_label = HintLabel("")
         lay.addWidget(self.notes_label)
         self._show_bundle(None)
@@ -217,7 +242,8 @@ class ComparePage(SidebarPage):
 
     def rule(self) -> Rule:
         return Rule(self.rule_combo.currentData(), alpha=float(self.alpha_spin.value()),
-                    top_n=int(self.top_spin.value()))
+                    top_n=int(self.top_spin.value()),
+                    fdr_over='compared' if self.fdr_compared_check.isChecked() else 'own')
 
     def _busy(self) -> bool:
         return self._run_worker is not None and self._run_worker.isRunning()
@@ -419,6 +445,7 @@ class ComparePage(SidebarPage):
             self.rule_label.setText("No comparison has been run for this selection.")
             _fill(self.summary_table, [])
             _fill(self.pairwise_table, [])
+            _fill(self.groups_table, [])
             self.notes_label.setText("")
             return
         sources = bundle.params.get('sources') or {}
@@ -434,6 +461,12 @@ class ComparePage(SidebarPage):
              _num(r.jaccard, '{:.2f}'), _num(r.direction_concordance, '{:.0%}'),
              _num(r.spearman, '{:.2f}')]
             for r in bundle.pairwise.itertuples()])
+        _fill(self.groups_table, [
+            [' + '.join(METHOD_LABELS.get(m, m) for m in r.methods.split(' + ')),
+             _num(r.genes), _num(r.same_direction, '{:.0%}'),
+             _num(r.median_abs_reml_effect, '{:.2f}'), _num(r.median_i2, '{:.2f}'),
+             _num(r.pi_excludes_0, '{:.0%}'), _num(r.no_single_study, '{:.0%}')]
+            for r in bundle.method_groups.itertuples()])
         notes = [f"{METHOD_LABELS.get(m, m)}: {s.get('note', '')}" for m, s in sources.items()]
         if bundle.params.get('design_differences'):
             notes.append("Merged pseudobulk was used although its design differs: "

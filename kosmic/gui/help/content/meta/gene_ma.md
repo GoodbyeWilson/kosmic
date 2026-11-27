@@ -76,7 +76,79 @@ modifiers.
 
 ## Calibration (analytical / CC permutation)
 
-*TODO.*
+The Calibration box sets how the p-value of each pooling method is
+obtained.
+
+- **Analytical** uses each method's own p-value. Nothing is shuffled, and
+  the result is immediate.
+- **CC permutation (fast)** shuffles the disease and control labels within
+  each study and fits each study's own DE model, with its covariates, on
+  every shuffle by array code. It gives the exact permutation's results in
+  a fifth to a tenth of the time and runs 1,000 permutations. Five studies of a
+  large cell type take about an hour and a half on 14 cores. Where the scipy function
+  it relies on is not usable, KOSMIC says so and uses a quick two-group
+  approximation that calls somewhat fewer genes.
+- **CC permutation (exact, slow)** re-runs each study's own DE (PyDESeq2) on
+  every shuffle. It runs 200 permutations. A permutation takes about
+  30–40 s per study on one core for a small cell type, and several
+  minutes for a large one.
+
+During a fast or exact run the run button reads *Stop*. A stopped run keeps
+its finished permutations in the `cc_permutation_vec/` or `cc_permutation/`
+folder beside the results; running again with the same settings continues
+from them, and settings or data that differ start the permutations again.
+Both re-fit DESeq2, so with Welch input they are not available and the
+Welch engine is used. They need each study's pseudobulk file to carry the
+covariates of its DE run; a study that does not says so and asks for its
+DE run to be repeated. Leave-one-study-out validation always uses the
+approximate engine.
+
+Two settings under the box apply to a permutation only. Both are off by
+default.
+
+- **Null from the pooled gene set only.** Each shuffle still fits every
+  study on all its genes, so size factors and the dispersion trend are as
+  in the real fit. Only the genes this run pools, after the gene-set
+  settings below, enter the null distribution and are calibrated. Off,
+  every gene pooled from enough studies enters the null.
+- **Don't re-apply the CPM filter on shuffles.** Fast and exact engines
+  only. A study's saved pseudobulk holds only the genes its DE tested, so
+  its library sizes are smaller than in the real fit, and re-applying the
+  CPM rule on every shuffle drops some genes the real fit tested. Ticked,
+  the CPM rule is off on shuffles; the summed-count rule still applies,
+  since a shuffle cannot change it.
+
+The run records the engine, the number of permutations, the seed, whether
+the shuffle was within covariate groups, and the smallest calibrated
+p-value the null can give. How the permutation works and how the
+engines differ is on [Statistical approach](statistics.md#permutation-calibration).
+
+## Gene set
+
+These settings choose the genes the run pools. Each is off by default, so
+a run that sets none pools every gene the studies report. The log gives
+the number of genes each setting removed, and the run's settings file
+(`.json`) records them.
+
+- **Independent filter** drops genes whose detection rate across studies
+  is below the threshold.
+- **Current gene symbols only** keeps genes named by a current approved
+  symbol (HGNC for human, MGI for mouse). Withdrawn or renamed symbols,
+  Ensembl IDs and clone names are left out.
+- **Leave out genes merged inconsistently across studies.** Gene-name
+  harmonisation sums two features into one symbol where HGNC has merged
+  the loci, but only in studies whose annotation carried both. Such a gene
+  is a sum of two features in one study and a single feature in another.
+  This is the same check the Combine step offers when building an atlas,
+  run on the studies of this meta-analysis. Studies with no harmonisation
+  record, and tables imported from outside the project, cannot be checked;
+  the log names them.
+
+The genes every pooling method tested are saved beside the results as
+`consensus_<methods>_<calibration>_genes.csv`. A per-cell-type DE run on
+the shared atlas can correct its FDR over that list (see
+[Gene DE](../de/gene_de.md#one-gene-universe-for-both-arms)), so the
+merged analysis tests the same genes as the meta-analysis.
 
 ## Tabs: Plots / Pathway Forest / Results / Venn / Enrichment / Cross-Dataset Reproducibility / LOO Validation
 

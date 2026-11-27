@@ -10,7 +10,7 @@
 # - 'PathwayScoringWorker' -- pathway-level DE on pseudobulk scores
 # - 'PathwayDataWorker'   -- loads the gene sets a pathway run needs
 # - 'CellTypeBatchWorker' -- the per-cell-type batch run ('kosmic.de.batch')
-# - 'GOEnrichmentWorker', 'EnrichrORAWorker' -- enrichment of a gene list
+# - 'EnrichrORAWorker' -- over-representation of a gene list
 # - 'SpilloverWorker'     -- the ambient-spillover diagnostic for one pathway
 # - 'MetaExportWorker'    -- writes the DE result + pseudobulk where the
 #                            Meta-Analysis workspace will find them
@@ -448,9 +448,14 @@ class MetaExportWorker(BaseWorker):
 
     def __init__(self, adata, sample_col, condition_col, min_cells,
                  primary_method, primary_moderate, primary_de_results,
-                 output_dir, gse_id, min_counts=0, run_record=None):
+                 output_dir, gse_id, min_counts=0, run_record=None,
+                 covariates=None):
         super().__init__()
         self.run_record = run_record
+        # The sample-level covariates the DE run's design used (ADR-018);
+        # they are written into the pseudobulk file so the exact
+        # case-control permutation can fit the same model.
+        self.covariates = list(covariates or ())
         self.adata = adata
         self.sample_col = sample_col
         self.condition_col = condition_col
@@ -496,7 +501,7 @@ class MetaExportWorker(BaseWorker):
             pb_matrix, pb_sample_df, pb_genes = create_pseudobulk(
                 self.adata, gene_names, self.sample_col, self.condition_col,
                 min_cells=self.min_cells, min_counts=self.min_counts,
-                aggregate='sum')
+                aggregate='sum', covariates=self.covariates)
 
             # Drop the excluded arm. The DE dropped it, so leaving it here
             # hands the consensus case-control permutation and
@@ -631,48 +636,6 @@ class CellTypeBatchWorker(BaseWorker):
                    + (f", {n_failed} failed" if n_failed else "")
                    + (" (cancelled)" if self._cancelled else ""))
         return runs, summary, message
-
-
-class GOEnrichmentWorker(BaseWorker):
-    """
-    Worker thread for GO term enrichment (elim algorithm).
-
-    Wraps src.gene_sets.go_enrichment.run_enrichment().
-    Emits 'finished_ok' with '(results_df, message)'.
-    """
-
-    def __init__(self, study_genes, background_genes,
-                 ontology='BP', method='elim', alpha=DEFAULT_FDR,
-                 min_genes=5):
-        super().__init__()
-        self.study_genes = study_genes
-        self.background_genes = background_genes
-        self.ontology = ontology
-        self.method = method
-        self.alpha = alpha
-        self.min_genes = min_genes
-
-    def _run(self):
-        from kosmic.de.go_enrichment import run_enrichment
-
-        df = run_enrichment(
-            study_genes=self.study_genes,
-            background_genes=self.background_genes,
-            ontology=self.ontology,
-            method=self.method,
-            alpha=self.alpha,
-            min_genes=self.min_genes,
-            progress_callback=self._on_progress,
-        )
-
-        n_sig = (df['P_value'] < self.alpha).sum() if not df.empty else 0
-        message = (
-            f"GO enrichment complete: {n_sig} significant terms "
-            f"from {len(df)} tested ({self.ontology}, {self.method})")
-        return (df, message)
-
-    def _on_progress(self, msg):
-        self.progress.emit(msg)
 
 
 class EnrichrORAWorker(BaseWorker):
@@ -942,8 +905,11 @@ class FgseaWorker(BaseWorker):
     def _run(self):
         from kosmic.de.fgsea import run_fgsea
         self.progress.emit("Running preranked GSEA (fgsea)...")
+        # The pathways here are the few the user chose, so each is tested
+        # whatever its size (the 15-500 bounds are for screening a library).
+        # Unchanged from before; on the list for review.
         return run_fgsea(self._gene_de, self._gene_sets, rank_by=self._rank_by,
-                         return_details=True)
+                         min_size=3, max_size=5000, return_details=True)
 
 
 class LibraryGseaWorker(BaseWorker):
@@ -958,11 +924,15 @@ class LibraryGseaWorker(BaseWorker):
     """
 
     def __init__(self, gene_de_results, library_name,
-                 rank_by='logfoldchanges', parent=None):
+                 rank_by='logfoldchanges', min_size=None, max_size=None,
+                 parent=None):
+        from kosmic.de.fgsea import GSEA_MIN_SIZE, GSEA_MAX_SIZE
         super().__init__(parent)
         self._gene_de = gene_de_results
         self._library_name = library_name
         self._rank_by = rank_by
+        self._min_size = GSEA_MIN_SIZE if min_size is None else int(min_size)
+        self._max_size = GSEA_MAX_SIZE if max_size is None else int(max_size)
         self.library_source = None
 
     def _run(self):
@@ -978,6 +948,7 @@ class LibraryGseaWorker(BaseWorker):
             f"Preranked GSEA over {len(gene_sets):,} gene sets...")
         res, details = run_fgsea(
             self._gene_de, gene_sets, rank_by=self._rank_by,
+            min_size=self._min_size, max_size=self._max_size,
             return_details=True)
         # Keep running-enrichment curves only for the most-enriched sets (what a
         # mountain-plot figure would ever show), so a big library does not pin
@@ -987,5 +958,7 @@ class LibraryGseaWorker(BaseWorker):
                 ascending=False).index)['names'].astype(str).head(40))
             details = {k: v for k, v in details.items() if k in keep}
         n_sig = int((res['pvals_adj'] < DEFAULT_FDR).sum()) if not res.empty else 0
-        return res, details, (f"GSEA complete -- {len(res):,} gene sets, "
-                              f"{n_sig} at FDR < {DEFAULT_FDR}")
+        return res, details, (
+            f"GSEA complete -- {len(res):,} of {len(gene_sets):,} gene sets had "
+            f"{self._min_size}-{self._max_size} genes in the ranking and were "
+            f"tested; {n_sig} at FDR < {DEFAULT_FDR}")

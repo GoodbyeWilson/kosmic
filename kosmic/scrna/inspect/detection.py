@@ -15,9 +15,13 @@
 # current symbol has moved on too. A short hand-verified patch for that
 # specific family lives in _LEGACY_MOUSE_SYNONYMS below.
 
+import re
 from functools import lru_cache
 from importlib.resources import files
 from typing import Dict, List
+
+# C11ORF58 -> C11orf58, CXORF38 -> CXorf38 (also inside read-through names).
+_HUMAN_ORF = re.compile(r'(?<![A-Z0-9])(C(?:\d+|X|Y))ORF(\d+)')
 
 
 def detect_species(gene_names: List[str], sample_size: int = 100) -> str:
@@ -116,7 +120,10 @@ def format_gene_for_species(gene: str, species: str) -> str:
         symbols with one mouse ortholog, or with a same-name ortholog
         among several), otherwise the naive Title-case guess (first letter upper, rest
         lower; 'MT-' prefix genes go to lower-case 'mt-'). For 'human',
-        the naive upper-case guess.
+        upper case, except the lower-case 'orf' HGNC keeps in open-reading-
+        frame symbols (C11orf58, CXorf38, HSPB2-C11orf52): upper-casing
+        those gave names no human dataset holds, so the genes were lost
+        silently from gene lists, pathways and committed FDR sets.
     """
     if species == 'mouse':
         gene_upper = gene.upper()
@@ -131,4 +138,6 @@ def format_gene_for_species(gene: str, species: str) -> str:
         if gene_upper.startswith('MT-'):
             return 'mt-' + gene[3:].capitalize()
         return gene.capitalize()
-    return gene.upper()
+    # The 'orf' in HGNC's open-reading-frame symbols is the only lower case
+    # in current human symbols (checked against the bundled HGNC table).
+    return _HUMAN_ORF.sub(r'\1orf\2', gene.upper())

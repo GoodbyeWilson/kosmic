@@ -842,6 +842,10 @@ def run_consensus_loo(datasets: List[pd.DataFrame],
     min_studies  = params.get('min_studies', 3)
     n_cc_perms   = params.get('cc_n_perms', 1000)
     de_method    = params.get('de_method', 'deseq2_fast')
+    if de_method in ('deseq2_exact', 'deseq2_vec'):
+        # The fold repeats the whole pipeline once per study; a re-fitting
+        # permutation per fold would take hours to days (ADR-018, ADR-019).
+        de_method = 'deseq2_fast'
     seed         = params.get('seed', 42)
 
     if calibration == 'cc_perm' and pseudobulk_data is None:

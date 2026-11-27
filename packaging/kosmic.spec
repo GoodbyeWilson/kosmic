@@ -52,7 +52,7 @@ datas = [
 hiddenimports = []
 binaries = []
 for pkg in (
-    "scanpy", "anndata", "pydeseq2", "gseapy", "goatools", "leidenalg",
+    "scanpy", "anndata", "pydeseq2", "gseapy", "leidenalg",
     "igraph", "harmonypy", "umap", "pynndescent", "numba", "llvmlite",
     "statsmodels", "formulaic", "formulaic_contrasts", "pyqtgraph",
     "seaborn", "markdown_it", "mdurl", "h5py", "zarr", "numcodecs",
@@ -70,18 +70,9 @@ for pkg in (
 
 hiddenimports += collect_submodules("kosmic")
 
-# collect_all is generous: drop what no user needs. goatools.test_data is
-# ~100 MB of test fixtures shipped as Python modules.
-def _keep(entry):
-    return "goatools/test_data" not in entry[0].replace("\\", "/")
-
-
-datas = [d for d in datas if _keep(d)]
-hiddenimports = [h for h in hiddenimports if not h.startswith("goatools.test_data")]
-
 excludes = [
     # Never used by the app; some are large.
-    "torch", "pyarrow", "goatools.test_data", "tkinter", "PyQt5", "PySide2",
+    "torch", "pyarrow", "goatools", "tkinter", "PyQt5", "PySide2",
     "PySide6", "IPython",
     "jupyter", "notebook", "pytest", "mkdocs", "mkdocs_material",
     "mkdocstrings", "ruff", "PyInstaller",

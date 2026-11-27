@@ -2,6 +2,8 @@
 # Pseudobulk DE analysis for scRNA-seq data.
 # Supports Welch's t-test (with optional EB moderation) and DESeq2 methods.
 
+from typing import NamedTuple
+
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -1812,33 +1814,52 @@ def _study_values(sample_df, study_col):
     return values if len(pd.unique(values)) > 1 else None
 
 
-def _run_deseq2(pseudobulk_matrix, sample_df, gene_names,
-                min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES,
-                independent_filter=DE_DESEQ2_INDEPENDENT_FILTER,
-                cooks_filter=DE_DESEQ2_COOKS_FILTER,
-                filter_min_count=DE_FILTER_MIN_COUNT,
-                filter_min_samples=DE_FILTER_MIN_SAMPLES,
-                covariates=None, study_col=None):
-    """Run DESeq2 on pseudobulk sum counts.
+class Deseq2Fit(NamedTuple):
+    """One fitted per-study DESeq2 model, as returned by 'fit_deseq2_wald'."""
+    dds: object              # the fitted pydeseq2 DeseqDataSet
+    ds: object               # its DeseqStats, with the Wald test run
+    counts_df: pd.DataFrame  # the counts that were fitted (donors x genes)
+    metadata_df: pd.DataFrame
+    sample_df: pd.DataFrame  # the donors that were fitted ('exclude' dropped)
+    design: str              # e.g. '~sex_inferred + condition'
+    used_covariates: list    # the covariates that made it into the design
 
-    'independent_filter' / 'cooks_filter' pass through to pydeseq2's
-    'DeseqStats'. When a gene is dropped by either, its 'padj' (and, for a
-    Cook's outlier, 'pvalue') comes back NaN -- kept as NaN here, not collapsed
-    to 1.0, and tagged in a 'filter_status' column so the exclusion is visible.
+
+def fit_deseq2_wald(pseudobulk_matrix, sample_df, gene_names,
+                    independent_filter=DE_DESEQ2_INDEPENDENT_FILTER,
+                    cooks_filter=DE_DESEQ2_COOKS_FILTER,
+                    filter_min_count=DE_FILTER_MIN_COUNT,
+                    filter_min_samples=DE_FILTER_MIN_SAMPLES,
+                    covariates=None, study_col=None,
+                    n_cpus=None, quiet=False):
+    """Fit the per-study DESeq2 model and run its Wald test.
+
+    This is the one place the model is defined (ADR-018). The DE workspace
+    ('_run_deseq2') and the exact case-control permutation both call it, so
+    a permuted fit is the fit the study's own DE would have made had the
+    labels been the shuffled ones: the same donors ('exclude' dropped), the
+    same expression filter, the same usable-covariate rule, the same design
+    and the same pydeseq2 settings. Shrinkage and the descriptive columns
+    are not part of it.
 
     Parameters
     ----------
     pseudobulk_matrix : numpy.ndarray
         '(n_samples, n_genes)' sum counts.
     sample_df : pandas.DataFrame
-        Sample metadata; must include a 'role' column.
+        Sample metadata; must include 'sample' and 'role' columns, and the
+        columns named in 'covariates'.
     gene_names : list of str
-    min_expressing_samples : int
+    n_cpus : int, optional
+        Cores pydeseq2 may use for the fit; the permutation passes 1 and
+        parallelises over permutations instead.
+    quiet : bool
+        Suppress pydeseq2's progress lines for the Wald test.
 
     Returns
     -------
-    pandas.DataFrame
-        DE results in the standard format.
+    Deseq2Fit or None
+        None when fewer than two donors, or no gene, remain to be fitted.
     """
     from pydeseq2.dds import DeseqDataSet
     from pydeseq2.ds import DeseqStats
@@ -1853,7 +1874,7 @@ def _run_deseq2(pseudobulk_matrix, sample_df, gene_names,
     pseudobulk_matrix = pseudobulk_matrix[keep_mask]
 
     if len(sample_df) < 2:
-        return pd.DataFrame()
+        return None
 
     # PyDESeq2 needs unique string sample IDs.
     sample_ids = sample_df['sample'].astype(str).values
@@ -1873,14 +1894,14 @@ def _run_deseq2(pseudobulk_matrix, sample_df, gene_names,
         studies=_study_values(sample_df, study_col))
     genes_passing = [g for g, k in zip(counts_df.columns, keep_mask) if k]
     if not genes_passing:
-        return pd.DataFrame()
+        return None
     counts_df = counts_df[genes_passing]
 
     # Also drop zero-total genes (PyDESeq2 errors on them).
     nonzero_genes = counts_df.columns[counts_df.sum(axis=0) > 0]
     counts_df = counts_df[nonzero_genes]
     if counts_df.empty:
-        return pd.DataFrame()
+        return None
 
     # Emit 'disease' / 'control' strings for the PyDESeq2 design matrix.
     synth_conds = sample_df['role'].astype(str).values
@@ -1901,18 +1922,66 @@ def _run_deseq2(pseudobulk_matrix, sample_df, gene_names,
         metadata_df[col] = pd.Categorical(sample_df[col].astype(str).values)
     design = "~" + " + ".join([*used_covariates, "condition"])
 
+    cores = {} if n_cpus is None else {'n_cpus': n_cpus}
     dds = DeseqDataSet(
         counts=counts_df, metadata=metadata_df,
         design=design,
-        quiet=True,
+        quiet=True, **cores,
     )
     dds.deseq2()
 
     contrast = ["condition", "disease", "control"]
     ds = DeseqStats(dds, contrast=contrast, alpha=DEFAULT_FDR,
                     independent_filter=independent_filter,
-                    cooks_filter=cooks_filter)
+                    cooks_filter=cooks_filter, quiet=quiet, **cores)
     ds.summary()
+    return Deseq2Fit(dds, ds, counts_df, metadata_df, sample_df,
+                     design, used_covariates)
+
+
+def _run_deseq2(pseudobulk_matrix, sample_df, gene_names,
+                min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES,
+                independent_filter=DE_DESEQ2_INDEPENDENT_FILTER,
+                cooks_filter=DE_DESEQ2_COOKS_FILTER,
+                filter_min_count=DE_FILTER_MIN_COUNT,
+                filter_min_samples=DE_FILTER_MIN_SAMPLES,
+                covariates=None, study_col=None):
+    """Run DESeq2 on pseudobulk sum counts.
+
+    'independent_filter' / 'cooks_filter' pass through to pydeseq2's
+    'DeseqStats'. When a gene is dropped by either, its 'padj' (and, for a
+    Cook's outlier, 'pvalue') comes back NaN -- kept as NaN here, not collapsed
+    to 1.0, and tagged in a 'filter_status' column so the exclusion is visible.
+
+    The model itself is fitted by 'fit_deseq2_wald'; this adds the shrunk
+    estimates and the descriptive columns.
+
+    Parameters
+    ----------
+    pseudobulk_matrix : numpy.ndarray
+        '(n_samples, n_genes)' sum counts.
+    sample_df : pandas.DataFrame
+        Sample metadata; must include a 'role' column.
+    gene_names : list of str
+    min_expressing_samples : int
+
+    Returns
+    -------
+    pandas.DataFrame
+        DE results in the standard format.
+    """
+    fit = fit_deseq2_wald(
+        pseudobulk_matrix, sample_df, gene_names,
+        independent_filter=independent_filter, cooks_filter=cooks_filter,
+        filter_min_count=filter_min_count,
+        filter_min_samples=filter_min_samples,
+        covariates=covariates, study_col=study_col)
+    if fit is None:
+        return pd.DataFrame()
+    ds = fit.ds
+    dds = fit.dds
+    counts_df, metadata_df = fit.counts_df, fit.metadata_df
+    design, used_covariates = fit.design, fit.used_covariates
 
     # Unshrunk estimates kept for meta-analysis (shrinkage distorts pooled SE).
     unshrunk_lfc = ds.results_df['log2FoldChange'].copy()

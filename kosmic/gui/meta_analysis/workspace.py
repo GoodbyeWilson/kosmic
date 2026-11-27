@@ -1158,7 +1158,8 @@ class MetaAnalysisWorkspace(QWidget):
         # Enrichment and Validation are downstream steps now, so they
         # are told the run finished rather than reading this page.
         context = self._gene_ma_page.get_run_context()
-        self._enrichment_page.set_meta_results(context.get('meta_df'))
+        self._enrichment_page.set_meta_results(context.get('meta_df'),
+                                               run_stem=context.get('run_stem'))
         self._validation_page.set_run_context(context)
 
     def _on_loo_complete(self, result):

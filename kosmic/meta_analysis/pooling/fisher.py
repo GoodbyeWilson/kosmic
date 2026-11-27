@@ -49,15 +49,12 @@ def fisher_fast(datasets, min_studies=MIN_STUDIES, progress_callback=None):
      pathway_map, study_info, _dataset_names, pval_matrix) = \
         _build_effect_matrices(datasets)
 
-    p_valid = valid_mask & np.isfinite(pval_matrix) & (pval_matrix > 0)
+    # Each study's p used as it is; 1e-300 only keeps a p of 0 (an
+    # underflow) finite.
+    p_valid = (valid_mask & np.isfinite(pval_matrix)
+               & (pval_matrix >= 0) & (pval_matrix <= 1))
     k_arr = p_valid.sum(axis=1).astype(int)
-
-    # Floor per-study p at 1/n_genes: no single study has more precision
-    # than its own multiple-testing burden. Without this, Fisher's
-    # combined-p produces absurdly small pooled values.
-    n_genes = len(gene_names)
-    p_floor = 1.0 / max(n_genes, 1)
-    p_safe = np.where(p_valid, np.clip(pval_matrix, p_floor, 1.0), 1.0)
+    p_safe = np.where(p_valid, np.clip(pval_matrix, 1e-300, 1.0), 1.0)
     log_p = np.where(p_valid, np.log(p_safe), 0.0)
     fisher_stat = -2.0 * log_p.sum(axis=1)
     df = 2 * k_arr

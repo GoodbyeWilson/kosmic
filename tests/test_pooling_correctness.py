@@ -10,8 +10,8 @@ DL has its own file (``test_dl_correctness.py``) covering the τ²
 truncation behaviour and HKSJ variant. This file adds one canonical
 correctness sentinel per remaining method.
 
-The rank and p-value methods require a realistic gene-set context (Fisher
-floors p at 1/n_genes so single-gene tests collapse, SumRank needs a real
+The rank and p-value methods are tested in a realistic gene-set context
+(SumRank needs a real
 rank space). All such tests use a 30-gene fixture.
 """
 from __future__ import annotations
@@ -57,6 +57,53 @@ def test_reml_matches_statsmodels():
     np.testing.assert_allclose(row['logfoldchanges'], sm.mean_effect_re,
                                 rtol=2e-3)
     np.testing.assert_allclose(row['se'], sm.sd_eff_w_re, rtol=2e-3)
+
+
+# ----------------------------------------------------------------------
+# Prediction interval: t(k-2), matching metafor predict(pi.type="Riley")
+# ----------------------------------------------------------------------
+def _single_gene_datasets(effects, variances):
+    return [
+        pd.DataFrame({'names': ['G1'], 'logfoldchanges': [e], 'se': [np.sqrt(v)],
+                      'pvals': [0.01], 'dataset': [f'Study_{i + 1}']})
+        for i, (e, v) in enumerate(zip(effects, variances))
+    ]
+
+
+# Reference values from metafor 4.8-0 (rma(method=...), predict(pi.type="Riley")).
+_PI_EFFECTS = [-0.82, -1.14, -0.59, -0.75, -0.89, 0.10]
+_PI_VARIANCES = [0.043, 0.058, 0.028, 0.018, 0.058, 0.05]
+
+
+@pytest.mark.parametrize("k, method, tau2, lo, hi", [
+    (5, "reml", 0.0, -1.0446099202, -0.5231923222),
+    (6, "reml", 0.1170077380, -1.7293649236, 0.3730126766),
+    (3, "dl", 0.0321662791, -3.8348272653, 2.2081755650),
+])
+def test_prediction_interval_matches_metafor(k, method, tau2, lo, hi):
+    """The prediction interval uses t with k-2 degrees of freedom, as in
+    metafor's pi.type="Riley". A normal (1.96) interval is narrower, most
+    of all for few studies."""
+    from kosmic.meta_analysis.pooling.dl import dl_fast
+
+    fn = reml_fast if method == "reml" else dl_fast
+    row = fn(_single_gene_datasets(_PI_EFFECTS[:k], _PI_VARIANCES[:k]),
+             min_studies=2).iloc[0]
+    np.testing.assert_allclose(row['tau_squared'], tau2, atol=2e-5)
+    np.testing.assert_allclose(row['pi_lower'], lo, atol=2e-4)
+    np.testing.assert_allclose(row['pi_upper'], hi, atol=2e-4)
+    normal_half = 1.96 * np.sqrt(row['se'] ** 2 + row['tau_squared'])
+    assert (row['pi_upper'] - row['pi_lower']) / 2 > normal_half
+
+
+def test_prediction_interval_degrees_of_freedom_floor():
+    """Two studies give df = 0; the degrees of freedom are floored at 1
+    (as in metafor), so the interval is finite and very wide."""
+    row = reml_fast(_single_gene_datasets([0.2, 0.5], [0.04, 0.05]),
+                    min_studies=2).iloc[0]
+    half = (row['pi_upper'] - row['pi_lower']) / 2
+    np.testing.assert_allclose(
+        half, scipy_stats.t.ppf(0.975, 1) * np.sqrt(row['se'] ** 2 + row['tau_squared']))
 
 
 # ----------------------------------------------------------------------
@@ -112,19 +159,14 @@ def test_fisher_pooled_pvalue_orders_sig_before_null(three_studies_30_genes):
     assert sig['pvals_pooled'] < null['pvals_pooled']
 
 
-def test_fisher_matches_scipy_on_floored_pvalues(three_studies_30_genes):
-    """KOSMIC's Fisher floors per-study p at 1/n_genes. With that floor
-    applied, the combined-p must match scipy.stats.combine_pvalues."""
-    n_genes = 30
-    p_floor = 1.0 / n_genes
-
-    # Reconstruct what the SIG gene's p-values become after KOSMIC's floor.
+def test_fisher_matches_scipy_on_the_raw_pvalues(three_studies_30_genes):
+    """KOSMIC's Fisher is the textbook test: each study's p used as it is,
+    so the combined p equals scipy.stats.combine_pvalues."""
     sig_raw = np.array([
         ds[ds['names'] == 'G00'].iloc[0]['pvals']
         for ds in three_studies_30_genes
     ])
-    sig_floored = np.clip(sig_raw, p_floor, 1.0)
-    expected = scipy_stats.combine_pvalues(sig_floored, method='fisher').pvalue
+    expected = scipy_stats.combine_pvalues(sig_raw, method='fisher').pvalue
 
     out = fisher_fast(three_studies_30_genes, min_studies=2)
     sig = _row(out, 'G00')

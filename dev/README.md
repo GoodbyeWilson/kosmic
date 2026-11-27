@@ -20,6 +20,21 @@ Benchmark harnesses that other scripts import.
   Validation step's GWAS tab is a placeholder pointing here.
 - `proteomics_validation.py` — Olink / proteomics cross-checks.
 
+## validation/
+
+Checks against real data, run by hand and not part of `pytest`.
+
+- `cc_exact_vs_fast.py` — the exact case-control permutation against the
+  fast engine and the analytical p-values, on the DCM endothelial cells
+  (ADR-018). Reads the project named by `KOSMIC_DCM_PROJECT`; writes only
+  to its output folder. The figures in the Statistical approach help page
+  come from its `boot` output.
+- `cc_exact_vs_vec.py` - the exact and the vectorised case-control
+  permutation (ADR-019) through `consensus_cc_permutation` on the same
+  studies and shuffles: null values, null tail fractions and genes at FDR 5%.
+  Reads the project named by `KOSMIC_DCM_PROJECT`; writes only to its output
+  folder.
+
 ## scripts/
 
 Method comparisons and reference builders.

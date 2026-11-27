@@ -69,8 +69,12 @@ def _build_effect_matrices(datasets):
             ds_name = f'Study_{ds_i + 1}'
         dataset_names.append(ds_name)
 
+        # Raw per-study p-values: Fisher, Stouffer and the permutation
+        # null all assume p-values that are uniform under the null, which
+        # adjusted ones are not (ADR-018). 'pvals_adj' only stands in for a
+        # table that has no raw column.
         pval_col = None
-        for col in ('pvals_adj', 'pvals'):
+        for col in ('pvals', 'pvals_adj'):
             if col in df.columns:
                 pval_col = col
                 break
@@ -94,8 +98,16 @@ def _build_effect_matrices(datasets):
         # Vectorized: map gene names to matrix indices
         gene_indices = np.array([gene_to_idx[g] for g in names])
 
-        # Valid mask for this dataset
+        # Valid mask for this dataset. A gene the study's own DE gave no raw
+        # p-value (a DESeq2 Cook's outlier: the fold change is reported but
+        # the test is withheld) is not a valid estimate for any method, so
+        # every method pools the same genes, as the permutation null already
+        # does (cc_permutation). Only the raw column decides: an adjusted
+        # p-value is also missing for genes DESeq2's independent filter set
+        # aside, whose tests are valid.
         valid = np.isfinite(logfcs) & np.isfinite(ses) & (ses > 0)
+        if pval_col == 'pvals':
+            valid &= np.isfinite(pvals)
         valid_idx = np.where(valid)[0]
 
         # Bulk assign into matrices
@@ -239,8 +251,9 @@ def _hksj_se(pooled, effects_matrix, weights_re, valid_mask):
     # Truncation: q_hk must be >= 1 to prevent the HKSJ SE from being
     # smaller than the standard DL/REML SE. Without this, genes with
     # very consistent effects across studies get artificially small SEs,
-    # leading to anti-conservative p-values. This is the standard
-    # correction used by R's metafor (test="knha") and Stata.
+    # leading to anti-conservative p-values. This is the ad hoc variant
+    # (Knapp & Hartung 2003; metafor test="adhoc"), not plain HKSJ
+    # (metafor test="knha", which does not truncate). Under review.
     q_hk = np.maximum(q_hk, 1.0)
 
     # HKSJ SE: sqrt(q_hk / sum(w_i))
@@ -250,6 +263,39 @@ def _hksj_se(pooled, effects_matrix, weights_re, valid_mask):
                        0.0)
 
     return se_hksj
+
+
+def _prediction_interval(pooled, se_pooled, tau2, k, level=0.95):
+    """Prediction interval for the effect in a new study (random effects).
+
+    The interval is pooled +/- t * sqrt(se_pooled**2 + tau2), where t is the
+    two-sided Student-t quantile with k - 2 degrees of freedom and k is the
+    number of studies pooled for that gene (Higgins, Thompson and
+    Spiegelhalter 2009; Riley et al. 2011; metafor 'predict(pi.type="Riley")').
+    The t quantile allows for the uncertainty in the estimates of the pooled
+    effect and of tau2, which a normal quantile ignores. It is 3.18 for five
+    studies, 2.31 for ten and approaches 1.96 as k grows. The degrees of
+    freedom are floored at 1, as in metafor, so a gene pooled from two
+    studies gets a very wide interval.
+
+    Parameters
+    ----------
+    pooled, se_pooled, tau2 : ndarray (n_genes,)
+        Pooled effect, its standard error and the between-study variance.
+    k : ndarray (n_genes,)
+        Number of studies pooled per gene.
+    level : float, default 0.95
+
+    Returns
+    -------
+    (pi_lower, pi_upper) : tuple of ndarray (n_genes,)
+    """
+    from scipy.stats import t as _t
+
+    df = np.maximum(np.asarray(k, dtype=float) - 2.0, 1.0)
+    crit = _t.ppf(0.5 + level / 2.0, df)
+    half = crit * np.sqrt(np.asarray(se_pooled, dtype=float) ** 2 + np.asarray(tau2, dtype=float))
+    return pooled - half, pooled + half
 
 
 # Helper: build output DataFrame from vectorized results

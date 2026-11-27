@@ -7,13 +7,14 @@ __all__ = ["bh_fdr", "neg_log10"]
 
 
 def bh_fdr(pvals, fill: float = 1.0) -> np.ndarray:
-    """BH-adjusted p-values. Invalid entries (NaN/inf/<=0/>1) get 'fill'
+    """BH-adjusted p-values. Invalid entries (NaN/inf/<0/>1) get 'fill'
     and are excluded from the BH denominator. Needed because
     statsmodels.multipletests does not mask invalid p-values and silently
-    deflates every q-value when N is inflated."""
+    deflates every q-value when N is inflated. A p of 0 (an underflow) is
+    valid: it is the smallest p and counts in the denominator."""
     from statsmodels.stats.multitest import multipletests
     arr = np.asarray(pvals, dtype=float)
-    valid = np.isfinite(arr) & (arr > 0) & (arr <= 1)
+    valid = np.isfinite(arr) & (arr >= 0) & (arr <= 1)
     out = np.full(arr.shape, fill, dtype=float)
     if valid.sum() > 0:
         _, out[valid], _, _ = multipletests(arr[valid], method="fdr_bh")

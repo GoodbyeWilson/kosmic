@@ -1,6 +1,7 @@
-# Enrichment Page (DE Discovery mode): over-representation analysis of
-# significant DE genes via GO (local elim) or Enrichr-based ORA, run
-# separately for upregulated and downregulated genes.
+# Enrichment Page (DE Discovery mode): over-representation analysis (ORA)
+# of the significant DE genes, or preranked GSEA of every gene, against a
+# gene-set library (bundled MSigDB Hallmark, or one downloaded from Enrichr,
+# which includes the GO libraries).
 #
 # In the DE workspace the page works on the gene DE run chosen in the run
 # bar (ADR-016): it saves its results in that run's folder and, when
@@ -30,13 +31,6 @@ from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD,
     DE_ENRICH_IF_DEFAULT_PCT, DE_ENRICH_IF_ON_BY_DEFAULT,
 )
-
-# Libraries grouped by source
-_GO_LIBRARIES = [
-    ("GO Biological Process", "GO_BP"),
-    ("GO Molecular Function", "GO_MF"),
-    ("GO Cellular Component", "GO_CC"),
-]
 
 # Published libraries bundled with KOSMIC, used exactly as released
 # (kosmic.reference.pathways.libraries). Listed before the Enrichr ones.
@@ -81,9 +75,19 @@ class EnrichmentPage(SidebarTabbedPage):
 
     help_id = "de/enrichment"
 
-    # Column used to rank genes for preranked GSEA. Overridden by the
-    # meta-analysis host; DE leaves it at the log2FC default.
+    # Column used to rank genes for preranked GSEA when the page offers no
+    # choice. Overridden by the meta-analysis host (the pooled z).
     rank_column = 'logfoldchanges'
+
+    # The rankings a preranked GSEA can use: (label, DE table column). The
+    # first is the default. The Wald statistic (log2FC / SE; Welch's t for
+    # the t-test methods) is what preranked GSEA of DESeq2 results usually
+    # ranks by: a noisy fold change of a lowly expressed gene does not
+    # reach the extremes of the ranking. Empty: no choice, 'rank_column'.
+    RANK_CHOICES = (
+        ("Test statistic (DESeq2: Wald, log2FC / SE)", 'statistic'),
+        ("Log2 fold change", 'logfoldchanges'),
+    )
 
     enrichment_complete = pyqtSignal()
 
@@ -221,21 +225,27 @@ class EnrichmentPage(SidebarTabbedPage):
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         method_lay.addWidget(self._method_combo)
 
+        # Preranked GSEA only: what orders the genes.
+        self._rank_label = QLabel("Rank genes by:")
+        self._rank_combo = NoScrollComboBox()
+        for display, column in self.RANK_CHOICES:
+            self._rank_combo.addItem(display, column)
+        self._rank_combo.setToolTip(
+            "Log2 fold change: the effect size alone.\n"
+            "Test statistic: the fold change divided by its standard error, so\n"
+            "genes measured with little precision (few counts) do not reach the\n"
+            "ends of the ranking. Preranked GSEA of DESeq2 results usually\n"
+            "ranks by it.")
+        method_lay.addWidget(self._rank_label)
+        method_lay.addWidget(self._rank_combo)
+        self._rank_label.setVisible(False)
+        self._rank_combo.setVisible(False)
+
         method_lay.addWidget(QLabel("Library:"))
         self._library_combo = NoScrollComboBox()
-        self._library_combo.currentIndexChanged.connect(self._on_library_changed)
         method_lay.addWidget(self._library_combo)
-        self._populate_libraries(gsea_only=False)
+        self._populate_libraries()
 
-        self._algo_label = QLabel("Algorithm:")
-        method_lay.addWidget(self._algo_label)
-        self._algo_combo = NoScrollComboBox()
-        self._algo_combo.addItem("elim (DAG-aware)", "elim")
-        self._algo_combo.addItem("Fisher + BH", "fisher")
-        self._algo_combo.setToolTip(
-            "elim: DAG-aware, removes redundant parent terms (recommended).\n"
-            "Fisher + BH: standard over-representation with FDR correction.")
-        method_lay.addWidget(self._algo_combo)
         method_lay.addStretch()
 
         # -- Term filters ---------------------------------------------
@@ -254,7 +264,8 @@ class EnrichmentPage(SidebarTabbedPage):
             "FDR cutoff for calling a pathway term significant.")
         terms_lay.addWidget(self._p_thresh)
 
-        terms_lay.addWidget(QLabel("Min genes per term:"))
+        self._min_genes_label = QLabel("Min genes per term:")
+        terms_lay.addWidget(self._min_genes_label)
         self._min_genes = NoScrollSpinBox()
         self._min_genes.setRange(2, 500)
         self._min_genes.setValue(5)
@@ -262,9 +273,30 @@ class EnrichmentPage(SidebarTabbedPage):
             "Skip terms with fewer than this many genes in the library. "
             "Very small terms give unstable p-values.")
         terms_lay.addWidget(self._min_genes)
-        terms_lay.addStretch()
 
-        self._on_library_changed()
+        # Preranked GSEA only: which gene sets are tested, by how many of
+        # their genes are in the ranking. The defaults are GSEA's own.
+        from kosmic.de.fgsea import GSEA_MIN_SIZE, GSEA_MAX_SIZE
+        size_tip = (
+            "Preranked GSEA tests a gene set only when this many of its genes\n"
+            f"are in the ranking. {GSEA_MIN_SIZE} and {GSEA_MAX_SIZE} are the "
+            "defaults of the Broad\nInstitute's GSEA and of GSEApy: smaller sets "
+            "give unstable scores,\nlarger ones are too broad to interpret.")
+        self._gsea_min_label = QLabel("Min genes per set (in the ranking):")
+        self._gsea_min_size = NoScrollSpinBox()
+        self._gsea_min_size.setRange(1, 10000)
+        self._gsea_min_size.setValue(GSEA_MIN_SIZE)
+        self._gsea_min_size.setToolTip(size_tip)
+        self._gsea_max_label = QLabel("Max genes per set (in the ranking):")
+        self._gsea_max_size = NoScrollSpinBox()
+        self._gsea_max_size.setRange(1, 100000)
+        self._gsea_max_size.setValue(GSEA_MAX_SIZE)
+        self._gsea_max_size.setToolTip(size_tip)
+        for w in (self._gsea_min_label, self._gsea_min_size,
+                  self._gsea_max_label, self._gsea_max_size):
+            terms_lay.addWidget(w)
+            w.setVisible(False)
+        terms_lay.addStretch()
 
         for key, title, icon in (
                 ('genes', "Genes tested", "dataset"),
@@ -304,14 +336,20 @@ class EnrichmentPage(SidebarTabbedPage):
         for _sig in (self._method_combo.currentIndexChanged,
                      self._library_combo.currentIndexChanged,
                      self._direction_combo.currentIndexChanged,
-                     self._algo_combo.currentIndexChanged,
                      self._fdr_spin.valueChanged,
                      self._lfc_spin.valueChanged,
                      self._p_thresh.valueChanged,
                      self._min_genes.valueChanged,
+                     self._gsea_min_size.valueChanged,
+                     self._gsea_max_size.valueChanged,
                      self._pct_filter.valueChanged):
             _sig.connect(self._refresh_card_summaries)
         self._pct_filter_check.toggled.connect(self._refresh_card_summaries)
+
+        # Defaults: preranked GSEA of the Hallmark sets (the first bundled
+        # library), which ranks every gene and needs no significance cutoff.
+        self._method_combo.setCurrentIndex(self._method_combo.findData("gsea"))
+        self._on_method_changed()
         self._refresh_card_summaries()
 
         # -- Right content area: tabs (provided by SidebarTabbedPage) --
@@ -342,37 +380,39 @@ class EnrichmentPage(SidebarTabbedPage):
         dir_note.setWordWrap(True)
         self.content_layout.addWidget(dir_note)
 
-    def _on_library_changed(self):
-        """Show/hide GO-specific algorithm selector."""
-        lib_id = self._library_combo.currentData()
-        is_go = lib_id is not None and lib_id in ("GO_BP", "GO_MF", "GO_CC")
-        self._algo_label.setVisible(is_go)
-        self._algo_combo.setVisible(is_go)
-
-    def _populate_libraries(self, gsea_only):
-        """Fill the library combo. Preranked GSEA needs fetchable gene-set
-        libraries, so the local-GO methods are offered for ORA only."""
+    def _populate_libraries(self):
+        """Fill the library combo: the same libraries serve ORA and GSEA."""
         self._library_combo.blockSignals(True)
         self._library_combo.clear()
-        if not gsea_only:
-            for display, lib_id in _GO_LIBRARIES:
-                self._library_combo.addItem(f"GO: {display}", lib_id)
         for display, lib_id in _BUNDLED_LIBRARIES:
             self._library_combo.addItem(f"MSigDB: {display}", lib_id)
         for display, lib_id in _ENRICHR_LIBRARIES:
             self._library_combo.addItem(f"Enrichr: {display}", lib_id)
         self._library_combo.blockSignals(False)
 
+    def _rank_by(self) -> str:
+        """The DE table column a preranked GSEA ranks the genes by."""
+        if self.RANK_CHOICES:
+            return self._rank_combo.currentData() or self.RANK_CHOICES[0][1]
+        return self.rank_column
+
     def _on_method_changed(self):
         """Switch between ORA and preranked GSEA."""
         is_gsea = self._method_combo.currentData() == "gsea"
-        self._populate_libraries(gsea_only=is_gsea)
+        offer_rank = is_gsea and bool(self.RANK_CHOICES)
+        self._rank_label.setVisible(offer_rank)
+        self._rank_combo.setVisible(offer_rank)
+        # The term-size filter is ORA's; GSEA has its own set-size bounds.
+        self._min_genes_label.setVisible(not is_gsea)
+        self._min_genes.setVisible(not is_gsea)
+        for w in (self._gsea_min_label, self._gsea_min_size,
+                  self._gsea_max_label, self._gsea_max_size):
+            w.setVisible(is_gsea)
         # GSEA ranks every gene, so the significant-gene cutoffs don't apply
         # (the pct-cells filter stays -- it scopes the ranking universe).
         self._fdr_spin.setEnabled(not is_gsea)
         self._lfc_spin.setEnabled(not is_gsea)
         self._run_btn.setText("Run GSEA" if is_gsea else "Run Enrichment")
-        self._on_library_changed()
 
     def _scoped_de_results(self):
         """
@@ -438,14 +478,12 @@ class EnrichmentPage(SidebarTabbedPage):
         self._method_card.set_summary([label, library.split(": ")[-1]])
 
         # Term filters
-        terms = f"FDR<{self._p_thresh.value():g}, min {self._min_genes.value()} genes"
-        # Not isVisible(): that is False whenever the page itself is not
-        # shown, so the algorithm silently vanished from the summary.
-        # The library is what decides whether an algorithm applies.
-        algo = ("GO " + self._algo_combo.currentData()
-                if self._library_combo.currentData() in ("GO_BP", "GO_MF", "GO_CC")
-                else "")
-        self._terms_card.set_summary([terms, algo])
+        if is_gsea:
+            terms = (f"FDR<{self._p_thresh.value():g}, sets of "
+                     f"{self._gsea_min_size.value()}-{self._gsea_max_size.value()} genes")
+        else:
+            terms = f"FDR<{self._p_thresh.value():g}, min {self._min_genes.value()} genes"
+        self._terms_card.set_summary([terms, ""])
 
     def _update_gene_count(self):
         """Update the live count of significant genes with direction breakdown."""
@@ -550,28 +588,15 @@ class EnrichmentPage(SidebarTabbedPage):
         if not lib_id:
             return
 
-        if lib_id in ("GO_BP", "GO_MF", "GO_CC"):
-            ontology = lib_id.split("_")[1]
-            from kosmic.gui.de_analysis.workers import GOEnrichmentWorker
-            self._worker = GOEnrichmentWorker(
-                study_genes=study,
-                background_genes=background,
-                ontology=ontology,
-                method=self._algo_combo.currentData(),
-                alpha=self._p_thresh.value(),
-                min_genes=self._min_genes.value(),
-            )
-            on_finished_cb = self._on_go_finished
-        else:
-            from kosmic.gui.de_analysis.workers import EnrichrORAWorker
-            self._worker = EnrichrORAWorker(
-                study_genes=study,
-                background_genes=background,
-                library_name=lib_id,
-                alpha=self._p_thresh.value(),
-                min_genes=self._min_genes.value(),
-            )
-            on_finished_cb = self._on_enrichr_finished
+        from kosmic.gui.de_analysis.workers import EnrichrORAWorker
+        self._worker = EnrichrORAWorker(
+            study_genes=study,
+            background_genes=background,
+            library_name=lib_id,
+            alpha=self._p_thresh.value(),
+            min_genes=self._min_genes.value(),
+        )
+        on_finished_cb = self._on_enrichr_finished
 
         if self.ws.progress_bar:
             self.ws.progress_bar.setRange(0, 100)
@@ -595,23 +620,6 @@ class EnrichmentPage(SidebarTabbedPage):
     def _on_worker_pct(self, pct):
         if self.ws.progress_bar:
             self.ws.progress_bar.setValue(pct)
-
-    def _on_go_finished(self, payload):
-        results_df, message = payload
-        self._run_btn.setEnabled(True)
-        if self.ws.progress_bar:
-            self.ws.progress_bar.setValue(0)
-        self._status_label.setText(message)
-        self.ws.log_message.emit(message)
-        self.ws.status_message.emit(message)
-        norm = self._normalise_go(results_df)
-        self._annotate_direction_and_display(norm)
-        self._library_source = {
-            'library': self._library_combo.currentData(),
-            'provider': 'Gene Ontology (annotation files bundled with KOSMIC)',
-            'accessed': _now(),
-        }
-        self._record_study_enrichment('go')
 
     def _on_enrichr_finished(self, payload):
         results_df, message = payload
@@ -660,19 +668,32 @@ class EnrichmentPage(SidebarTabbedPage):
         self._run_btn.setEnabled(False)
         self._status_label.setText(f"Running preranked GSEA ({lib_id})...")
 
-        # Which column ranks the genes. DE ranks by log2FC; the
-        # meta-analysis host points this at the pooled z-statistic,
-        # which divides the effect by its pooled SE and so already
-        # accounts for between-study heterogeneity. The worker always
-        # receives the column named 'logfoldchanges'.
-        rank_col = getattr(self, 'rank_column', 'logfoldchanges')
+        # Which column ranks the genes: the Rank genes by choice on the DE
+        # page; the meta-analysis host's pooled z-statistic, which divides
+        # the effect by its pooled SE and so already accounts for
+        # between-study heterogeneity. The worker always receives the
+        # column named 'logfoldchanges'.
+        rank_col = self._rank_by()
         if rank_col not in gene_de.columns:
+            if self.RANK_CHOICES and rank_col != 'logfoldchanges':
+                self._status_label.setText(
+                    f"This DE result has no '{rank_col}' column to rank by "
+                    "(it was saved by an earlier version). Run the DE again, "
+                    "or rank by log2 fold change.")
+                self._run_btn.setEnabled(True)
+                return
             rank_col = 'logfoldchanges'
         rank_df = gene_de[['names', rank_col]].copy()
         rank_df.columns = ['names', 'logfoldchanges']
 
         from kosmic.gui.de_analysis.workers import LibraryGseaWorker
-        self._worker = LibraryGseaWorker(rank_df, lib_id)
+        lo, hi = self._gsea_min_size.value(), self._gsea_max_size.value()
+        if lo > hi:
+            self._status_label.setText(
+                f"The minimum set size ({lo}) is above the maximum ({hi}).")
+            self._run_btn.setEnabled(True)
+            return
+        self._worker = LibraryGseaWorker(rank_df, lib_id, min_size=lo, max_size=hi)
         if self.ws.progress_bar:
             self.ws.progress_bar.setRange(0, 0)  # indeterminate
         run_worker(
@@ -700,9 +721,9 @@ class EnrichmentPage(SidebarTabbedPage):
     # Provenance
     # ------------------------------------------------------------------
 
-    # The adjusted p-value column of each method's results table: ORA and
-    # GO are normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
-    _ADJ_P_COLUMN = {'go': 'FDR', 'ora': 'FDR', 'gsea': 'pvals_adj'}
+    # The adjusted p-value column of each method's results table: ORA's
+    # is normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
+    _ADJ_P_COLUMN = {'ora': 'FDR', 'gsea': 'pvals_adj'}
 
     def _enrichment_params(self, method) -> dict:
         """What one enrichment run used and found, for the provenance."""
@@ -721,12 +742,13 @@ class EnrichmentPage(SidebarTabbedPage):
             # counts and the time it was loaded.
             'library_source': getattr(self, '_library_source', None),
             'direction':   self._direction_combo.currentData(),
-            'rank_by':     (getattr(self, 'rank_column', 'logfoldchanges')
-                            if method == 'gsea' else None),
+            'rank_by':     self._rank_by() if method == 'gsea' else None,
             'fdr':         self._p_thresh.value(),
             'gene_fdr':    self._fdr_spin.value(),
             'gene_lfc':    self._lfc_spin.value(),
-            'min_genes':   self._min_genes.value(),
+            'min_genes':   self._min_genes.value() if method != 'gsea' else None,
+            'gsea_min_size': self._gsea_min_size.value() if method == 'gsea' else None,
+            'gsea_max_size': self._gsea_max_size.value() if method == 'gsea' else None,
             'n_genes_in':  len(study or []),
             'n_background': len(background or []),
             'n_terms':     n_terms,
@@ -966,32 +988,6 @@ class EnrichmentPage(SidebarTabbedPage):
     # ------------------------------------------------------------------
     # Normalise results to common format
     # ------------------------------------------------------------------
-
-    def _normalise_go(self, df):
-        import pandas as pd
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        norm = pd.DataFrame()
-        norm['Term'] = df.get('GO_ID', '').astype(str) + ' ' + df.get('Term', '').astype(str)
-        norm['P_value'] = df['P_value']
-        if 'P_adjusted' in df.columns:
-            norm['FDR'] = df['P_adjusted']
-        else:
-            # elim p-values are not multiplicity-adjusted (the topGO
-            # convention). The column holds the p-value significance is
-            # judged on; the label says which it is.
-            norm['FDR'] = df['P_value']
-            norm.attrs['significance_label'] = 'elim P (uncorrected)'
-        norm['Fold_Enrichment'] = df.get('Fold_Enrichment', 1.0)
-        norm['Gene_Count'] = df.get('Genes', df.get('Gene_Count', '')).apply(
-            lambda x: len(x) if isinstance(x, list) else 0
-        )
-        norm['Term_Size'] = df.get('Term_Size', norm['Gene_Count'])
-        norm['Genes'] = df.get('Genes', '').apply(
-            lambda x: ', '.join(x) if isinstance(x, list) else str(x)
-        )
-        return norm
 
     def _normalise_enrichr(self, df):
         import pandas as pd

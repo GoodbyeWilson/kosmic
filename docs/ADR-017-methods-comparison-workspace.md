@@ -216,6 +216,41 @@ new workspace answers a different question. The two overlap for the
 four shared methods. Whether to retire the older mode is left to a later
 decision.
 
+### 8. Amendment (2026-11-26): the gene set, FDR over the genes compared, and genes by method group
+
+Three changes, so the comparison follows the rules a meta-analysis run
+was made with and compares every method over the same genes.
+
+- **The meta-analysis gene set.** When a method is pooled again (§3) it
+  uses the gene set the Meta-Analysis workspace builds
+  (`kosmic.meta_analysis.gene_set.build_gene_set`): the expression filter,
+  then *Current gene symbols only*, then *Leave out genes merged
+  inconsistently across studies*, each when the selection's latest run used
+  it. The run's settings file records the two settings
+  (`current_symbols_only`, `drop_inconsistent_merges`); a saved run is read
+  only when they match too.
+- **FDR over the genes compared.** The rule gains `fdr_over`. Under
+  `compared` (the default), every p-value method is corrected again with
+  Benjamini-Hochberg, from its raw p-values, over the genes every method
+  compared tested, so every method's FDR has the same denominator. A
+  p-value method has tested a gene when it gave a raw p-value: DESeq2's
+  independent filter withholds only the adjusted p-value, as the DE
+  workspace's committed-gene FDR treats it. Merged pseudobulk fitted
+  genome-wide is then corrected over the same genes as the meta-analysis
+  without a refit, because the fit and its raw p-values do not depend on
+  the genes corrected over. `own` keeps §5 as first written: each method's
+  adjusted p-value, and the genes with one in every method. A comparison
+  saved before this field reads as `own`. The results table gains
+  `padj_used`, the adjusted p-value the call used.
+- **Genes by method group.** `agreement.gene_characteristics` gives, per
+  gene, from the studies' own DE tables and the REML fit: same direction in
+  every study, the number of studies calling it, REML's effect, I² and
+  95% prediction interval (pooled ± t(k−2)·√(SE² + τ²)).
+  `agreement.method_groups` groups the genes called by at least one method
+  by exactly the methods calling them and summarises each group with those
+  characteristics. Both are saved (`genes.csv`, `method_groups.csv`) and
+  shown on the page. REML is pooled for them when it is not compared.
+
 ## Consequences
 
 - Users can compare merged pseudobulk with meta-analysis, and export the

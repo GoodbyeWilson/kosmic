@@ -135,7 +135,9 @@ def _top_r_sum_cdf(x, k, r):
 
     sums, cdf = _top_r_lookup_cache[key]
     idx = np.searchsorted(sums, x, side='right')
-    return float(idx / len(sums))
+    # The Monte Carlo estimate (b + 1) / (n + 1) (Phipson & Smyth 2010), so
+    # a sum below every simulated one gets p of about 2e-7, never 0.
+    return float((idx + 1) / (len(sums) + 1))
 
 
 def _irwin_hall_cdf_fast(x, n):
@@ -246,11 +248,12 @@ def sumrank_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0,
     result_df = pd.DataFrame(results)
     if not result_df.empty:
         result_df = result_df.sort_values('pvals_pooled').reset_index(drop=True)
-        # Pseudo-Z from p-value so the volcano Z-axis works
+        # Pseudo-Z from the p-value, signed by the direction the rank test
+        # found ('up' / 'down'), not by the mean log2FC, which can differ.
         from scipy.stats import norm as _norm
         p_arr = result_df['pvals_pooled'].values.astype(float)
-        lfc_arr = result_df['logfoldchanges'].values.astype(float)
+        sign = np.where(result_df['direction'].values == 'up', 1.0, -1.0)
         raw_z = _norm.isf(np.clip(p_arr, 1e-300, 1.0) / 2.0)
-        result_df['z_stat'] = np.sign(lfc_arr) * np.clip(raw_z, 0, 38)
+        result_df['z_stat'] = sign * np.clip(raw_z, 0, 38)
     return result_df
 

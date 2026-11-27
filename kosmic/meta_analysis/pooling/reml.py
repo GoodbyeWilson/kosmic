@@ -8,9 +8,10 @@
 # Matches R's 'metafor::rma(method="REML")' for the τ² estimate to ~1e-7
 # (Fisher-scoring iteration reaches the same maximum of the REML log-likelihood
 # that metafor does; cross-checked against 'scipy.optimize.minimize_scalar'
-# on the REML log-likelihood and against the published 'dat.bcg' values in
-# 'tests/meta_analysis/test_reml_correctness.py'). With 'hksj=True' matches
-# 'metafor::rma(method="REML", test="knha")'.
+# on the REML log-likelihood and against metafor's published 'dat.bcg' values,
+# tau² and I², in 'tests/test_paper_textbook_fixes.py'). With 'hksj=True' it is
+# the ad hoc variant, 'metafor::rma(method="REML", test="adhoc")': the HKSJ
+# factor is truncated at 1 (pooling_core._hksj_se). Plain 'knha' does not truncate.
 from __future__ import annotations
 from kosmic import MIN_STUDIES
 
@@ -20,6 +21,7 @@ from .pooling_core import (
     _build_effect_matrices,
     _vectorized_dl,
     _hksj_se,
+    _prediction_interval,
     _build_result_df,
 )
 
@@ -74,13 +76,18 @@ def _vectorized_reml(effects_matrix, var_matrix, valid_mask,
 
     weights_fe = np.where(valid_mask, 1.0 / var, 0.0)
     sum_w_fe = weights_fe.sum(axis=1)
-    pooled_fe = np.where(sum_w_fe > 0,
-                         (weights_fe * eff).sum(axis=1) / sum_w_fe, 0.0)
-    resid_fe = np.where(valid_mask, eff - pooled_fe[:, None], 0.0)
-    Q = (weights_fe * resid_fe ** 2).sum(axis=1)
+    # I² as metafor computes it for any tau² estimator (Higgins & Thompson
+    # 2002): tau² / (tau² + s²), where s² is the 'typical' within-study
+    # variance (k-1) Σw / ((Σw)² - Σw²), w = 1/v. For DerSimonian-Laird this
+    # equals (Q - df) / Q; for REML it does not, so the REML tau² is used.
     k = valid_mask.sum(axis=1).astype(float)
     df = k - 1
-    I2 = np.where(Q > 0, np.maximum(0, (Q - df) / Q), 0.0)
+    sum_w2_fe = (weights_fe ** 2).sum(axis=1)
+    s2_den = sum_w_fe ** 2 - sum_w2_fe
+    with np.errstate(invalid='ignore', divide='ignore'):
+        s2 = np.where(s2_den > 0, df * sum_w_fe / s2_den, np.nan)
+        I2 = np.where((df > 0) & np.isfinite(s2) & (tau2 + s2 > 0),
+                      tau2 / (tau2 + s2), 0.0)
 
     return pooled, se_pooled, tau2, I2, weights_re
 
@@ -115,7 +122,8 @@ def reml_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0, hksj=False,
         pvals_pooled, n_studies, pathways, study_effects, heterogeneity_i2,
         pooling_method.
         Random-effects reporting columns: tau_squared, Q, p_heterogeneity,
-        pi_lower, pi_upper (95% prediction interval).
+        pi_lower, pi_upper (95% prediction interval for a new study:
+        pooled +/- t(k-2) * sqrt(se^2 + tau2), k = studies pooled for the gene).
     """
     from scipy.stats import chi2 as _chi2
 
@@ -181,9 +189,8 @@ def reml_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0, hksj=False,
             p_het = np.where(df_row > 0,
                              1.0 - _chi2.cdf(Q_row, df_row),
                              1.0)
-        pi_se = np.sqrt(se_row ** 2 + tau2_row)
-        pi_lower = result['logfoldchanges'].values - 1.96 * pi_se
-        pi_upper = result['logfoldchanges'].values + 1.96 * pi_se
+        pi_lower, pi_upper = _prediction_interval(
+            result['logfoldchanges'].values.astype(float), se_row, tau2_row, k_row)
 
         result['tau_squared'] = tau2_row
         result['Q'] = Q_row

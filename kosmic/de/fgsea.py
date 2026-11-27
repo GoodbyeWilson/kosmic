@@ -66,6 +66,13 @@ def load_fgsea_results(path):
 #: observed score, i.e. the value is below 1 / PERMUTATIONS.
 PERMUTATIONS = 1000
 
+#: Gene-set size bounds: a set is tested only when this many of its genes are
+#: in the ranking. 15 and 500 are the defaults of the Broad Institute's GSEA
+#: and of GSEApy's prerank: smaller sets give unstable scores, larger ones are
+#: too broad to say anything.
+GSEA_MIN_SIZE = 15
+GSEA_MAX_SIZE = 500
+
 
 def format_fdr(fdr) -> str:
     """'FDR = 0.012', or 'FDR < 0.001' for a GSEA FDR of 0, which is the
@@ -80,7 +87,8 @@ def format_permutation_value(value, fmt: str = '.2e') -> str:
 
 
 def run_fgsea(gene_de_results, pathway_gene_sets, rank_by='logfoldchanges',
-              min_size=3, max_size=5000, permutation_num=PERMUTATIONS, seed=0,
+              min_size=GSEA_MIN_SIZE, max_size=GSEA_MAX_SIZE,
+              permutation_num=PERMUTATIONS, seed=0,
               threads=4, return_details=False):
     """Preranked GSEA of pathways against the ranked gene-level DE results.
 
@@ -93,9 +101,9 @@ def run_fgsea(gene_de_results, pathway_gene_sets, rank_by='logfoldchanges',
     rank_by : str
         Column used to rank genes (default ``'logfoldchanges'``).
     min_size, max_size : int
-        Gene-set size bounds (genes present in the ranking). ``min_size=3``
-        so small a-priori pathways are still tested (note: GSEA is noisy for
-        very small sets).
+        Gene-set size bounds (genes present in the ranking). Default
+        :data:`GSEA_MIN_SIZE` and :data:`GSEA_MAX_SIZE`, the GSEA defaults
+        (15 and 500).
     permutation_num : int
         Gene-set permutations for the null.
     seed : int
