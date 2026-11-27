@@ -6,6 +6,8 @@ Identify over-represented pathways among your significant DE genes.
 
 Enrichment analysis tests whether your significant DE genes are enriched for membership in known biological pathways or gene sets. This is the interpretation endpoint of discovery mode.
 
+The page opens on preranked GSEA of the bundled MSigDB Hallmark sets (human), with genes ranked by their test statistic: every gene is used and no significance cutoff is needed. Over-representation (ORA) of the significant genes, and the other libraries, are the alternatives.
+
 ## Enrichr libraries
 
 Over-representation analysis against pathway databases downloaded from Enrichr (KEGG, Reactome, MSigDB Hallmark, WikiPathways, the Gene Ontology libraries, etc.). Uses Fisher's exact test with BH correction.
@@ -30,8 +32,8 @@ Preranked GSEA orders every gene by one value. In the DE workspace, **Rank genes
 
 | Choice | What orders the genes |
 |---|---|
-| **Log2 fold change** (default) | The effect size alone. |
-| **Test statistic** | The log2 fold change divided by its standard error: DESeq2's Wald statistic, or Welch's t for the t-test methods. A gene measured with little precision, such as one with few counts, has a large standard error, so a noisy fold change does not carry it to either end of the ranking. Preranked GSEA of DESeq2 results usually ranks by it. |
+| **Test statistic** (default) | The log2 fold change divided by its standard error: DESeq2's Wald statistic, or Welch's t for the t-test methods. A gene measured with little precision, such as one with few counts, has a large standard error, so a noisy fold change does not carry it to either end of the ranking. Preranked GSEA of DESeq2 results usually ranks by it. |
+| **Log2 fold change** | The effect size alone. |
 
 A DE result saved by a version of KOSMIC that did not keep the test statistic cannot be ranked by it; run the DE again. The meta-analysis Enrichment step has no choice: it ranks by the pooled z-statistic, the pooled effect divided by its pooled standard error. The ranking used is recorded with each run.
 

@@ -337,7 +337,7 @@ def test_run_and_export_sit_outside_the_accordion(enrich):
         in_cards.update(id(b) for b in card.findChildren(QPushButton))
     outside = [b.text() for b in enrich.sidebar.findChildren(QPushButton)
                if id(b) not in in_cards]
-    assert "Run Enrichment" in outside
+    assert "Run GSEA" in outside            # GSEA is the default method
     assert "Export CSV..." in outside
 
 

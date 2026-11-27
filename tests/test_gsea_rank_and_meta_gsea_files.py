@@ -62,12 +62,14 @@ def _capture(monkeypatch):
     return seen
 
 
-def test_the_de_page_offers_the_ranking_and_ranks_by_log2fc_by_default(app):
+def test_the_de_page_opens_on_gsea_of_hallmark_ranked_by_the_statistic(app):
     page = _de_page(DE)
+    assert page._method_combo.currentData() == 'gsea'
+    assert page._library_combo.currentData() == 'MSigDB_Hallmark_2026.2_Hs'
     assert [page._rank_combo.itemData(i) for i in range(page._rank_combo.count())] == \
-        ['logfoldchanges', 'statistic']
+        ['statistic', 'logfoldchanges']
     assert not page._rank_combo.isHidden()
-    assert page._rank_by() == 'logfoldchanges'
+    assert page._rank_by() == 'statistic'
     page._method_combo.setCurrentIndex(page._method_combo.findData('ora'))
     assert page._rank_combo.isHidden()      # ORA does not rank genes
 
@@ -84,6 +86,7 @@ def test_gsea_ranks_by_the_test_statistic_when_chosen(app, monkeypatch):
 def test_gsea_ranks_by_log2fc_when_that_is_chosen(app, monkeypatch):
     seen = _capture(monkeypatch)
     page = _de_page(DE)
+    page._rank_combo.setCurrentIndex(page._rank_combo.findData('logfoldchanges'))
     page._run_gsea()
     assert seen['rank'] == {'A': 3.0, 'B': -0.5, 'C': 0.2}
 

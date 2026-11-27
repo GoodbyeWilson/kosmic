@@ -85,8 +85,8 @@ class EnrichmentPage(SidebarTabbedPage):
     # ranks by: a noisy fold change of a lowly expressed gene does not
     # reach the extremes of the ranking. Empty: no choice, 'rank_column'.
     RANK_CHOICES = (
-        ("Log2 fold change", 'logfoldchanges'),
         ("Test statistic (DESeq2: Wald, log2FC / SE)", 'statistic'),
+        ("Log2 fold change", 'logfoldchanges'),
     )
 
     enrichment_complete = pyqtSignal()
@@ -345,6 +345,11 @@ class EnrichmentPage(SidebarTabbedPage):
                      self._pct_filter.valueChanged):
             _sig.connect(self._refresh_card_summaries)
         self._pct_filter_check.toggled.connect(self._refresh_card_summaries)
+
+        # Defaults: preranked GSEA of the Hallmark sets (the first bundled
+        # library), which ranks every gene and needs no significance cutoff.
+        self._method_combo.setCurrentIndex(self._method_combo.findData("gsea"))
+        self._on_method_changed()
         self._refresh_card_summaries()
 
         # -- Right content area: tabs (provided by SidebarTabbedPage) --

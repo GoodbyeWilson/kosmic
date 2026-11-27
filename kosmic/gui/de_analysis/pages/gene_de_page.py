@@ -1227,10 +1227,13 @@ class GeneDEPage(SidebarTabbedPage):
         if hasattr(self, '_pathway_only_check'):
             self._pathway_only_check.setVisible(has_pathways and discovery)
 
+        # Both tabs are views of the chosen pathways: hypothesis mode only.
+        # Discovery tests the whole transcriptome, and a pathway list left
+        # over from a hypothesis run must not bring them back.
         for attr in ('_pw_gene_tab_idx', '_topde_tab_idx'):
             idx = getattr(self, attr, None)
             if idx is not None and self.tabs is not None:
-                self.tabs.setTabVisible(idx, has_pathways)
+                self.tabs.setTabVisible(idx, has_pathways and not discovery)
 
     def _on_mode_changed(self, mode):
         """Reset the pathway-only volcano filter to the mode's natural default.
