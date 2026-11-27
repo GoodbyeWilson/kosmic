@@ -1,16 +1,16 @@
 # Installation
 
-KOSMIC is a desktop application for Windows, macOS and Linux. It needs
-a graphical session; it does not run on a headless server. Allow 8 GB
-of memory as a minimum and 16–32 GB for datasets of several hundred
-thousand cells. Windows 11 is the most heavily tested platform, Ubuntu
-24.04 moderately, macOS least — please report problems there.
+KOSMIC is a desktop application for Windows, tested on Windows 11 with
+Python 3.12. It may run on macOS or Linux, but it is not tested there.
+It needs a graphical session; it does not run on a headless server.
+Allow 8 GB of memory as a minimum and 16–32 GB for datasets of several
+hundred thousand cells.
 
 There are two ways to install it.
 
 ## Installer
 
-One-click installers for Windows, macOS and Linux will be published on
+A one-click installer for Windows will be published on
 the project's GitHub Releases page. They include Python and every
 dependency; nothing else needs to be installed. Until the first release
 is published, install from source as below.
@@ -19,15 +19,14 @@ is published, install from source as below.
 
 You need two things installed first. Both are free.
 
-**Python 3.11 or newer.** Check what you have by opening a terminal
-(Windows: press the Windows key, type `cmd`, Enter; macOS: Terminal;
-Linux: your usual shell) and running:
+**Python 3.12 or newer.** Check what you have by opening a terminal
+(press the Windows key, type `cmd`, Enter) and running:
 
 ```sh
 python --version
 ```
 
-If that says 3.11 or higher, you are set. If it says an older version,
+If that says 3.12 or higher, you are set. If it says an older version,
 or "not recognized" / "not found", install it from
 [python.org/downloads](https://www.python.org/downloads/).
 
@@ -36,11 +35,6 @@ or "not recognized" / "not found", install it from
 > unticked is the most common reason the next step says `python` is not
 > recognised. If you already installed without it, re-run the installer,
 > choose *Modify*, and tick it there.
-
-On macOS the system `python3` is often too old; the python.org
-installer is the reliable option. On Linux, `python3.11` from your
-package manager is fine (`sudo apt install python3.11 python3.11-venv`
-on Ubuntu/Debian).
 
 **Git**, to download the code, from
 [git-scm.com](https://git-scm.com/downloads); the installer's defaults
@@ -57,13 +51,11 @@ cd kosmic
 python -m venv .venv
 ```
 
-Then activate the environment. This is the one step that differs by
-operating system, and you repeat it every time you open a new terminal
-to use KOSMIC:
+Then activate the environment. You repeat this every time you open a
+new terminal to use KOSMIC:
 
 ```sh
-.venv\Scripts\activate          # Windows (cmd or PowerShell)
-source .venv/bin/activate       # macOS / Linux
+.venv\Scripts\activate
 ```
 
 Your prompt should now start with `(.venv)`. Finally:
@@ -74,7 +66,7 @@ python main.py
 ```
 
 The install takes about five minutes and downloads roughly a gigabyte
-(the scientific Python stack). No compiler is needed on any platform.
+(the scientific Python stack). No compiler is needed.
 
 > **Note:** If PowerShell refuses to run the activate script ("running
 > scripts is disabled on this system"), run
@@ -82,7 +74,7 @@ The install takes about five minutes and downloads roughly a gigabyte
 > and try again. This is Windows' default policy, not a KOSMIC problem.
 
 If you already use conda, skip the venv lines: `conda create -n kosmic
-python=3.11`, `conda activate kosmic`, then the same
+python=3.12`, `conda activate kosmic`, then the same
 `pip install -e .`. Everything comes from PyPI either way.
 
 ## Optional components

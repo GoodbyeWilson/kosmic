@@ -95,17 +95,17 @@ documentation's [Statistical approach](https://goodbyewilson.github.io/kosmic/me
 
 ## Getting started
 
-**Installer.** One-click installers for Windows, macOS and Linux will be
-published on the Releases page. Until the first release, install from
-source.
+**Installer.** A one-click installer for Windows will be published on
+the Releases page. Until the first release, install from source.
 
-**From source** — Python 3.11 or newer and Git are the prerequisites:
+**From source** — Windows, Python 3.12 or newer and Git are the
+prerequisites (macOS and Linux may work but are not tested):
 
 ```sh
 git clone https://github.com/GoodbyeWilson/kosmic.git
 cd kosmic
 python -m venv .venv
-.venv\Scripts\activate          # Windows;  macOS/Linux: source .venv/bin/activate
+.venv\Scripts\activate
 pip install -e .
 python main.py
 ```

@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       # The reference pages are generated from the package, so the docs
       # build needs the package importable (deps included: mkdocstrings
       # reads signatures statically, but the gen script imports nothing

@@ -7,7 +7,7 @@ name = "kosmic"
 version = "0.2.0"
 description = "KOSMIC -- Kirk's Open-source Single-cell Meta-analysis Integration and Comparison"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Calum Wilson" },
     { name = "Kirk Franks" },
@@ -25,7 +25,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 # GPL-3.0: PyQt6 and leidenalg are GPL, so a distributed build is GPL
@@ -69,14 +69,9 @@ dependencies = [
 [project.optional-dependencies]
 # Developer / test tooling
 dev = [
-    # Below 9.2: with pytest 9.2.0 every '--forked' test exits with status
-    # 3 on CI (all 1,507, first seen 28 Oct 2026). Lift once pytest-forked
-    # supports it.
-    "pytest>=7.0,<9.2",
-    # Each test in its own forked process (CI, Linux only): a Qt object
-    # one test leaves behind cannot then be destroyed inside another
-    # test's widget construction. Unix-only, which is where it is used.
-    "pytest-forked>=1.6; sys_platform != 'win32'",
+    "pytest>=7.0",
+    # Runs the suite in parallel worker processes (CI: -n 4).
+    "pytest-xdist>=3.5",
     "pyyaml>=6",       # tests read mkdocs.yml
     "ruff>=0.4",
 ]

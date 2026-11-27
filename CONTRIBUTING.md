@@ -14,16 +14,15 @@ For how the code is currently laid out, see [`CODEBASE.md`](CODEBASE.md).
 git clone https://github.com/GoodbyeWilson/kosmic.git
 cd kosmic
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # macOS / Linux
+.venv\Scripts\activate
 pip install -e ".[dev]"
 python main.py
 ```
 
-Python 3.11+. No compiler needed — every dependency has a prebuilt
-wheel on all three platforms. `pyproject.toml` is the single source of
-truth for dependencies. Conda users: `conda create -n kosmic
-python=3.11` and then the same `pip install`; there is no separate
+Windows, Python 3.12+: the only platform CI tests. No compiler needed —
+every dependency has a prebuilt wheel. `pyproject.toml` is the single
+source of truth for dependencies. Conda users: `conda create -n kosmic
+python=3.12` and then the same `pip install`; there is no separate
 conda path to maintain.
 
 Two things are deliberately **not** required, because neither is on
