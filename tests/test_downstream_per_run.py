@@ -214,3 +214,44 @@ def test_the_run_bar_sits_above_each_pages_results(ws):
     assert ws._top_layout.indexOf(ws.run_bar) == 0
     ws.switch_tab(pages.index(3))
     assert gene_de.content_layout.indexOf(ws.run_bar) == 0
+
+
+def test_load_data_says_which_counts_have_saved_runs(ws):
+    """Runs are kept per counts; Load Data says what Gene DE will list."""
+    setup = ws.setup_page
+    assert setup._saved_runs_text('raw') == "2 cell types and the whole study"
+    assert setup._saved_runs_text('decontX_counts') == (
+        "None on these counts; original counts: 2 cell types and the whole study")
+
+
+def test_the_counts_choice_is_remembered_per_project(app, tmp_path):
+    from PyQt6.QtCore import QSettings
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+
+    study = tmp_path / 'Project' / 'S1'
+    study.mkdir(parents=True)
+    h5ad = study / 'S1.h5ad'
+    a = _adata()
+    a.layers['decontX_counts'] = a.X.copy()
+    a.write_h5ad(h5ad)
+    settings = QSettings(str(tmp_path / 'kosmic.ini'), QSettings.Format.IniFormat)
+
+    def workspace():
+        w = DEWorkspace()
+        w.settings = settings                  # never the user's own settings
+        w.project_dir = study
+        return w
+
+    first = workspace()
+    first.setup_page._choose_counts('decontX_counts')        # no study loaded: no reload
+    second = workspace()                                      # KOSMIC opened again
+    assert second.counts_choice is None
+    second.setup_page._restore_counts_choice(h5ad)
+    assert second.counts_choice == 'decontX_counts'
+    # A study without those counts opens on the original counts.
+    plain = tmp_path / 'Project' / 'S2'
+    plain.mkdir()
+    _adata().write_h5ad(plain / 'S2.h5ad')
+    second.project_dir = plain
+    second.setup_page._restore_counts_choice(plain / 'S2.h5ad')
+    assert second.counts_choice is None
