@@ -59,7 +59,13 @@ different assumptions and fail in different ways:
 - **Rank aggregation** — SumRank, and gwOP — which pool the *ranking*
   of genes within each study and are insensitive to effect-size scale.
 - **p-value combination** — Fisher's method (unsigned) and Stouffer's
-  (signed) — which pool evidence without an effect size.
+  (signed) — which pool evidence without an effect size. Both are the
+  textbook methods: each study's p-value is used as it is, with no floor,
+  and a study with p = 1 counts (it adds z = 0 to Stouffer's sum). The
+  only limit is numerical: a p-value that underflowed to 0 is taken as
+  10⁻³⁰⁰. With p-values as small as single-cell studies give, the pooled
+  p-value of the strongest genes can therefore be very small; their order
+  is still informative.
 - **Vote counting** — the number of studies that call a gene
   significant in the same direction. See
   [Vote counting](#vote-counting).

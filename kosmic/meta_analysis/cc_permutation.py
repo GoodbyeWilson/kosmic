@@ -749,7 +749,8 @@ def _pool_fisher_pvals(effects, var_matrix, valid_mask, pval_matrix=None, **kw):
                          effects / np.sqrt(var_matrix), 0.0)
         from scipy.stats import norm
         pval_matrix = 2 * norm.sf(np.abs(z))
-    p_valid = valid_mask & np.isfinite(pval_matrix) & (pval_matrix > 0)
+    p_valid = (valid_mask & np.isfinite(pval_matrix)
+               & (pval_matrix >= 0) & (pval_matrix <= 1))
     k_arr = p_valid.sum(axis=1).astype(int)
     p_safe = np.where(p_valid, np.clip(pval_matrix, 1e-300, 1.0), 1.0)
     log_p = np.where(p_valid, np.log(p_safe), 0.0)
@@ -769,10 +770,9 @@ def _pool_stouffer_pvals(effects, var_matrix, valid_mask, pval_matrix=None,
                          effects / np.sqrt(var_matrix), 0.0)
         pval_matrix = 2 * norm.sf(np.abs(z))
     p_valid = (valid_mask & np.isfinite(pval_matrix)
-               & (pval_matrix > 0) & (pval_matrix < 1))
+               & (pval_matrix >= 0) & (pval_matrix <= 1))
     k_arr = p_valid.sum(axis=1).astype(int)
-    p_safe = np.where(p_valid,
-                      np.clip(pval_matrix, 1e-300, 1 - 1e-12), 0.5)
+    p_safe = np.where(p_valid, np.clip(pval_matrix, 1e-300, 1.0), 1.0)
     z_mag = norm.isf(p_safe / 2.0)
     signs = np.where(effects > 0, 1.0,
                      np.where(effects < 0, -1.0, 0.0))

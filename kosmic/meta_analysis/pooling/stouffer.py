@@ -60,15 +60,13 @@ def stouffer_fast(datasets, min_studies=MIN_STUDIES, weighted=False,
      pathway_map, study_info, _dataset_names, pval_matrix) = \
         _build_effect_matrices(datasets)
 
+    # Every study with a p-value counts, p = 1 included (z = 0). Each p is
+    # used as it is: the only limit is 1e-300, which keeps a p of 0 (an
+    # underflow) finite, so no study's evidence is capped.
     p_valid = (valid_mask & np.isfinite(pval_matrix)
-               & (pval_matrix > 0) & (pval_matrix < 1))
+               & (pval_matrix >= 0) & (pval_matrix <= 1))
     k_arr = p_valid.sum(axis=1).astype(int)
-
-    # Floor per-study p at 1/n_genes (same rationale as Fisher).
-    n_genes = len(gene_names)
-    p_floor = 1.0 / max(n_genes, 1)
-    p_safe = np.where(p_valid,
-                      np.clip(pval_matrix, p_floor, 1 - 1e-12), 0.5)
+    p_safe = np.where(p_valid, np.clip(pval_matrix, 1e-300, 1.0), 1.0)
     z_mag = norm.isf(p_safe / 2.0)
     signs = np.where(effects_matrix > 0, 1.0,
                      np.where(effects_matrix < 0, -1.0, 0.0))

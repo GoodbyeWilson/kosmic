@@ -10,8 +10,8 @@ DL has its own file (``test_dl_correctness.py``) covering the τ²
 truncation behaviour and HKSJ variant. This file adds one canonical
 correctness sentinel per remaining method.
 
-The rank and p-value methods require a realistic gene-set context (Fisher
-floors p at 1/n_genes so single-gene tests collapse, SumRank needs a real
+The rank and p-value methods are tested in a realistic gene-set context
+(SumRank needs a real
 rank space). All such tests use a 30-gene fixture.
 """
 from __future__ import annotations
@@ -159,19 +159,14 @@ def test_fisher_pooled_pvalue_orders_sig_before_null(three_studies_30_genes):
     assert sig['pvals_pooled'] < null['pvals_pooled']
 
 
-def test_fisher_matches_scipy_on_floored_pvalues(three_studies_30_genes):
-    """KOSMIC's Fisher floors per-study p at 1/n_genes. With that floor
-    applied, the combined-p must match scipy.stats.combine_pvalues."""
-    n_genes = 30
-    p_floor = 1.0 / n_genes
-
-    # Reconstruct what the SIG gene's p-values become after KOSMIC's floor.
+def test_fisher_matches_scipy_on_the_raw_pvalues(three_studies_30_genes):
+    """KOSMIC's Fisher is the textbook test: each study's p used as it is,
+    so the combined p equals scipy.stats.combine_pvalues."""
     sig_raw = np.array([
         ds[ds['names'] == 'G00'].iloc[0]['pvals']
         for ds in three_studies_30_genes
     ])
-    sig_floored = np.clip(sig_raw, p_floor, 1.0)
-    expected = scipy_stats.combine_pvalues(sig_floored, method='fisher').pvalue
+    expected = scipy_stats.combine_pvalues(sig_raw, method='fisher').pvalue
 
     out = fisher_fast(three_studies_30_genes, min_studies=2)
     sig = _row(out, 'G00')
