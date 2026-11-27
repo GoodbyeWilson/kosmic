@@ -356,8 +356,9 @@ class GeneDEPage(SidebarTabbedPage):
         self.eb_checkbox.setChecked(False)
         self.eb_checkbox.setEnabled(False)  # Disabled by default (DESeq2 selected)
         self.eb_checkbox.setToolTip(
-            "Shrink per-gene variance toward a common prior (limma-style).\n"
-            "Reduces false positives from genes with unusually low variance.\n"
+            "Shrink per-gene variance toward a common prior.\n"
+            "KOSMIC's own version, not limma's: the prior variance is the median\n"
+            "and its degrees of freedom are capped at 50. Under review.\n"
             "Only applies to t-test method."
         )
         self.eb_checkbox.toggled.connect(self._on_eb_toggled)

@@ -322,6 +322,9 @@ class GeneMAPage(SidebarTabbedPage):
             "only): the pooled effect is tested with an adjusted standard "
             "error and a t-test on k - 1 degrees of freedom, where k is the "
             "number of studies.</p>"
+            "<p>KOSMIC never lets the adjusted standard error fall below the "
+            "unadjusted one: the ad hoc variant (metafor's test=\"adhoc\"), "
+            "not plain HKSJ (test=\"knha\"). Under review.</p>"
             "<p>It suits one outcome pooled over a few studies. Over "
             "thousands of genes with fewer than about 10 studies, it rarely "
             "lets any gene pass a genome-wide FDR.</p>")

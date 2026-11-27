@@ -85,8 +85,8 @@ them. It is a consensus of statistical methods on the same data, not an
 independent validation; the Validation step's proteomics (Olink) and
 GWAS comparisons are the external evidence.
 
-With two studies, the DerSimonian–Laird and REML estimates coincide
-(τ² has one degree of freedom), Hartung–Knapp has one degree of freedom
+With two studies, τ² rests on a single difference between them and is
+very uncertain whichever estimator is used, Hartung–Knapp has one degree of freedom
 in its t-distribution and finds nothing, and the rank methods have
 almost no resolution. Two studies is the minimum that runs; five or
 more is where the method choice starts to matter.
@@ -247,9 +247,9 @@ what genome-wide discovery misses:
 
 Over-representation and gene-set enrichment on discovery results use
 Fisher's exact test against the tested-gene background and preranked
-GSEA respectively; Gene Ontology enrichment uses the topGO-style *elim*
-algorithm, which removes the genes of a significant child term before
-testing its parents.
+GSEA respectively; Gene Ontology enrichment uses Fisher's exact test
+with BH correction by default (KOSMIC's *elim* option is its own
+variant, not topGO's, and is under review).
 
 ## Gene identity across studies
 

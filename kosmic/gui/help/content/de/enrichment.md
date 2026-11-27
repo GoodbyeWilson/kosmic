@@ -8,7 +8,7 @@ Enrichment analysis tests whether your significant DE genes are enriched for mem
 
 ## GO enrichment
 
-Gene Ontology enrichment uses local GO annotations. The 'elim' algorithm is DAG-aware and removes redundant parent terms. 'Fisher + BH' is the standard approach with FDR correction.
+Gene Ontology enrichment uses local GO annotations. 'Fisher + BH' (the default) is the standard over-representation test with FDR correction. 'elim' is KOSMIC's own variant, not topGO's elim algorithm: it removes a significant term's genes from every term tested after it, not only from its parent terms, and keeps the full background, so it is more conservative. It is under review.
 
 ## Enrichr libraries
 

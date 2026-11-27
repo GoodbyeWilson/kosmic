@@ -8,9 +8,10 @@
 # Matches R's 'metafor::rma(method="REML")' for the τ² estimate to ~1e-7
 # (Fisher-scoring iteration reaches the same maximum of the REML log-likelihood
 # that metafor does; cross-checked against 'scipy.optimize.minimize_scalar'
-# on the REML log-likelihood and against the published 'dat.bcg' values in
-# 'tests/meta_analysis/test_reml_correctness.py'). With 'hksj=True' matches
-# 'metafor::rma(method="REML", test="knha")'.
+# on the REML log-likelihood and against metafor's published 'dat.bcg' values,
+# tau² and I², in 'tests/test_paper_textbook_fixes.py'). With 'hksj=True' it is
+# the ad hoc variant, 'metafor::rma(method="REML", test="adhoc")': the HKSJ
+# factor is truncated at 1 (pooling_core._hksj_se). Plain 'knha' does not truncate.
 from __future__ import annotations
 from kosmic import MIN_STUDIES
 

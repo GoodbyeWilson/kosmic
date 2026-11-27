@@ -353,11 +353,13 @@ class PathwayMAPage(SidebarPage):
 
         self._scoring_combo = QComboBox()
         self._scoring_combo.addItems([
-            "DESeq2 + VIF (recommended)",
+            "DESeq2 + VIF (KOSMIC's own, under review)",
             "CPM + Welch (legacy)"])
         self._scoring_combo.setToolTip(
-            "DESeq2 + VIF: pathway summaries from per-gene DESeq2 "
-            "results with CAMERA-style VIF correction.\n\n"
+            "DESeq2 + VIF: pathway summaries from per-gene DESeq2 results, with\n"
+            "the SE inflated by a variance inflation factor for a fixed inter-gene\n"
+            "correlation of 0.1. KOSMIC's own method, not CAMERA (which estimates\n"
+            "the correlation from the data). Under review.\n\n"
             "CPM + Welch: mean log2-CPM, Welch t-test. Legacy.")
         settings_group.add_row("Scoring:", self._scoring_combo)
 

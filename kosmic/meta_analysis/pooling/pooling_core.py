@@ -251,8 +251,9 @@ def _hksj_se(pooled, effects_matrix, weights_re, valid_mask):
     # Truncation: q_hk must be >= 1 to prevent the HKSJ SE from being
     # smaller than the standard DL/REML SE. Without this, genes with
     # very consistent effects across studies get artificially small SEs,
-    # leading to anti-conservative p-values. This is the standard
-    # correction used by R's metafor (test="knha") and Stata.
+    # leading to anti-conservative p-values. This is the ad hoc variant
+    # (Knapp & Hartung 2003; metafor test="adhoc"), not plain HKSJ
+    # (metafor test="knha", which does not truncate). Under review.
     q_hk = np.maximum(q_hk, 1.0)
 
     # HKSJ SE: sqrt(q_hk / sum(w_i))

@@ -388,7 +388,8 @@ def test_algorithm_shows_without_the_page_being_visible(enrich):
         if enrich._library_combo.itemData(i) == "GO_BP":
             enrich._library_combo.setCurrentIndex(i)
             break
-    assert "elim" in " ".join(_summary(enrich._terms_card))
+    # Fisher + BH is the default GO algorithm (elim is KOSMIC's own variant).
+    assert "GO fisher" in " ".join(_summary(enrich._terms_card))
 
 
 def test_meta_gsea_saves_into_the_selection_folder(enrich, tmp_path):

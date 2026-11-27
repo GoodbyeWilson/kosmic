@@ -77,3 +77,10 @@ def test_gsea_size_defaults_are_gseas():
     sig = inspect.signature(fgsea.run_fgsea)
     assert sig.parameters['min_size'].default == 15
     assert sig.parameters['max_size'].default == 500
+
+
+def test_sumrank_top_r_monte_carlo_p_is_never_zero():
+    """A rank sum below every simulated one gets (0 + 1) / (n + 1), not 0."""
+    from kosmic.meta_analysis.pooling.sumrank import _top_r_sum_cdf
+    p = _top_r_sum_cdf(1e-9, 5, 3)
+    assert 0 < p < 1e-6

@@ -256,11 +256,13 @@ class EnrichmentPage(SidebarTabbedPage):
         self._algo_label = QLabel("Algorithm:")
         method_lay.addWidget(self._algo_label)
         self._algo_combo = NoScrollComboBox()
-        self._algo_combo.addItem("elim (DAG-aware)", "elim")
         self._algo_combo.addItem("Fisher + BH", "fisher")
+        self._algo_combo.addItem("elim (KOSMIC's own, under review)", "elim")
         self._algo_combo.setToolTip(
-            "elim: DAG-aware, removes redundant parent terms (recommended).\n"
-            "Fisher + BH: standard over-representation with FDR correction.")
+            "Fisher + BH: the standard over-representation test with FDR correction.\n"
+            "elim: KOSMIC's own variant, not topGO's elim. It removes a significant\n"
+            "term's genes from every later term and keeps the full background, so it\n"
+            "is more conservative than topGO's. Under review.")
         method_lay.addWidget(self._algo_combo)
         method_lay.addStretch()
 

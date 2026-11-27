@@ -135,7 +135,9 @@ def _top_r_sum_cdf(x, k, r):
 
     sums, cdf = _top_r_lookup_cache[key]
     idx = np.searchsorted(sums, x, side='right')
-    return float(idx / len(sums))
+    # The Monte Carlo estimate (b + 1) / (n + 1) (Phipson & Smyth 2010), so
+    # a sum below every simulated one gets p of about 2e-7, never 0.
+    return float((idx + 1) / (len(sums) + 1))
 
 
 def _irwin_hall_cdf_fast(x, n):
