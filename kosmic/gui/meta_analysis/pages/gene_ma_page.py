@@ -12,9 +12,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSplitter, QGridLayout, QSpinBox, QComboBox,
     QCheckBox, QLineEdit,
-    QRadioButton, QButtonGroup, QStackedWidget,
+    QStackedWidget,
 )
-from PyQt6.QtCore import QSettings, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 
 import numpy as np
 import pyqtgraph as pg
@@ -23,7 +23,7 @@ from kosmic.gui.shared.theme import get_color, style_pg_plot
 from kosmic.gui.shared.widgets import (
     SidebarTabbedPage,
     SecondaryLabel, SectionHeader, PrimaryButton,
-    StageAccordion, StageSummaryCard, HintLabel,
+    StageAccordion, StageSummaryCard,
 )
 
 from kosmic.paths import meta_output_dir
@@ -46,17 +46,25 @@ from kosmic.gui.meta_analysis.pages.gene_ma.workers import (
 
 # --- Method registry ---
 
-_METHODS = [
-    ('dl', 'DL'),
-    ('reml', 'REML'),
-    ('stouffer', 'Stouffer'),
-    ('fisher', 'Fisher'),
-    ('sumrank', 'SumRank'),
-    ('gwop', 'gwOP'),
-    ('vote_count', 'Vote count'),
-]
-
-_METHOD_KEYS_BASE = {name: key for key, name in _METHODS}
+#: (family, key, label): one method per family, each a checkbox.
+_METHOD_CHOICES = (
+    ('effect_size', 'reml', 'REML'),
+    ('rank', 'sumrank', 'SumRank'),
+    ('pvalue', 'stouffer', 'Stouffer'),
+    ('vote', 'vote_count', 'Vote count'),
+)
+_METHODS = [(key, label) for _fam, key, label in _METHOD_CHOICES]
+_METHOD_TIPS = {
+    'reml': "REML random effects: pools each study's log2 fold change and its "
+            "standard error, allowing for differences between studies.",
+    'sumrank': "SumRank: sums each gene's relative rank across studies; with "
+               "'best %' below 100 only the gene's best-ranked share of studies "
+               "is summed, for effects present in a subset of cohorts.",
+    'stouffer': "Stouffer's Z: combines each study's p-value, signed by its "
+                "direction.",
+    'vote_count': "Vote counting: the number of studies calling the gene "
+                  "significant in the same direction (a rule, no p-value).",
+}
 
 def _short_study_names(names: list[str]) -> list[str]:
     """Study names without the suffix they all share, such as
@@ -73,26 +81,8 @@ def _short_study_names(names: list[str]) -> list[str]:
     return short if all(short) else list(names)
 
 
-# Families Consensus mode leaves unticked: vote counting is a rule, and
-# in a consensus it removes every gene too few studies call on their own.
-_OPT_IN_FAMILIES = {'vote'}
-_METHOD_KEYS_TOP50 = {
-    'dl': 'dl_top50',
-    'reml': 'reml_top50',
-    'sumrank': 'sumrank_top50',
-}
-
-# Effect-size methods composed with HKSJ small-sample correction.
-_HKSJ_MAP = {
-    'dl': 'dl_hksj',
-    'reml': 'reml_hksj',
-    'dl_top50': 'dl_top50_hksj',
-    'reml_top50': 'reml_top50_hksj',
-}
-
-# DE-method combo index → canonical method key used in DE filenames.
-# Combo order: "DESeq2", "Welch CPM", "Welch Raw".
-_DE_METHOD_COMBO_MAP = ['deseq2', 'welch_cpm', 'welch_raw']
+# The DE method whose results are pooled: DESeq2, the only one.
+_DE_METHOD_COMBO_MAP = ['deseq2']
 
 # Allowable filename-key fallbacks per DE method. Tight aliases only --
 # never silently substitute a different DE algorithm.
@@ -158,7 +148,6 @@ class GeneMAPage(SidebarTabbedPage):
         self._loo_result = None
         self._loo_worker = None
         self._last_selected_gene = None
-        self._last_single_family = None
         # Per-mode result cache: switching modes preserves prior work.
         # Stores raw data; widgets re-render on restore.
         # (Reproducibility cache lives on the ReproducibilityTab.)
@@ -203,7 +192,6 @@ class GeneMAPage(SidebarTabbedPage):
         self._project_folder = project_folder
         self._sync_min_studies()
         self._refresh_ma_cards()
-        self._update_hksj_note()
         self._pathway_ma_results = pathway_ma_results
         self._pathway_gene_sets = pathway_gene_sets or {}
         n = len(self._datasets)
@@ -247,93 +235,45 @@ class GeneMAPage(SidebarTabbedPage):
         self._info_label = SecondaryLabel("No studies loaded yet.")
         self._mode_label = SecondaryLabel("Mode: Exploratory")
 
-        # --- Method Mode ---
-        from kosmic.gui.meta_analysis.dialogs.ma_settings_dialog import (
-            METHOD_FAMILIES)
-
-        # The cards already draw a frame and carry a title, so the
-        # contents go in bare. A SettingsGroup here nested a titled box
-        # inside a titled box and repeated the heading.
-        mb_lay = QHBoxLayout()
-        mb_lay.setContentsMargins(0, 0, 0, 0)
-        self._single_radio = QRadioButton("Single")
-        self._consensus_radio = QRadioButton("Consensus")
-        self._single_radio.setChecked(True)
-        mode_group = QButtonGroup(self)
-        mode_group.addButton(self._single_radio)
-        mode_group.addButton(self._consensus_radio)
-        self._single_radio.toggled.connect(self._on_method_mode_toggled)
-        self._single_radio.toggled.connect(self._sync_run_button_text)
-        mb_lay.addWidget(self._single_radio)
-        mb_lay.addWidget(self._consensus_radio)
-        mb_lay.addStretch()
-        self._card_pages['method'][1].addLayout(mb_lay)
-
+        # --- Methods: one checkbox per method; several ticked = consensus ---
         method_grid = QGridLayout()
         method_grid.setContentsMargins(0, 0, 0, 0)
         method_grid.setColumnStretch(0, 0)
         method_grid.setColumnStretch(1, 1)
-
         self._family_checks: dict = {}
-        self._family_combos: dict = {}
-        self._family_btn_group = QButtonGroup(self)
-        self._family_btn_group.setExclusive(True)  # single mode default
-        self._family_btn_group.buttonToggled.connect(
-            self._on_family_selection_changed)
-
-        for i, (fam_key, fam_label, _methods) in enumerate(METHOD_FAMILIES):
-            cb = QCheckBox(f"{fam_label}:")
-            cb.setChecked(i == 0)
+        for i, (fam_key, key, label) in enumerate(_METHOD_CHOICES):
+            cb = QCheckBox(label)
+            cb.setChecked(fam_key != 'vote')      # vote counting is opt-in
+            cb.setToolTip(_METHOD_TIPS[key])
             self._family_checks[fam_key] = cb
-            self._family_btn_group.addButton(cb)
-            combo = QComboBox()
-            combo.setMinimumContentsLength(12)
-            self._family_combos[fam_key] = combo
             method_grid.addWidget(cb, i, 0)
-            method_grid.addWidget(combo, i, 1)
-
-        self._single_combo = list(self._family_combos.values())[0]
-
-        self._populate_method_dropdowns()
+        # SumRank's own setting: how many of each gene's studies are summed.
+        self._sumrank_top_spin = QSpinBox()
+        self._sumrank_top_spin.setRange(1, 100)
+        self._sumrank_top_spin.setSingleStep(10)
+        self._sumrank_top_spin.setValue(100)
+        self._sumrank_top_spin.setPrefix("best ")
+        self._sumrank_top_spin.setSuffix("% of studies")
+        self._sumrank_top_spin.setToolTip(
+            "SumRank sums each gene's ranks over its best-ranked share of "
+            "studies: 100% sums every study; 50% the best half (the best 3 of "
+            "5), for effects present in a subset of cohorts. The p-value then "
+            "comes from the distribution of the sum of the r smallest of k "
+            "ranks.")
+        method_grid.addWidget(self._sumrank_top_spin, 1, 1)
+        sumrank_cb = self._family_checks['rank']
+        self._sumrank_top_spin.setEnabled(sumrank_cb.isChecked())
+        sumrank_cb.toggled.connect(self._sumrank_top_spin.setEnabled)
+        for cb in self._family_checks.values():
+            cb.toggled.connect(self._on_family_selection_changed)
+            cb.toggled.connect(self._sync_run_button_text)
+        self._sumrank_top_spin.valueChanged.connect(self._on_family_selection_changed)
+        self._sumrank_top_spin.valueChanged.connect(self._sync_run_button_text)
         self._card_pages['method'][1].addLayout(method_grid)
 
         sg = QVBoxLayout()
         sg.setContentsMargins(0, 0, 0, 0)
         sg.setSpacing(6)
-
-        self._top50_cb = QCheckBox("Top 50% selection")
-        # Rich text so Qt wraps it; a plain-text tooltip is one line
-        # per sentence and ran across most of the screen.
-        self._top50_cb.setToolTip(
-            "<p><b>SumRank:</b> sum only the best half of each gene's study "
-            "ranks (the best 3 of 5), for effects present in a subset of "
-            "cohorts. Stricter than the full sum when the cohorts agree.</p>"
-            "<p><b>DL / REML:</b> pool only the more precise half of each "
-            "gene's studies (smallest standard error, at least 2).</p>")
-        self._top50_cb.setChecked(False)
-        sg.addWidget(self._top50_cb)
-
-        # Kept short: the card viewport is ~274px and the qualifier ran
-        # to 542px, so the text was simply cut off. The detail is in the
-        # tooltip, which is where it was already spelled out anyway.
-        self._hksj_cb = QCheckBox("HKSJ correction")
-        self._hksj_cb.setToolTip(
-            "<p><b>Hartung-Knapp-Sidik-Jonkman adjustment</b> (DL and REML "
-            "only): the pooled effect is tested with an adjusted standard "
-            "error and a t-test on k - 1 degrees of freedom, where k is the "
-            "number of studies.</p>"
-            "<p>KOSMIC never lets the adjusted standard error fall below the "
-            "unadjusted one: the ad hoc variant (metafor's test=\"adhoc\"), "
-            "not plain HKSJ (test=\"knha\"). Under review.</p>"
-            "<p>It suits one outcome pooled over a few studies. Over "
-            "thousands of genes with fewer than about 10 studies, it rarely "
-            "lets any gene pass a genome-wide FDR.</p>")
-        self._hksj_cb.setChecked(False)
-        sg.addWidget(self._hksj_cb)
-        self._hksj_note = HintLabel("")
-        self._hksj_note.hide()
-        sg.addWidget(self._hksj_note)
-        self._hksj_cb.toggled.connect(self._update_hksj_note)
 
         # --- Calibration, DE method, Min studies ---
         grid = QGridLayout()
@@ -348,16 +288,17 @@ class GeneMAPage(SidebarTabbedPage):
             "CC permutation (exact, slow)"])
         self._cal_combo.setToolTip(
             "Analytical: each method's own p-value.\n"
-            "Fast: shuffles the disease/control labels within each study and "
-            "fits each study's own DE model, with its covariates, on every "
-            "shuffle by array code (ADR-019). It gives the exact permutation's "
-            "results five to ten times faster: about an hour and a half for 1,000 "
-            "permutations of five studies of a large cell type on 14 cores. Where scipy's optimiser "
-            "interface is not usable it falls back to a quick two-group "
-            "approximation, which calls somewhat fewer genes.\n"
-            "Exact: re-runs PyDESeq2 itself on every shuffle. About 30-40 s per "
-            "study per permutation on one core, so hours for 200 "
-            "permutations. For both, a stopped run continues where it stopped.")
+            "Both permutations shuffle the disease/control labels within each "
+            "study, refit each study's own DESeq2 model, with its covariates, on "
+            "every shuffle, and pool again.\n"
+            "Fast: the fit computed for all genes at once (ADR-019), tested equal "
+            "to PyDESeq2's; five to ten times faster than exact, about an hour "
+            "and a half for 1,000 permutations of five studies of a large cell "
+            "type on 14 cores. It needs scipy's private L-BFGS-B interface; "
+            "where that is not usable, KOSMIC says so (use exact).\n"
+            "Exact: PyDESeq2 itself on every shuffle. About 30-40 s per study per "
+            "permutation on one core, so hours for 200 permutations.\n"
+            "For both, a stopped run continues where it stopped.")
         grid.addWidget(self._cal_combo, r, 1)
         r += 1
 
@@ -385,12 +326,6 @@ class GeneMAPage(SidebarTabbedPage):
         self._cal_combo.currentIndexChanged.connect(self._show_cc_settings)
         self._show_cc_settings()
 
-        grid.addWidget(QLabel("DE method:"), r, 0)
-        self._de_combo = QComboBox()
-        self._de_combo.addItems(["DESeq2", "Welch CPM", "Welch Raw"])
-        grid.addWidget(self._de_combo, r, 1)
-        r += 1
-
         grid.addWidget(QLabel("Min studies:"), r, 0)
         self._min_studies_spin = QSpinBox()
         self._min_studies_spin.setRange(2, 20)
@@ -407,7 +342,6 @@ class GeneMAPage(SidebarTabbedPage):
         r += 1
         # The Settings card summarises both; it showed the default 3
         # after Min studies was changed.
-        self._de_combo.currentIndexChanged.connect(self._refresh_ma_cards)
         self._min_studies_spin.valueChanged.connect(self._refresh_ma_cards)
 
         self._min_votes_label = QLabel("Vote threshold:")
@@ -880,7 +814,7 @@ class GeneMAPage(SidebarTabbedPage):
         style_pg_plot(self._forest_plot, title=title,
                       left_label='', bottom_label=bottom)
 
-    def _on_family_selection_changed(self, button, checked):
+    def _on_family_selection_changed(self, *_):
         """Cache current results and restore cached results for the new selection."""
         current_keys = self._get_method_keys()
         run_keys = self._method_keys or []
@@ -936,8 +870,8 @@ class GeneMAPage(SidebarTabbedPage):
         is nothing to reach consensus between -- and it made the log
         unreadable when comparing one method against another.
         """
-        consensus = (hasattr(self, '_consensus_radio')
-                     and self._consensus_radio.isChecked())
+        consensus = (hasattr(self, '_family_checks')
+                     and len(self._get_method_keys()) > 1)
         return "Consensus" if consensus else "Meta-analysis"
 
     def _refresh_ma_cards(self, _=None):
@@ -957,15 +891,15 @@ class GeneMAPage(SidebarTabbedPage):
             first, second = "No studies loaded yet", "Select them on Select Studies"
         self._dataset_card.set_summary([first, second])
 
-        consensus = self._consensus_radio.isChecked()
-        keys = self._get_method_keys() if hasattr(self, '_get_method_keys') else []
+        keys = self._get_method_keys() if hasattr(self, '_family_checks') else []
+        labels = dict(_METHODS)
+        names = [labels.get(k, 'SumRank' if k.startswith('sumrank') else k) for k in keys]
         self._method_card.set_summary([
-            "Consensus of several methods" if consensus else "Single method",
-            (f"{len(keys)} method(s) selected" if keys else "no method selected"),
+            "Consensus of several methods" if len(keys) > 1 else "Single method",
+            ", ".join(names) if names else "no method selected",
         ])
 
-        de_method = (self._de_combo.currentText()
-                     if hasattr(self, '_de_combo') else "?")
+        de_method = "DESeq2"
         min_studies = (self._min_studies_spin.value()
                        if hasattr(self, '_min_studies_spin') else "?")
         self._settings_card.set_summary([
@@ -973,118 +907,18 @@ class GeneMAPage(SidebarTabbedPage):
             f"a gene needs {min_studies} of {n or '?'} studies",
         ])
 
-    def _on_method_mode_toggled(self, checked):
-        """
-        Toggle between Single Method and Consensus UI.
-
-        Single: checkboxes are mutually exclusive (one family at a time).
-        Consensus: checkboxes are independent (multi-select).
-        Remembers the last single-mode selection when switching back.
-        """
-        is_single = self._single_radio.isChecked()
-        if not is_single:
-            for fam_key, cb in self._family_checks.items():
-                if cb.isChecked():
-                    self._last_single_family = fam_key
-                    break
-            self._family_btn_group.setExclusive(False)
-            for fam_key, cb in self._family_checks.items():
-                cb.setChecked(fam_key not in _OPT_IN_FAMILIES)
-        else:
-            self._family_btn_group.setExclusive(False)
-            restore = self._last_single_family
-            for fam_key, cb in self._family_checks.items():
-                cb.setChecked(fam_key == restore)
-            if not any(cb.isChecked()
-                       for cb in self._family_checks.values()):
-                first = list(self._family_checks.values())[0]
-                first.setChecked(True)
-            self._family_btn_group.setExclusive(True)
-
-    def _populate_method_dropdowns(self):
-        """Fill Single and Consensus dropdowns from the enabled methods in QSettings."""
-        from kosmic.gui.meta_analysis.dialogs.ma_settings_dialog import (
-            METHOD_FAMILIES, load_enabled_methods)
-
-        enabled = load_enabled_methods(QSettings("KOSMIC", "KOSMIC"))
-
-        self._single_combo.clear()
-        key_to_label = dict(_METHODS)
-        default_set = False
-        for _fk, _fl, methods in METHOD_FAMILIES:
-            for m_key, m_label in methods:
-                if m_key not in enabled:
-                    continue
-                self._single_combo.addItem(
-                    key_to_label.get(m_key, m_label), userData=m_key)
-                if m_key == 'reml' and not default_set:
-                    self._single_combo.setCurrentIndex(
-                        self._single_combo.count() - 1)
-                    default_set = True
-        if not default_set and self._single_combo.count() > 0:
-            self._single_combo.setCurrentIndex(0)
-
-        for fam_key, _fam_label, methods in METHOD_FAMILIES:
-            combo = self._family_combos.get(fam_key)
-            cb = self._family_checks.get(fam_key)
-            if combo is None:
-                continue
-            enabled_in_family = [(m_key, m_label) for m_key, m_label
-                                 in methods if m_key in enabled]
-            combo.clear()
-            if len(enabled_in_family) == 0:
-                combo.addItem("(none)")
-                combo.setEnabled(False)
-                combo.setVisible(True)
-                if cb:
-                    cb.setChecked(False)
-                    cb.setEnabled(False)
-            elif len(enabled_in_family) == 1:
-                m_key, m_label = enabled_in_family[0]
-                combo.addItem(
-                    key_to_label.get(m_key, m_label), userData=m_key)
-                combo.setEnabled(False)
-                combo.setVisible(True)
-                if cb:
-                    cb.setEnabled(True)
-            else:
-                for m_key, m_label in enabled_in_family:
-                    combo.addItem(
-                        key_to_label.get(m_key, m_label), userData=m_key)
-                combo.setEnabled(True)
-                combo.setVisible(True)
-                if cb:
-                    cb.setEnabled(True)
-                combo.setCurrentIndex(0)
-
-    def refresh_method_controls(self):
-        """Re-populate dropdowns after settings change."""
-        self._populate_method_dropdowns()
-
     # --- Run ---
     def _get_method_keys(self):
-        """Get selected method keys, applying Top 50% and HKSJ modifiers."""
-        raw_keys = []
-        for fam_key, combo in self._family_combos.items():
-            cb = self._family_checks.get(fam_key)
-            if cb and not cb.isChecked():
-                continue
-            key = combo.currentData()
-            if key is not None:
-                raw_keys.append(key)
-
-        top50 = self._top50_cb.isChecked()
-        hksj = self._hksj_cb.isChecked()
-
+        """The ticked methods' keys; SumRank's names its share of studies
+        ('sumrank', or 'sumrank_top50' for the best 50%)."""
+        from kosmic.meta_analysis.pooling_dispatch import sumrank_key
         keys = []
-        for k in raw_keys:
-            # Top 50% applied first so HKSJ composes on top.
-            if top50:
-                k = _METHOD_KEYS_TOP50.get(k, k)
-            if hksj:
-                k = _HKSJ_MAP.get(k, k)
-            if k not in keys:
-                keys.append(k)
+        for fam_key, key, _label in _METHOD_CHOICES:
+            if not self._family_checks[fam_key].isChecked():
+                continue
+            if key == 'sumrank':
+                key = sumrank_key(self._sumrank_top_spin.value())
+            keys.append(key)
         return keys
 
     def _reload_datasets_for_de_method(self, method_key: str
@@ -1219,10 +1053,7 @@ class GeneMAPage(SidebarTabbedPage):
                 f"every gene.")
 
     def _current_de_method_key(self) -> str:
-        """Canonical key for the currently-selected DE method combo."""
-        idx = self._de_combo.currentIndex()
-        if 0 <= idx < len(_DE_METHOD_COMBO_MAP):
-            return _DE_METHOD_COMBO_MAP[idx]
+        """The DE method whose results are pooled: DESeq2, the only one."""
         return 'deseq2'
 
     def _run_consensus(self):
@@ -1333,10 +1164,14 @@ class GeneMAPage(SidebarTabbedPage):
         if self.progress_bar:
             self.progress_bar.setRange(0, 0)
 
-        # The permutation's DE engine: fast or exact for DESeq2 (the
-        # Calibration choice); Welch passes through.
+        # The permutation's DE engine: fast or exact (the Calibration choice).
         cc_de_method, cc_resume_dir = self._cc_engine_settings(
             cal_key, de_method_key)
+        if cc_de_method is None:          # the fast engine was refused
+            if self.progress_bar:
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(0)
+            return
 
         params = {
             'method_keys': method_keys,
@@ -1467,36 +1302,34 @@ class GeneMAPage(SidebarTabbedPage):
         return 'exact' if self._cal_combo.currentIndex() == 2 else 'fast'
 
     def _cc_engine_settings(self, cal_key, de_method_key):
-        """The permutation's DE engine and, for the engines that re-fit each
-        study, their resume folder.
+        """The permutation's DE engine and its resume folder.
 
-        Both of them fit DESeq2, so they apply to the DESeq2 DE method only;
-        Welch input keeps its own (already fast) engine. The fast choice is
-        the vectorised engine (ADR-019) where scipy's optimiser interface is
-        usable, and the two-group approximation where it is not.
+        Both engines refit each study's DESeq2 model on every shuffle: the
+        fast one (ADR-019) computed for all genes at once, the exact one with
+        PyDESeq2 itself. The fast one needs scipy's private L-BFGS-B interface;
+        without it the run is refused with a note to use the exact engine,
+        rather than run any other engine in its place. Returns (None, None)
+        when refused; ('analytical', None) under analytical calibration.
         """
-        de_engine = {'deseq2': 'deseq2_fast', 'welch_cpm': 'welch_cpm',
-                     'welch_raw': 'welch_raw'}.get(de_method_key, 'deseq2_fast')
+        if cal_key != 'cc_perm':
+            return 'analytical', None
+        if self._cc_engine() == 'exact':
+            de_engine, folder = 'deseq2_exact', 'cc_permutation'
+        else:
+            from kosmic.meta_analysis.vec_lbfgsb import available
+            if not available():
+                self.log_message.emit(
+                    "The fast permutation needs scipy's private L-BFGS-B "
+                    "interface, which this scipy does not provide in the form it "
+                    "expects. Choose the exact permutation.")
+                dialogs.warning(
+                    self, "Fast permutation unavailable",
+                    "The fast permutation cannot run with this version of scipy. "
+                    "Choose 'CC permutation (exact, slow)' instead.")
+                return None, None
+            de_engine, folder = 'deseq2_vec', 'cc_permutation_vec'
         resume = None
-        folder = None
-        if cal_key == 'cc_perm' and de_engine == 'deseq2_fast':
-            if self._cc_engine() == 'exact':
-                de_engine, folder = 'deseq2_exact', 'cc_permutation'
-            else:
-                from kosmic.meta_analysis.vec_lbfgsb import available
-                if available():
-                    de_engine, folder = 'deseq2_vec', 'cc_permutation_vec'
-                else:
-                    self.log_message.emit(
-                        "The vectorised permutation needs scipy's private "
-                        "L-BFGS-B interface, which this scipy does not provide "
-                        "in the form it expects; using the two-group "
-                        "approximation. The exact engine is still available.")
-        elif cal_key == 'cc_perm' and self._cc_engine() == 'exact':
-            self.log_message.emit(
-                "The exact permutation re-runs DESeq2; with Welch input the "
-                "permutation uses the Welch engine.")
-        if folder and self._project_folder:
+        if self._project_folder:
             resume = str(meta_output_dir(
                 self._project_folder, self._output_selection) / folder)
         return de_engine, resume
@@ -1599,7 +1432,6 @@ class GeneMAPage(SidebarTabbedPage):
         self._method_dfs = data['method_dfs']
         self._method_keys = data['method_keys']
         self._tested_genes = data.get('tested_genes')
-        self._log_hksj_none_significant()
 
         # Annotate with Olink panel membership + (hypothesis mode)
         # the parent pathway each consensus gene came from, before
@@ -1656,37 +1488,6 @@ class GeneMAPage(SidebarTabbedPage):
         from kosmic.meta_analysis.pooling.vote_count import describe_selection
         return describe_selection(self._method_keys, self._meta_df,
                                   len(self._run_study_names()))
-
-    # Below this many studies the HKSJ t-test cannot reach genome-wide FDR.
-    _HKSJ_FEW_STUDIES = 10
-
-    def _hksj_note_text(self, n_studies: int) -> str:
-        """Why HKSJ with few studies calls no gene genome-wide, or ''."""
-        from kosmic.meta_analysis.pooling_dispatch import hksj_smallest_p
-        if not 2 <= n_studies < self._HKSJ_FEW_STUDIES:
-            return ""
-        p = hksj_smallest_p(n_studies)
-        return (f"With {n_studies} studies the HKSJ t-test has "
-                f"{n_studies - 1} degrees of freedom; the smallest p-value "
-                f"it can reach is about {p:.0e} (at t = 20), so a genome-wide "
-                "FDR is unlikely to call any gene.")
-
-    def _update_hksj_note(self, *_):
-        text = (self._hksj_note_text(len(self._datasets))
-                if self._hksj_cb.isChecked() else "")
-        self._hksj_note.setText(text)
-        self._hksj_note.setVisible(bool(text))
-
-    def _log_hksj_none_significant(self):
-        """Explain an HKSJ run that called nothing, rather than leave a 0."""
-        df = self._meta_df
-        if (df is None or 'fdr' not in df.columns
-                or not any('hksj' in k for k in (self._method_keys or []))
-                or (df['fdr'] < DEFAULT_FDR).any()):
-            return
-        text = self._hksj_note_text(len(self._run_study_names()))
-        if text:
-            self.log_message.emit(f"No gene passed FDR < {DEFAULT_FDR:g}. {text}")
 
     def _apply_translational_annotation(self):
         """
@@ -1797,11 +1598,11 @@ class GeneMAPage(SidebarTabbedPage):
         # Count how many statistical families each gene passes at FDR < 0.05.
         # A family agrees if ANY of its selected methods is significant
         # (within-family agreement is redundant -- shared framework).
-        from kosmic.gui.meta_analysis.dialogs.ma_settings_dialog import METHOD_FAMILIES
         selected_keys = set(self._method_keys or [])
         family_key_groups = []
-        for fam_key, fam_label, methods in METHOD_FAMILIES:
-            fam_methods = [k for k, _ in methods if k in selected_keys]
+        for _fam_key, base, fam_label in _METHOD_CHOICES:
+            fam_methods = [k for k in selected_keys
+                           if k == base or k.startswith(base + '_top')]
             if fam_methods:
                 family_key_groups.append((fam_label, fam_methods))
         n_families = len(family_key_groups)
@@ -2694,7 +2495,8 @@ class GeneMAPage(SidebarTabbedPage):
                             else None),
             'method_keys': self._get_method_keys(),
             'mode':        self._mode,
-            'top50':       self._top50_cb.isChecked(),
+            'sumrank_top_pct': self._sumrank_top_spin.value(),
+            'top50':       self._sumrank_top_spin.value() < 100,
             'params':      self._last_consensus_params,
             'de_dfs':      self._last_consensus_de_dfs,
             'labels':      self._last_consensus_labels,
@@ -2847,6 +2649,11 @@ class GeneMAPage(SidebarTabbedPage):
 
         cc_de_method, cc_resume_dir = self._cc_engine_settings(
             cal_key, de_method_key)
+        if cc_de_method is None:          # the fast engine was refused
+            if self.progress_bar:
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(0)
+            return
 
         params = {
             'method_keys': method_keys,

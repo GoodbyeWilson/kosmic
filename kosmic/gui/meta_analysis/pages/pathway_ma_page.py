@@ -5,7 +5,7 @@
 # expression averaged over a pathway's genes) and compares disease and
 # control donors with Welch's t-test, giving each pathway an effect (the
 # difference in mean score, log2) and its standard error. Here those
-# effects are pooled with REML (or DL) random effects, as genes are, and
+# effects are pooled with REML random effects, as genes are, and
 # BH-corrected. Only tables made with that score and test are pooled; a
 # table saved by an earlier version (which may have used one of the
 # scoring methods since removed) is named, not pooled.
@@ -13,7 +13,7 @@
 
 from PyQt6.QtWidgets import (
     QPushButton, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QComboBox, QSpinBox,
+    QSplitter, QSpinBox,
     QDoubleSpinBox, QFileDialog, QTabWidget, QHeaderView,
     QAbstractItemView,
 )
@@ -164,14 +164,6 @@ class PathwayMAPage(SidebarPage):
         self._min_studies.setRange(2, 20)
         self._min_studies.setValue(2)
         settings_group.add_row("Min studies:", self._min_studies)
-
-        self._pooling_combo = QComboBox()
-        self._pooling_combo.addItem("REML", userData='reml')
-        self._pooling_combo.addItem("DL", userData='dl')
-        self._pooling_combo.setToolTip(
-            "REML: restricted maximum likelihood (recommended).\n"
-            "DL: DerSimonian-Laird method-of-moments.")
-        settings_group.add_row("Pooling:", self._pooling_combo)
 
         lay.addWidget(settings_group)
 
@@ -325,7 +317,7 @@ class PathwayMAPage(SidebarPage):
             self._status_label.setText("No pathway DE datasets loaded.")
             return
 
-        pooling_key = self._pooling_combo.currentData() or 'reml'
+        pooling_key = 'reml'                # REML random effects, as genes
         method_keys = [pooling_key]
         min_studies = self._min_studies.value()
 
@@ -416,7 +408,7 @@ class PathwayMAPage(SidebarPage):
                 for label, rec in gather_study_provenance(self._project_folder)
             }
             params = {
-                'pooling_method': self._pooling_combo.currentData() or 'reml',
+                'pooling_method': 'reml',
                 'n_studies': len(self._run_study_names),
                 'studies': list(self._run_study_names),
                 'n_pathway_sets': len(self._pathway_gene_sets or {}),

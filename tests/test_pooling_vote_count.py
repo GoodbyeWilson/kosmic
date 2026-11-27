@@ -94,18 +94,6 @@ def test_cc_permutation_leaves_the_rule_alone():
     assert not set(RULE_METHODS) & set(_MATRIX_POOLERS)
 
 
-def test_a_saved_method_selection_does_not_hide_vote_counting(tmp_path):
-    from PyQt6.QtCore import QSettings
-
-    from kosmic.gui.meta_analysis.dialogs.ma_settings_dialog import (
-        load_enabled_methods, save_enabled_methods)
-    settings = QSettings(str(tmp_path / 's.ini'), QSettings.Format.IniFormat)
-    settings.setValue('meta_analysis/enabled_methods', ['dl', 'fisher'])   # saved before
-    assert load_enabled_methods(settings) == {'dl', 'fisher', 'vote_count'}
-    save_enabled_methods(settings, {'dl'})            # now unticked on purpose
-    assert load_enabled_methods(settings) == {'dl'}
-
-
 def test_the_selection_is_worded_by_the_methods_run(studies):
     from kosmic.meta_analysis.pooling.vote_count import describe_selection
     vote = get_analytical_pool_fn('vote_count', 2, min_votes=3)(studies)

@@ -1,22 +1,51 @@
 # Gene Meta-Analysis (Consensus)
 
-Pool per-study gene-level DE results with one or more methods. Single mode = one method; consensus mode = several methods, intersection of significance.
+Pool each study's DESeq2 gene results across studies with one or more
+methods. With one method ticked, the run reports that method's significant
+genes. With several, a gene is a consensus gene when every ticked method
+calls it.
 
-## Family checkboxes (Single / Consensus)
+## Methods
 
-*TODO.*
+The **Methods** box has one tick box per method:
+
+- **REML**: random-effects pooling of each gene's log2 fold change, with
+  the between-study variance estimated by restricted maximum likelihood.
+  It gives the pooled effect, its confidence interval and I².
+- **SumRank**: pools each gene's rank within every study, so it does not
+  depend on the scale of the effects. **best N% of studies** sets how many
+  of each gene's study ranks are summed (see below).
+- **Stouffer**: combines each study's signed z-score.
+- **Vote counting**: counts the studies that call the gene significant
+  (see below).
+
+REML, SumRank and Stouffer are ticked by default; vote counting is not.
+Stouffer and vote counting give no pooled effect of their own, so their
+volcano and results table show REML's pooled log2 fold change. See
+[Statistical approach](statistics.md#random-effects-meta-analysis-across-studies).
+
+### SumRank: best N% of studies
+
+At 100% (the default), SumRank sums all of a gene's study ranks. Below
+100%, each gene's score is the sum of its best r study ranks, r = ceil(k ×
+N/100) of its k studies (at 50%, the best 3 of 5), tested against the null
+distribution of that partial sum. It asks whether a gene is highly ranked
+in at least that share of the studies, which suits an effect present in a
+subset of cohorts. When the cohorts agree it is stricter than the full sum,
+because the other studies' evidence is not used: at 50% on five DCM
+cardiomyocyte studies it called 378 genes against 1,348 for the full sum.
+It does not remove genes before pooling. The Methods page states the
+setting in words.
 
 ### Vote counting
 
-The **Vote counting** family passes a gene when at least *N* studies
+**Vote counting** passes a gene when at least *N* studies
 call it significant (study FDR < 0.05) in the same direction and none
 calls it significant in the opposite direction. **Vote threshold** (*N*
-of *k*, all studies by default) appears when the family is ticked.
-Switching to Consensus mode ticks every family except vote counting;
-tick it to add the rule. Run with REML in Consensus mode, the consensus
-genes are those with a pooled effect that at least *N* studies also
-call on their own. It ignores effect sizes and gives no pooled
-estimate, so use it beside DL or REML, not in place of them. Run on its
+of *k*, all studies by default) appears when it is ticked.
+Run with REML, the consensus genes are those with a pooled effect that
+at least *N* studies also call on their own. It ignores effect sizes and
+gives no pooled estimate, so use it beside REML, not in place of it. Run on its
 own, the page counts the genes that pass the rule rather than
 significant genes. It has no p-value to draw a volcano from, so the
 **Plots** tab shows the genes at each level of study agreement, split
@@ -42,38 +71,6 @@ at each level, split up and down, and can hatch the genes REML or
 another method of the run calls significant. See
 [Statistical approach](statistics.md#vote-counting).
 
-Vote counting is new in the method list; it is enabled by default and
-can be hidden in **View → Meta-Analysis Settings**.
-
-## Top 50% and HKSJ modifiers
-
-**Top 50% selection** changes how SumRank, DL and REML use each gene's
-studies. It does not remove genes before pooling.
-
-- With **SumRank**, each gene's score is the sum of its best ceil(k/2)
-  study ranks (the best 3 of 5), tested against the null distribution of
-  that partial sum. It asks whether a gene is highly ranked in at least
-  half of the studies, which suits an effect present in a subset of
-  cohorts. When the cohorts agree it is stricter than the full sum,
-  because the other studies' evidence is not used: on five DCM
-  cardiomyocyte studies it called 378 genes against 1,348 for plain
-  SumRank.
-- With **DL** and **REML**, each gene is pooled over its ceil(k/2) most
-  precise studies (smallest standard error, at least 2).
-
-**HKSJ correction** (Hartung-Knapp-Sidik-Jonkman) applies to DL and
-REML. It replaces the normal test with a t-test on k - 1 degrees of
-freedom, which is appropriate for one outcome pooled over a few
-studies. Over thousands of genes it has little power when k is small:
-with five studies a t of 20 gives p of about 4e-5, while
-Benjamini-Hochberg over 11,000 genes needs about 4e-6 for the strongest
-gene to pass. With fewer than 10 studies selected, a note under the box
-gives the smallest reachable p-value, and a run that calls no gene says
-so in the output panel.
-
-The Methods page states each pooling method in words, including these
-modifiers.
-
 ## Calibration (analytical / CC permutation)
 
 The Calibration box sets how the p-value of each pooling method is
@@ -85,9 +82,9 @@ obtained.
   each study and fits each study's own DE model, with its covariates, on
   every shuffle by array code. It gives the exact permutation's results in
   a fifth to a tenth of the time and runs 1,000 permutations. Five studies of a
-  large cell type take about an hour and a half on 14 cores. Where the scipy function
-  it relies on is not usable, KOSMIC says so and uses a quick two-group
-  approximation that calls somewhat fewer genes.
+  large cell type take about an hour and a half on 14 cores. It relies on a private
+  scipy function; where that function is not usable, KOSMIC says so and does
+  not run, and the exact engine is the one to choose.
 - **CC permutation (exact, slow)** re-runs each study's own DE (PyDESeq2) on
   every shuffle. It runs 200 permutations. A permutation takes about
   30–40 s per study on one core for a small cell type, and several
@@ -97,8 +94,7 @@ During a fast or exact run the run button reads *Stop*. A stopped run keeps
 its finished permutations in the `cc_permutation_vec/` or `cc_permutation/`
 folder beside the results; running again with the same settings continues
 from them, and settings or data that differ start the permutations again.
-Both re-fit DESeq2, so with Welch input they are not available and the
-Welch engine is used. They need each study's pseudobulk file to carry the
+Both need each study's pseudobulk file to carry the
 covariates of its DE run; a study that does not says so and asks for its
 DE run to be repeated. Leave-one-study-out validation always uses the
 approximate engine.
@@ -166,8 +162,8 @@ genes have such a conflict, and the same count is written to the output
 panel and the Methods page.
 
 Tick **Show only genes with opposite-direction effects** to list only
-these genes. They occur mainly with Fisher's method, SumRank and gwOP,
-which do not use the sign of the effect; see
+these genes. They occur mainly with SumRank over the best N% of
+studies, which does not use the studies it leaves out; see
 [Statistical approach](statistics.md#direction-of-effect-across-studies).
 
 Studies whose DE results have no adjusted p-values are not counted; the

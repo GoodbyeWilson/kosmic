@@ -12,8 +12,16 @@ from kosmic.meta_analysis.pooling_dispatch import (
 
 def test_sumrank_top50_is_the_top_r_sum_not_a_gene_filter():
     text = describe_pooling_method('sumrank_top50', 5)
-    assert text == ("SumRank over the best ceil(k/2) study ranks per gene "
+    assert text == ("SumRank over the best 50% of each gene's study ranks "
                     "(top-r sum, r = 3 of k = 5)")
+
+
+@pytest.mark.parametrize('k,pct,r', [(5, 50, 3), (10, 30, 3), (10, 70, 7),
+                                     (3, 1, 1), (5, 99, 5)])
+def test_sumrank_top_r_is_ceil_of_k_times_the_share(k, pct, r):
+    """10 x 0.3 is 3.0000000000000004 in floating point; r is still 3."""
+    from kosmic.meta_analysis.pooling.sumrank import top_r
+    assert top_r(k, pct / 100) == r
 
 
 def test_effect_size_top50_and_hksj_are_both_stated():

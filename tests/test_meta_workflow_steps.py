@@ -535,50 +535,6 @@ def test_a_run_saves_where_it_started(app, tmp_path):
     assert rec["stages"][-1]["params"]["studies"] == labels
 
 
-# -- HKSJ with few studies (#63) and pooling in words (#61) ------------
-
-def test_hksj_note_appears_with_few_studies(app, tmp_path):
-    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
-    page = GeneMAPage()
-    five = _tiny_studies("Endo", n=5)
-    page.set_datasets(five, [d["name"] for d in five], str(tmp_path))
-    assert page._hksj_note.isHidden()
-    page._hksj_cb.setChecked(True)
-    assert not page._hksj_note.isHidden()
-    assert "With 5 studies" in page._hksj_note.text()
-    twelve = _tiny_studies("Endo", n=12)
-    page.set_datasets(twelve, [d["name"] for d in twelve], str(tmp_path))
-    assert page._hksj_note.isHidden()
-
-
-def test_an_hksj_run_that_calls_nothing_says_why(app, tmp_path):
-    from kosmic import provenance
-    from kosmic.gui.meta_analysis.pages.gene_ma.workers import GeneMAWorker
-    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
-    from kosmic.meta_analysis.io import meta_provenance_dir
-
-    page = GeneMAPage()
-    studies = _tiny_studies("Endo", n=4)
-    labels = [d["name"] for d in studies]
-    params = {"method_keys": ["reml_hksj"], "calibration": "analytical",
-              "min_studies": 2}
-    page.set_datasets(studies, labels, str(tmp_path), output_selection="Endo")
-    page._pending_output_selection = page._output_selection
-    page._last_consensus_labels = labels
-    page._last_consensus_params = params
-    page._last_consensus_de_dfs = [d["df"] for d in studies]
-    data = GeneMAWorker([d["df"] for d in studies], labels, params)._run()
-    assert not (data["meta_df"]["fdr"] < 0.05).any()
-
-    logged = []
-    page.log_message.connect(logged.append)
-    page._on_finished(data)
-    assert any(m.startswith("No gene passed FDR") and "With 4 studies" in m
-               for m in logged)
-    rec = provenance.load(meta_provenance_dir(tmp_path, "Endo"))
-    assert "Hartung-Knapp" in rec["stages"][-1]["params"]["pooling_described"]
-
-
 # -- vote counting (#30) -----------------------------------------------
 
 def test_vote_counting_is_a_family_and_its_table_shows_votes_not_a_ci(app):
@@ -654,21 +610,35 @@ def test_the_vote_threshold_reaches_the_run_and_levels_filter_the_table(app, tmp
     assert "Votes" not in [page._tabs.tabText(i) for i in range(page._tabs.count())]
 
 
-def test_consensus_mode_leaves_vote_counting_unticked(app):
-    """Vote counting is opt-in: as a rule in a consensus it removes every
-    gene too few studies call, so switching to Consensus does not tick it."""
+def test_the_page_offers_four_methods_with_vote_counting_unticked(app):
+    """REML, SumRank, Stouffer and vote counting, one tick box each. Vote
+    counting is opt-in: as a rule in a consensus it removes every gene too
+    few studies call."""
     from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
 
     page = GeneMAPage()
-    page._consensus_radio.setChecked(True)
     checks = page._family_checks
+    assert list(checks) == ["effect_size", "rank", "pvalue", "vote"]
     assert not checks["vote"].isChecked()
-    assert all(cb.isChecked() for key, cb in checks.items()
-               if key != "vote" and cb.isEnabled())
-    assert "vote_count" not in page._get_method_keys()
+    assert page._get_method_keys() == ["reml", "sumrank", "stouffer"]
 
     checks["vote"].setChecked(True)
     assert "vote_count" in page._get_method_keys()
+
+
+def test_sumrank_top_percent_follows_the_spin_box(app):
+    """SumRank's tuning (the best r of k study ranks) is set as a percentage;
+    100% is plain SumRank. The box is usable only while SumRank is ticked."""
+    from kosmic.gui.meta_analysis.pages.gene_ma_page import GeneMAPage
+
+    page = GeneMAPage()
+    spin = page._sumrank_top_spin
+    assert spin.value() == 100 and spin.isEnabled()
+    spin.setValue(50)
+    assert "sumrank_top50" in page._get_method_keys()
+    page._family_checks["rank"].setChecked(False)
+    assert not spin.isEnabled()
+    assert not any(k.startswith("sumrank") for k in page._get_method_keys())
 
 
 def test_the_studies_card_names_every_study(app, tmp_path):
@@ -700,9 +670,8 @@ def test_the_settings_card_follows_min_studies_and_the_de_method(app, tmp_path):
                 if w.isVisibleTo(page._settings_card) or not w.isHidden()]
 
     page._min_studies_spin.setValue(5)
-    page._de_combo.setCurrentText("Welch CPM")
     lines = " | ".join(summary())
-    assert "a gene needs 5 of 5 studies" in lines and "DE input: Welch CPM" in lines
+    assert "a gene needs 5 of 5 studies" in lines and "DE input: DESeq2" in lines
 
 
 def test_a_large_pool_lists_nothing_until_a_cell_type_is_chosen(app, per_cell_type_project):

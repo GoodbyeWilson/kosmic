@@ -34,7 +34,7 @@ import pandas as pd
 
 from kosmic import DEFAULT_FDR, MIN_STUDIES
 
-from .pooling_core import _build_effect_matrices, _build_result_df, _vectorized_dl
+from .pooling_core import _build_effect_matrices, _build_result_df
 
 CONFLICT = 'conflict'
 
@@ -118,7 +118,9 @@ def vote_count_fast(datasets, min_studies=MIN_STUDIES, min_votes: Optional[int] 
     res = count_votes(effects_matrix, padj, testable, fdr)
     passes = (res['votes'] >= min_votes) & ~res['conflict']
 
-    mean_lfc, se_pooled, _tau2, I2, _w, _Q = _vectorized_dl(
+    # For reference beside the votes: REML's pooled effect, SE and I².
+    from .reml import _vectorized_reml
+    mean_lfc, se_pooled, _tau2, I2, _w = _vectorized_reml(
         effects_matrix, var_matrix, testable)
     result = _build_result_df(
         gene_names, mean_lfc, se_pooled, I2, res['n_tested'],

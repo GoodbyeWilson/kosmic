@@ -23,7 +23,6 @@ import numpy as np
 
 from .pooling_core import (
     _build_effect_matrices,
-    _vectorized_dl,
     _build_result_df,
 )
 
@@ -91,8 +90,10 @@ def stouffer_fast(datasets, min_studies=MIN_STUDIES, weighted=False,
                      2.0 * norm.sf(np.abs(pooled_z)), 1.0)
     pvals = np.clip(pvals, 1e-300, 1.0)
 
-    # IV-weighted pooled logFC + SE + I² for display.
-    mean_lfc, se_pooled, _tau2, I2, _wre, _Q = _vectorized_dl(
+    # For reference beside the Stouffer Z: REML's pooled effect, SE and I²
+    # (the effect-size method's own estimate), labelled as REML's where shown.
+    from .reml import _vectorized_reml
+    mean_lfc, se_pooled, _tau2, I2, _wre = _vectorized_reml(
         effects_matrix, var_matrix, valid_mask)
 
     pooling_method = 'stouffer_weighted' if weighted else 'stouffer'

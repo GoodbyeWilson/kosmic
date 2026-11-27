@@ -88,9 +88,9 @@ folder for the current selection. Results saved by earlier versions in
 
 ## DE method filter
 
-When a result exists for more than one DE method, the method chosen in
-**View → Meta-Analysis Settings** is used (DESeq2 by default). A result
-without that method uses the one it has, and the output panel says so.
+The meta-analysis pools DESeq2 results. When a study has results from
+more than one DE method, its DESeq2 result is used. A result without one
+uses the method it has, and the output panel says so.
 
 ## Skipping a problematic study
 

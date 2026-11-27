@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
@@ -43,6 +44,24 @@ _METHOD_NAMES = {
 }
 
 
+def sumrank_proportion(key: str) -> Optional[float]:
+    """The share of studies a SumRank key sums: 1.0 for 'sumrank', 0.5 for
+    'sumrank_top50' (any 'sumrank_top<NN>', NN from 1 to 99); None for
+    another key."""
+    if key == 'sumrank':
+        return 1.0
+    m = re.fullmatch(r'sumrank_top(\d{1,2})', key)
+    if m and 1 <= int(m.group(1)) <= 99:
+        return int(m.group(1)) / 100.0
+    return None
+
+
+def sumrank_key(percent: int) -> str:
+    """The SumRank key for summing each gene's best 'percent'% of studies."""
+    percent = int(percent)
+    return 'sumrank' if percent >= 100 else f'sumrank_top{percent}'
+
+
 def describe_pooling_method(key: str, n_studies: Optional[int] = None) -> str:
     """The pooling a key runs, in words, for the methods text.
 
@@ -51,6 +70,14 @@ def describe_pooling_method(key: str, n_studies: Optional[int] = None) -> str:
     top-r null; DL and REML pool each gene's ceil(k/2) most precise
     studies (smallest standard error, at least 2).
     """
+    prop = sumrank_proportion(key)
+    if prop is not None and prop < 1.0:
+        pct = int(round(prop * 100))
+        from kosmic.meta_analysis.pooling.sumrank import top_r
+        r = (f", r = {top_r(n_studies, prop)} of k = {n_studies}"
+             if n_studies else "")
+        return (f"SumRank over the best {pct}% of each gene's study ranks "
+                f"(top-r sum{r})")
     hksj = key.endswith('_hksj')
     base = key.removesuffix('_hksj')
     top50 = base.endswith('_top50')
@@ -121,6 +148,11 @@ def get_analytical_pool_fn(pooling_key: str,
         'stouffer_weighted': lambda ds, min_studies=_ms: stouffer_fast(ds, min_studies=min_studies, weighted=True),
         'vote_count':       lambda ds, min_studies=_ms: vote_count_fast(ds, min_studies=min_studies, min_votes=min_votes),
     }
+    prop = sumrank_proportion(pooling_key)
+    if pooling_key not in dispatch and prop is not None:
+        dispatch[pooling_key] = (
+            lambda ds, min_studies=_ms: sumrank_fast(
+                ds, min_studies=min_studies, proportion_top=prop))
     if pooling_key not in dispatch:
         raise KeyError(
             f"Unknown pooling_key {pooling_key!r}. "
