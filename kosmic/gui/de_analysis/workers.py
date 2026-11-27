@@ -35,8 +35,8 @@ class MetabolicDEWorker(BaseWorker):
     def __init__(self, adata, sample_col: str, condition_col: str,
                  control_label: str, disease_label: str,
                  pathway_gene_sets: dict, min_cells: int = 10,
-                 min_expressing_samples: int = 2, de_method: str = 'ttest',
-                 full_genome: bool = False, moderate: bool = False,
+                 min_expressing_samples: int = 2, de_method: str = 'deseq2',
+                 full_genome: bool = False,
                  unit: str = 'sample', counts_layer=None, detection_min_pct=None,
                  detection_min_donor_frac=None, detection_study_col=None,
                  fdr_genes=None, deseq2_independent_filter=None,
@@ -55,7 +55,6 @@ class MetabolicDEWorker(BaseWorker):
         self.min_expressing_samples = min_expressing_samples
         self.de_method = de_method
         self.full_genome = full_genome
-        self.moderate = moderate
         self.unit = unit
         self.counts_layer = counts_layer
         self.detection_min_pct = detection_min_pct
@@ -99,7 +98,6 @@ class MetabolicDEWorker(BaseWorker):
             min_expressing_samples=self.min_expressing_samples,
             de_method=self.de_method,
             full_genome=self.full_genome,
-            moderate=self.moderate,
             unit=self.unit,
             counts_layer=self.counts_layer,
             fdr_genes=self.fdr_genes,
@@ -261,7 +259,7 @@ class PathwayScoringWorker(BaseWorker):
 
         pathway_de = run_pseudobulk_de(
             score_matrix, sample_df, pathway_names,
-            pre_transformed=True, moderate=False,
+            pre_transformed=True,
         )
 
         if pathway_de.empty:
@@ -298,7 +296,7 @@ class PathwayScoringWorker(BaseWorker):
 
         pathway_de = run_pseudobulk_de(
             score_matrix, sample_df, pathway_names,
-            pre_transformed=True, moderate=False,
+            pre_transformed=True,
         )
 
         if pathway_de.empty:
@@ -446,7 +444,7 @@ class MetaExportWorker(BaseWorker):
     """
 
     def __init__(self, adata, sample_col, condition_col, min_cells,
-                 primary_method, primary_moderate, primary_de_results,
+                 primary_method, primary_de_results,
                  output_dir, gse_id, min_counts=0, run_record=None,
                  covariates=None):
         super().__init__()
@@ -461,7 +459,6 @@ class MetaExportWorker(BaseWorker):
         self.min_cells = min_cells
         self.min_counts = min_counts
         self.primary_method = primary_method
-        self.primary_moderate = primary_moderate
         self.primary_de_results = primary_de_results
         self.output_dir = Path(output_dir)
         self.gse_id = gse_id
@@ -478,7 +475,7 @@ class MetaExportWorker(BaseWorker):
 
         # Export the chosen method's results (already computed) in the layout
         # the meta-analysis loads.
-        label = method_label(self.primary_method, self.primary_moderate)
+        label = method_label(self.primary_method)
         if self.primary_de_results is not None and not self.primary_de_results.empty:
             out_path = run_dir / f"{self.gse_id}_DE_{label}.csv"
             self.primary_de_results.to_csv(out_path, index=False)
@@ -552,7 +549,7 @@ class CellTypeBatchWorker(BaseWorker):
 
     def __init__(self, adata, cell_type_col, sample_col, condition_col,
                  output_dir, accession, cell_types=None,
-                 de_method='deseq2', moderate=False, covariates=None,
+                 de_method='deseq2', covariates=None,
                  min_cells=10, pathway_gene_sets=None, fdr_genes=None,
                  min_counts=0, run_record=None, **pipeline_kwargs):
         super().__init__()
@@ -565,7 +562,6 @@ class CellTypeBatchWorker(BaseWorker):
         self.accession = accession
         self.cell_types = list(cell_types) if cell_types else None
         self.de_method = de_method
-        self.moderate = moderate
         self.covariates = list(covariates or ())
         self.min_cells = min_cells
         self.min_counts = min_counts
@@ -607,7 +603,7 @@ class CellTypeBatchWorker(BaseWorker):
             self.adata, self.cell_type_col, self.sample_col,
             self.condition_col, self.output_dir, self.accession,
             cell_types=self.cell_types, de_method=self.de_method,
-            moderate=self.moderate, covariates=self.covariates,
+            covariates=self.covariates,
             min_cells=self.min_cells, min_counts=self.min_counts,
             pathway_gene_sets=self.pathway_gene_sets,
             fdr_genes=self.fdr_genes,

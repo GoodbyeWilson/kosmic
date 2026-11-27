@@ -117,12 +117,12 @@ def test_batch_de_saves_a_record_beside_each_table(tmp_path):
     record = {'counts_source': 'raw', 'geneset_label': 'x', 'pathway_gene_sets': {}}
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
-        de_method='ttest', min_cells=10, detection_min_pct=0.0, run_record=record)
+        de_method='deseq2', min_cells=10, detection_min_pct=0.0, run_record=record)
     for r in runs:
         rec = saved.read_run_record(r.de_path)
         assert rec['cell_type'] == r.cell_type
         assert rec['cell_type_column'] == 'cell_type'
-        assert rec['method'] == 'welch_cpm' and rec['counts_source'] == 'raw'
+        assert rec['method'] == 'deseq2' and rec['counts_source'] == 'raw'
     listed = saved.list_gene_de_runs(tmp_path / 'GSE1')
     assert {r.cell_type for r in listed} == {r.cell_type for r in runs}
 
@@ -146,13 +146,13 @@ def test_the_whole_study_export_saves_a_record(app, tmp_path):
     from kosmic.gui.de_analysis.workers import MetaExportWorker
     from tests.study_folder import de_table
 
-    w = MetaExportWorker(None, 'sample', 'condition', 10, 'ttest', True,
+    w = MetaExportWorker(None, 'sample', 'condition', 10, 'deseq2',
                          de_table(['A', 'B']), tmp_path / 'S', 'S',
                          run_record={'counts_source': 'raw', 'cell_type': None})
     w._run()                         # the pseudobulk step fails without data; reported
     (run,) = saved.list_gene_de_runs(tmp_path / 'S')
-    assert run.method == 'welch_cpm_eb' and run.cell_type is None
-    assert saved.read_run_record(run.path)['method'] == 'welch_cpm_eb'
+    assert run.method == 'deseq2' and run.cell_type is None
+    assert saved.read_run_record(run.path)['method'] == 'deseq2'
 
 
 @pytest.fixture(scope='module')

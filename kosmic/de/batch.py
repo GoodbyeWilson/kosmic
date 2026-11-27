@@ -282,7 +282,6 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                         accession: str,
                         cell_types: Optional[Sequence[str]] = None,
                         de_method: str = 'deseq2',
-                        moderate: bool = False,
                         pathway_gene_sets: Optional[dict] = None,
                         fdr_genes=None,
                         covariates: Optional[Sequence[str]] = None,
@@ -337,7 +336,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
     output_dir = Path(output_dir) if output_dir is not None else None
     if write and output_dir is None:
         raise ValueError("output_dir is required when write=True.")
-    label = method_label(de_method, moderate)
+    label = method_label(de_method)
 
     def _progress(msg):
         if progress_callback:
@@ -400,7 +399,7 @@ def run_de_by_cell_type(adata, cell_type_col: str, sample_col: str,
                 subset, sample_col, condition_col, pathway_gene_sets or {},
                 min_cells=min_cells, min_counts=min_counts,
                 de_method=de_method, full_genome=True,
-                moderate=moderate, covariates=covariates,
+                covariates=covariates,
                 fdr_genes=type_fdr_genes,
                 progress_callback=lambda m, h=head: _progress(f"{h}: {m}"),
                 **pipeline_kwargs)

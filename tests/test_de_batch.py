@@ -181,7 +181,7 @@ def test_run_writes_discoverable_per_cell_type_results(tmp_path):
     study = tmp_path / 'GSE1'
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', study, 'GSE1',
-        de_method='ttest', min_cells=10, detection_min_pct=0.0)
+        de_method='deseq2', min_cells=10, detection_min_pct=0.0)
 
     assert [r.status for r in runs] == ['ok', 'ok']
     assert {r.accession for r in runs} == {'GSE1_Endothelial', 'GSE1_Fibroblast'}
@@ -198,7 +198,7 @@ def test_run_writes_discoverable_per_cell_type_results(tmp_path):
 def test_run_written_pseudobulk_has_a_role_column(tmp_path):
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', cell_types=['Endothelial'], de_method='ttest',
+        'GSE1', cell_types=['Endothelial'], de_method='deseq2',
         min_cells=10, detection_min_pct=0.0)
     pb = pd.read_csv(runs[0].pseudobulk_path, index_col=0)
     assert 'role' in pb.columns
@@ -214,7 +214,7 @@ def test_run_exports_the_pseudobulk_of_the_counts_it_tested(tmp_path):
     a.layers['decontX_counts'] = np.floor(a.X * 0.5)
     runs = B.run_de_by_cell_type(
         a, 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
-        cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+        cell_types=['Endothelial'], de_method='deseq2', min_cells=10,
         detection_min_pct=0.0, counts_layer='decontX_counts')
     pb = pd.read_csv(runs[0].pseudobulk_path, index_col=0)
     d1 = ((a.obs['cell_type'] == 'Endothelial') & (a.obs['donor'] == 'D1')).to_numpy()
@@ -228,7 +228,7 @@ def test_run_skips_ineligible_without_touching_disk(tmp_path):
     adata.obs = obs
     runs = {r.cell_type: r for r in B.run_de_by_cell_type(
         adata, 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
-        de_method='ttest', min_cells=10, detection_min_pct=0.0)}
+        de_method='deseq2', min_cells=10, detection_min_pct=0.0)}
     assert runs['Rare'].status == 'skipped'
     assert runs['Rare'].de_path is None
     written = {p.name for p in de_stats_dir(tmp_path / 'GSE1').iterdir()}
@@ -252,7 +252,7 @@ def test_run_continues_after_one_cell_type_fails(tmp_path, monkeypatch):
 
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', de_method='ttest', min_cells=10, detection_min_pct=0.0)
+        'GSE1', de_method='deseq2', min_cells=10, detection_min_pct=0.0)
     assert [r.status for r in runs] == ['failed', 'ok']
     assert 'boom' in runs[0].message
 
@@ -261,7 +261,7 @@ def test_run_reports_progress_per_cell_type(tmp_path):
     seen = []
     B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', de_method='ttest', min_cells=10, detection_min_pct=0.0,
+        'GSE1', de_method='deseq2', min_cells=10, detection_min_pct=0.0,
         progress_callback=seen.append)
     assert any('[1/2] Endothelial' in m for m in seen)
     assert any('[2/2] Fibroblast' in m for m in seen)
@@ -278,7 +278,7 @@ def test_run_can_be_cancelled(tmp_path):
 
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', de_method='ttest', min_cells=10, detection_min_pct=0.0,
+        'GSE1', de_method='deseq2', min_cells=10, detection_min_pct=0.0,
         progress_callback=on_progress, cancelled=cancelled)
     assert runs[-1].status == 'skipped'
     assert 'cancelled' in runs[-1].message
@@ -287,7 +287,7 @@ def test_run_can_be_cancelled(tmp_path):
 def test_run_write_false_computes_without_writing(tmp_path):
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', de_method='ttest', min_cells=10, detection_min_pct=0.0,
+        'GSE1', de_method='deseq2', min_cells=10, detection_min_pct=0.0,
         write=False)
     assert all(r.status == 'ok' and r.de_path is None for r in runs)
     assert not (tmp_path / 'GSE1').exists()
@@ -298,7 +298,7 @@ def test_run_write_false_computes_without_writing(tmp_path):
 def test_batch_summary_shape(tmp_path):
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', de_method='ttest', min_cells=10, detection_min_pct=0.0,
+        'GSE1', de_method='deseq2', min_cells=10, detection_min_pct=0.0,
         write=False)
     summary = B.batch_summary(runs)
     assert len(summary) == 2
@@ -331,7 +331,7 @@ def test_write_false_needs_no_output_dir():
     """A dry run has nowhere to write and should not need a path."""
     runs = B.run_de_by_cell_type(
         _adata(), 'cell_type', 'donor', 'condition', None, 'GSE1',
-        de_method='ttest', min_cells=10, detection_min_pct=0.0, write=False)
+        de_method='deseq2', min_cells=10, detection_min_pct=0.0, write=False)
     assert [r.status for r in runs] == ['ok', 'ok']
     assert all(r.de_path is None and r.significant_path is None for r in runs)
     assert all(r.de_results is not None for r in runs)
@@ -341,7 +341,7 @@ def test_write_true_still_requires_output_dir():
     with pytest.raises(ValueError, match='output_dir'):
         B.run_de_by_cell_type(
             _adata(), 'cell_type', 'donor', 'condition', None, 'GSE1',
-            de_method='ttest', min_cells=10, detection_min_pct=0.0, write=True)
+            de_method='deseq2', min_cells=10, detection_min_pct=0.0, write=True)
 
 
 # --- hypothesis mode must reach the batch runner -------------------------
@@ -359,7 +359,7 @@ def test_batch_honours_hypothesis_mode(tmp_path):
 
     runs = B.run_de_by_cell_type(
         adata, 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
-        cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+        cell_types=['Endothelial'], de_method='deseq2', min_cells=10,
         detection_min_pct=0.0,
         pathway_gene_sets=panel, fdr_genes=committed)
 
@@ -372,7 +372,7 @@ def test_batch_without_gene_sets_is_genome_wide(tmp_path):
     runs = B.run_de_by_cell_type(
         _adata(n_genes=60), 'cell_type', 'donor', 'condition',
         tmp_path / 'GSE1', 'GSE1', cell_types=['Endothelial'],
-        de_method='ttest', min_cells=10, detection_min_pct=0.0)
+        de_method='deseq2', min_cells=10, detection_min_pct=0.0)
     de = runs[0].de_results
     assert len(de) > 5
     assert (de['pathways'].astype(str) == '').all()
@@ -386,7 +386,7 @@ def test_batch_excludes_chosen_gene_groups(tmp_path):
     def tested(groups):
         runs = B.run_de_by_cell_type(
             a, 'cell_type', 'donor', 'condition', tmp_path / 'GSE1', 'GSE1',
-            cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+            cell_types=['Endothelial'], de_method='deseq2', min_cells=10,
             detection_min_pct=0.0, write=False, exclude_gene_groups=groups)
         return set(runs[0].de_results['names'])
 

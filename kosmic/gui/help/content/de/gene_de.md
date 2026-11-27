@@ -12,8 +12,7 @@ analysis is the donor / sample rather than the cell.
 
 | Setting | Effect |
 |---|---|
-| **DE method** | Welch's t-test or DESeq2 (default). |
-| **EB moderation** | Limma-style variance shrinkage (t-test only). |
+| **Pseudobulk method** | DESeq2. limma-voom is planned and listed, not yet available. |
 | **Min cells per donor** | A donor contributing fewer cells is dropped. |
 | **Min transcripts per donor** | A donor whose cells sum to fewer transcripts is dropped. Off (0) by default. |
 | **Shared atlas genes only** | Correct and report over the gene list of the project's shared atlas. Enabled only when the project has an atlas; the label shows how many genes that is. |
@@ -190,35 +189,33 @@ Stacked summary of the strongest hits, optionally grouped by pathway.
 
 ## Methods
 
-### Welch's t-test (default)
-
-Welch's t-test on mean-per-cell pseudobulk values. Fold changes
-directly reflect per-cell expression differences, so they match what
-you see when plotting means. Fast, and makes no assumption about the
-proportion of genes that are unchanged.
-
 ### DESeq2
 
-Negative-binomial GLM on sum-count pseudobulk with median-of-ratios
-size-factor normalisation. Powerful for whole-transcriptome analyses
-where most genes are unchanged. KOSMIC always runs DESeq2 on the full
-transcriptome to keep size factors unbiased, then filters to your
-gene set if applicable.
+Cells are summed to one count profile per donor. DESeq2 (Love et al.,
+*Genome Biology* 2014) fits a negative-binomial GLM to those counts,
+with median-of-ratios size factors, the covariates you choose, and a
+Wald test for disease versus control. It shrinks each gene's dispersion
+toward a trend fitted across genes (empirical Bayes), which is what
+makes it stable with few donors. KOSMIC always runs it on the full
+transcriptome, so the size factors are estimated from every gene, then
+reports your gene set if you chose one.
 
-> **Warning:** In single-cell pseudobulk, library-size differences can
-> be biological (disease cells expressing less per cell), not just
-> technical. DESeq2's median-of-ratios normalisation may interpret
-> that as a technical effect and normalise it away -- so a gene with
-> near-identical per-cell expression (0.13 vs 0.12 counts/cell) can be
-> reported as up-regulated because it "resisted" the global trend.
-> The t-test avoids this because it normalises at the aggregation
-> step. Default to t-test when testing curated gene sets.
+Independent filtering and Cook's outlier filtering are DESeq2's own
+defaults: genes with too low a mean count to reach significance are
+left out of the FDR correction, and a gene whose result rests on one
+extreme donor has its p-value left blank.
 
-### Empirical Bayes moderation (t-test only)
+> **Note:** median-of-ratios normalisation assumes most genes are
+> unchanged. If disease cells make less RNA overall, that difference is
+> normalised away and genes are reported relative to it. The check on
+> the Gene DE page compares the two arms' library sizes.
 
-Optional. Shrinks per-gene variance toward a common prior (Smyth 2004 /
-limma's `eBayes`). Stabilises estimates with few replicates and reduces
-false positives from genes with unusually low variance.
+### limma-voom (coming soon)
+
+limma-voom, the standard method for testing pseudobulk log-CPM, is
+planned. KOSMIC's earlier log-CPM option, a Welch t-test, has been
+removed: it could not adjust for covariates and did not weight for the
+noise of low counts. Runs made with it still open.
 
 ## Multiple testing
 

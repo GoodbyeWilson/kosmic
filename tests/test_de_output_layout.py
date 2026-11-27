@@ -142,7 +142,7 @@ def _batch(tmp_path, **kw):
     from kosmic.de import batch as B
     return B.run_de_by_cell_type(
         _adata(decontx='counts_layer' in kw), 'cell_type', 'donor', 'condition',
-        tmp_path / 'GSE1', 'GSE1', de_method='ttest', min_cells=10,
+        tmp_path / 'GSE1', 'GSE1', de_method='deseq2', min_cells=10,
         detection_min_pct=0.0, run_record={'counts_source': 'raw'}, **kw)
 
 

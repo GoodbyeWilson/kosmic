@@ -37,8 +37,6 @@ min_expressing_samples = 2     # legacy sample-level threshold (superseded by th
 filter_min_count       = 10    # sample-level expression filter: CPM cutoff derived from this count vs median library size
 filter_min_total_count = 15    # sample-level expression filter: minimum summed count across all samples
 filter_min_samples     = 0     # samples a gene must clear the CPM cutoff in; 0 = auto (smallest group size)
-max_se                 = 5.0   # SE cap (numerical safety)
-se_floor               = 0.01  # SE floor; bounds inverse-variance weight in meta-analysis (0 disables)
 detection_min_pct      = 0.0   # optional cell-level pre-filter; 0 = off. filterByExpr (below) is the gene filter for
                                # pseudobulk DE. A detection floor is a Seurat FindMarkers idea (cell-level Wilcoxon);
                                # at 5% it overrode filterByExpr entirely and cost ~1,250 significant genes.
