@@ -81,9 +81,19 @@ class EnrichmentPage(SidebarTabbedPage):
 
     help_id = "de/enrichment"
 
-    # Column used to rank genes for preranked GSEA. Overridden by the
-    # meta-analysis host; DE leaves it at the log2FC default.
+    # Column used to rank genes for preranked GSEA when the page offers no
+    # choice. Overridden by the meta-analysis host (the pooled z).
     rank_column = 'logfoldchanges'
+
+    # The rankings a preranked GSEA can use: (label, DE table column). The
+    # first is the default. The Wald statistic (log2FC / SE; Welch's t for
+    # the t-test methods) is what preranked GSEA of DESeq2 results usually
+    # ranks by: a noisy fold change of a lowly expressed gene does not
+    # reach the extremes of the ranking. Empty: no choice, 'rank_column'.
+    RANK_CHOICES = (
+        ("Log2 fold change", 'logfoldchanges'),
+        ("Test statistic (DESeq2: Wald, log2FC / SE)", 'statistic'),
+    )
 
     enrichment_complete = pyqtSignal()
 
@@ -220,6 +230,22 @@ class EnrichmentPage(SidebarTabbedPage):
             "Preranked GSEA: threshold-free, ranks all genes (unbiased).")
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         method_lay.addWidget(self._method_combo)
+
+        # Preranked GSEA only: what orders the genes.
+        self._rank_label = QLabel("Rank genes by:")
+        self._rank_combo = NoScrollComboBox()
+        for display, column in self.RANK_CHOICES:
+            self._rank_combo.addItem(display, column)
+        self._rank_combo.setToolTip(
+            "Log2 fold change: the effect size alone.\n"
+            "Test statistic: the fold change divided by its standard error, so\n"
+            "genes measured with little precision (few counts) do not reach the\n"
+            "ends of the ranking. Preranked GSEA of DESeq2 results usually\n"
+            "ranks by it.")
+        method_lay.addWidget(self._rank_label)
+        method_lay.addWidget(self._rank_combo)
+        self._rank_label.setVisible(False)
+        self._rank_combo.setVisible(False)
 
         method_lay.addWidget(QLabel("Library:"))
         self._library_combo = NoScrollComboBox()
@@ -363,10 +389,19 @@ class EnrichmentPage(SidebarTabbedPage):
             self._library_combo.addItem(f"Enrichr: {display}", lib_id)
         self._library_combo.blockSignals(False)
 
+    def _rank_by(self) -> str:
+        """The DE table column a preranked GSEA ranks the genes by."""
+        if self.RANK_CHOICES:
+            return self._rank_combo.currentData() or self.RANK_CHOICES[0][1]
+        return self.rank_column
+
     def _on_method_changed(self):
         """Switch between ORA and preranked GSEA."""
         is_gsea = self._method_combo.currentData() == "gsea"
         self._populate_libraries(gsea_only=is_gsea)
+        offer_rank = is_gsea and bool(self.RANK_CHOICES)
+        self._rank_label.setVisible(offer_rank)
+        self._rank_combo.setVisible(offer_rank)
         # GSEA ranks every gene, so the significant-gene cutoffs don't apply
         # (the pct-cells filter stays -- it scopes the ranking universe).
         self._fdr_spin.setEnabled(not is_gsea)
@@ -660,13 +695,20 @@ class EnrichmentPage(SidebarTabbedPage):
         self._run_btn.setEnabled(False)
         self._status_label.setText(f"Running preranked GSEA ({lib_id})...")
 
-        # Which column ranks the genes. DE ranks by log2FC; the
-        # meta-analysis host points this at the pooled z-statistic,
-        # which divides the effect by its pooled SE and so already
-        # accounts for between-study heterogeneity. The worker always
-        # receives the column named 'logfoldchanges'.
-        rank_col = getattr(self, 'rank_column', 'logfoldchanges')
+        # Which column ranks the genes: the Rank genes by choice on the DE
+        # page; the meta-analysis host's pooled z-statistic, which divides
+        # the effect by its pooled SE and so already accounts for
+        # between-study heterogeneity. The worker always receives the
+        # column named 'logfoldchanges'.
+        rank_col = self._rank_by()
         if rank_col not in gene_de.columns:
+            if self.RANK_CHOICES and rank_col != 'logfoldchanges':
+                self._status_label.setText(
+                    f"This DE result has no '{rank_col}' column to rank by "
+                    "(it was saved by an earlier version). Run the DE again, "
+                    "or rank by log2 fold change.")
+                self._run_btn.setEnabled(True)
+                return
             rank_col = 'logfoldchanges'
         rank_df = gene_de[['names', rank_col]].copy()
         rank_df.columns = ['names', 'logfoldchanges']
@@ -721,8 +763,7 @@ class EnrichmentPage(SidebarTabbedPage):
             # counts and the time it was loaded.
             'library_source': getattr(self, '_library_source', None),
             'direction':   self._direction_combo.currentData(),
-            'rank_by':     (getattr(self, 'rank_column', 'logfoldchanges')
-                            if method == 'gsea' else None),
+            'rank_by':     self._rank_by() if method == 'gsea' else None,
             'fdr':         self._p_thresh.value(),
             'gene_fdr':    self._fdr_spin.value(),
             'gene_lfc':    self._lfc_spin.value(),

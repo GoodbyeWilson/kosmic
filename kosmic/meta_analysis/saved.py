@@ -11,8 +11,9 @@ before it):
 - a pathway-level run as ``pathway_ma_{method}.csv`` and ``.json``;
 - the Enrichment step's runs on the pooled gene list:
   ``enrichment_results.csv`` (over-representation) and one
-  ``gsea_library_results_{library}.csv`` per library, with its
-  running-enrichment curves beside it (:mod:`kosmic.de.saved`).
+  ``<run>_gsea_{library}.csv`` per pooling run and library (``<run>`` the
+  gene-level run's stem; ``gsea_library_results_{library}.csv`` before),
+  with its running-enrichment curves beside it (:mod:`kosmic.de.saved`).
 
 :func:`list_meta_runs` lists them and :func:`figure_inputs` builds, from
 one run, the mapping the Meta-Analysis workspace's ``figure_inputs()``
@@ -38,6 +39,12 @@ from kosmic.paths import meta_output_dir
 _GENE_RUN = re.compile(r'^consensus_(.+)_(analytical|ccexact|ccvec|cc)\.csv$')
 _PATHWAY_RUN = re.compile(r'^pathway_ma_(.+)\.csv$')
 _GSEA_LIBRARY = re.compile(r'^gsea_library_results_(.+)\.csv$')
+
+
+def _own_gsea(run_stem: str, name: str) -> bool:
+    """Whether *name* is a library GSEA of the run saved as *run_stem*
+    ('consensus_reml_analytical_gsea_<library>.csv', Enrichment step)."""
+    return name.startswith(f'{run_stem}_gsea_') and name.endswith('.csv')
 _CALIBRATION_TEXT = {'analytical': 'analytical', 'cc': 'calibrated',
                      'ccexact': 'calibrated, exact permutation',
                      'ccvec': 'calibrated, vectorised permutation'}
@@ -310,9 +317,18 @@ class MetaFigureInputs(Mapping):
         return read_enrichment(self.run.folder)
 
     def _gsea_path(self) -> Optional[Path]:
+        """The run's own library GSEA ('<run>_gsea_<library>.csv'), newest
+        library first; for a run without one, a GSEA saved under the name of
+        earlier versions ('gsea_library_results_<library>.csv'), which does
+        not say which run it ranked."""
         folder = self.run.folder
         if not folder.is_dir():
             return None
+        if self.run.gene_path is not None:
+            own = _newest(p for p in folder.iterdir()
+                          if _own_gsea(self.run.gene_path.stem, p.name))
+            if own is not None:
+                return own
         return _newest(p for p in folder.iterdir() if _GSEA_LIBRARY.match(p.name))
 
     def _gsea_details(self):
@@ -321,7 +337,8 @@ class MetaFigureInputs(Mapping):
             return None, None
         from kosmic.de.saved import read_gsea_details
         details, library = read_gsea_details(path)
-        return details, library or _GSEA_LIBRARY.match(path.name).group(1)
+        m = _GSEA_LIBRARY.match(path.name)
+        return details, library or (m.group(1) if m else path.stem.split('_gsea_', 1)[-1])
 
 
 def figure_inputs(run: MetaRun) -> MetaFigureInputs:

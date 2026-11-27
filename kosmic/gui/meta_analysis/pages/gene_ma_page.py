@@ -2558,8 +2558,7 @@ class GeneMAPage(SidebarTabbedPage):
             output_dir = meta_output_dir(self._project_folder,
                                          self._run_output_selection)
             output_dir.mkdir(parents=True, exist_ok=True)
-            keys_str = '_'.join(self._method_keys) if self._method_keys else 'consensus'
-            stem = f'consensus_{keys_str}_{self._cal_tag()}'
+            stem = self._saved_run_stem()
 
             csv_path = output_dir / f'{stem}.csv'
             export_df = self._meta_df.drop(
@@ -2587,6 +2586,12 @@ class GeneMAPage(SidebarTabbedPage):
                 self.log_message.emit(warning)
         except Exception as e:
             self.log_message.emit(f"Auto-save failed: {e}")
+
+    def _saved_run_stem(self) -> str:
+        """The file stem the last run is saved under:
+        'consensus_<methods>_<calibration>'."""
+        keys_str = '_'.join(self._method_keys) if self._method_keys else 'consensus'
+        return f'consensus_{keys_str}_{self._cal_tag()}'
 
     def _write_settings_sidecar(self, path):
         """Write a JSON sidecar capturing the run settings + result summary."""
@@ -2680,6 +2685,10 @@ class GeneMAPage(SidebarTabbedPage):
         """
         return {
             'meta_df':     self._meta_df,
+            # The saved run the table is ('consensus_reml_analytical'), so
+            # the Enrichment step can name its results after it.
+            'run_stem':    (self._saved_run_stem() if self._meta_df is not None
+                            else None),
             'method_keys': self._get_method_keys(),
             'mode':        self._mode,
             'top50':       self._top50_cb.isChecked(),
