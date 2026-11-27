@@ -175,3 +175,25 @@ def test_pathway_results_follow_the_chosen_run(ws):
     _choose(ws, 'Endothelial Cell')
     assert ws.pathway_de_results is None
     assert 'No saved pathway results for Endothelial Cell' in ws.pathway_de_page.status_label.text()
+
+
+def test_saved_runs_are_listed_when_the_study_finishes_loading_on_gene_de(app, tmp_path):
+    """The study loads in the background: Gene DE opened before the data
+    arrived must list the saved runs once it does, without leaving the page."""
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    study = tmp_path / 'S1'
+    for ct, floor in (('Endothelial Cell', 3), ('Fibroblast', 7)):
+        _run(study, ct, cell_type_column='annotation', min_cells=floor, min_counts=0)
+    w = DEWorkspace()
+    w.project_dir = study
+    w.analysis_mode = 'discovery'
+    w.sample_col, w.condition_col = 'sample', 'condition'
+    w.control_label, w.disease_label = 'Control', 'Disease'
+    w.switch_tab(w.get_page_map().index(3))          # Gene DE, nothing loaded yet
+    assert not w.cell_type_runs and w.run_bar.isHidden()
+
+    setup = w.setup_page
+    setup._load_study_dir = study                    # the background load finishing
+    setup._on_loaded((_adata(), str(study / 'processed_data' / 'S1.h5ad'), ''))
+    assert sorted(r.cell_type for r in w.cell_type_runs) == ['Endothelial Cell', 'Fibroblast']
+    assert not w.run_bar.isHidden()

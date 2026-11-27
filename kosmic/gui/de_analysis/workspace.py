@@ -442,6 +442,15 @@ class DEWorkspace(QWidget):
         self.run_bar.set_runs([], -1)
         self.refresh_run_bar()
 
+    def refresh_saved_runs(self) -> None:
+        """After a study loads: list its saved runs on the loaded counts in
+        the run bar, unless runs are already listed (kept because the same
+        file and counts were loaded again)."""
+        if (self.current_adata is not None and not self.cell_type_runs
+                and self.de_results is None and hasattr(self, 'gene_de_page')):
+            self.gene_de_page._try_load_previous_results()
+        self.refresh_run_bar()
+
     def refresh_run_bar(self) -> None:
         """Show the bar on the pages after gene DE once there is a run, and
         write its line from the chosen run."""

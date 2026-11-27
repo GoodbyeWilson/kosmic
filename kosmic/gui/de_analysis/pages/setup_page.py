@@ -613,6 +613,11 @@ class SetupPage(SimplePage):
         self.ws.log_message.emit(f"Loaded h5ad: {path}: {message}")
         self.ws.status_message.emit(f"DE: Loaded {path} ({adata.n_obs:,} cells)")
         self.ws.mark_step_complete(0)  # Step 0 = Load Data
+        # The study's saved runs on these counts, listed now: the load runs
+        # in the background, so the Gene DE page may already be open.
+        refresh = getattr(self.ws, 'refresh_saved_runs', None)
+        if refresh is not None:
+            refresh()
 
     def _on_load_failed(self, message: str) -> None:
         self._counts_btn.setEnabled(True)
