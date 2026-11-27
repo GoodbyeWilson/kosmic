@@ -175,3 +175,83 @@ def test_pathway_results_follow_the_chosen_run(ws):
     _choose(ws, 'Endothelial Cell')
     assert ws.pathway_de_results is None
     assert 'No saved pathway results for Endothelial Cell' in ws.pathway_de_page.status_label.text()
+
+
+def test_saved_runs_are_listed_when_the_study_finishes_loading_on_gene_de(app, tmp_path):
+    """The study loads in the background: Gene DE opened before the data
+    arrived must list the saved runs once it does, without leaving the page."""
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+    study = tmp_path / 'S1'
+    for ct, floor in (('Endothelial Cell', 3), ('Fibroblast', 7)):
+        _run(study, ct, cell_type_column='annotation', min_cells=floor, min_counts=0)
+    w = DEWorkspace()
+    w.project_dir = study
+    w.analysis_mode = 'discovery'
+    w.sample_col, w.condition_col = 'sample', 'condition'
+    w.control_label, w.disease_label = 'Control', 'Disease'
+    w.switch_tab(w.get_page_map().index(3))          # Gene DE, nothing loaded yet
+    assert not w.cell_type_runs and w.run_bar.isHidden()
+
+    setup = w.setup_page
+    setup._load_study_dir = study                    # the background load finishing
+    setup._on_loaded((_adata(), str(study / 'processed_data' / 'S1.h5ad'), ''))
+    assert sorted(r.cell_type for r in w.cell_type_runs) == ['Endothelial Cell', 'Fibroblast']
+    assert not w.run_bar.isHidden()
+
+
+def test_the_run_bar_sits_above_each_pages_results(ws):
+    """'Results for' chooses which finished run is shown, so it heads the
+    results area of each page, not the setup sidebar; Methods has no
+    results area and keeps it above the page."""
+    gene_de, enrichment = ws.gene_de_page, ws.enrichment_page
+    pages = ws.get_page_map()
+    ws.switch_tab(pages.index(3))                      # Gene DE
+    assert gene_de.content_layout.indexOf(ws.run_bar) == 0
+    ws.switch_tab(pages.index(5))                      # Enrichment
+    assert enrichment.content_layout.indexOf(ws.run_bar) == 0
+    assert gene_de.content_layout.indexOf(ws.run_bar) == -1
+    ws.switch_tab(pages.index(6))                      # Methods
+    assert ws._top_layout.indexOf(ws.run_bar) == 0
+    ws.switch_tab(pages.index(3))
+    assert gene_de.content_layout.indexOf(ws.run_bar) == 0
+
+
+def test_load_data_says_which_counts_have_saved_runs(ws):
+    """Runs are kept per counts; Load Data says what Gene DE will list."""
+    setup = ws.setup_page
+    assert setup._saved_runs_text('raw') == "2 cell types and the whole study"
+    assert setup._saved_runs_text('decontX_counts') == (
+        "None on these counts; original counts: 2 cell types and the whole study")
+
+
+def test_the_counts_choice_is_remembered_per_project(app, tmp_path):
+    from PyQt6.QtCore import QSettings
+    from kosmic.gui.de_analysis.workspace import DEWorkspace
+
+    study = tmp_path / 'Project' / 'S1'
+    study.mkdir(parents=True)
+    h5ad = study / 'S1.h5ad'
+    a = _adata()
+    a.layers['decontX_counts'] = a.X.copy()
+    a.write_h5ad(h5ad)
+    settings = QSettings(str(tmp_path / 'kosmic.ini'), QSettings.Format.IniFormat)
+
+    def workspace():
+        w = DEWorkspace()
+        w.settings = settings                  # never the user's own settings
+        w.project_dir = study
+        return w
+
+    first = workspace()
+    first.setup_page._choose_counts('decontX_counts')        # no study loaded: no reload
+    second = workspace()                                      # KOSMIC opened again
+    assert second.counts_choice is None
+    second.setup_page._restore_counts_choice(h5ad)
+    assert second.counts_choice == 'decontX_counts'
+    # A study without those counts opens on the original counts.
+    plain = tmp_path / 'Project' / 'S2'
+    plain.mkdir()
+    _adata().write_h5ad(plain / 'S2.h5ad')
+    second.project_dir = plain
+    second.setup_page._restore_counts_choice(plain / 'S2.h5ad')
+    assert second.counts_choice is None

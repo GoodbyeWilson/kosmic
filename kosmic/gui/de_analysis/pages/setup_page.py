@@ -103,7 +103,8 @@ class SetupPage(SimplePage):
             "Which counts the analysis reads: the original counts, or the\n"
             "DecontX-corrected counts (layers['decontX_counts']) of a study\n"
             "run through the Decontaminate step. Changing it reloads the\n"
-            "study, and the choice applies to each study loaded after it.")
+            "study. The choice is remembered for the project: every study\n"
+            "of it opens on these counts, when it has them.")
         self._counts_menu = QMenu(self._counts_btn)
         self._counts_menu.aboutToShow.connect(self._populate_counts_menu)
         self._counts_btn.setMenu(self._counts_menu)
@@ -116,6 +117,12 @@ class SetupPage(SimplePage):
             'counts', "Counts",
             "The count matrix every DE step reads, and the pseudobulk it "
             "exports.")
+        self._dataset_panel.add_row(
+            'saved_runs', "Saved gene DE",
+            "Gene DE runs already saved for this study on the counts loaded, "
+            "which Gene DE lists under 'Results for'. Runs are kept per "
+            "counts, so a run on the other counts is not listed until those "
+            "counts are loaded.")
         self._dataset_panel.add_row(
             'sample_col', "Sample column",
             "Column with patient/sample IDs -- each unique value becomes "
@@ -306,6 +313,7 @@ class SetupPage(SimplePage):
         path = self._registered_h5ad()
         if path is None:
             return
+        self._restore_counts_choice(path)
         self._start_load(str(path))
 
     def show_loaded_state(self, label: str, detail: str) -> None:
@@ -495,12 +503,80 @@ class SetupPage(SimplePage):
             act.setEnabled(not missing)
             act.triggered.connect(lambda _c=False, ly=layer: self._choose_counts(ly))
 
+    def _saved_runs_text(self, loaded) -> str:
+        """How many gene DE runs the study has saved on the counts loaded
+        ('raw' or a layer), and on the other counts when there are none on
+        these: what Gene DE will list under 'Results for'."""
+        proj = self.ws.project_dir
+        if not proj:
+            return "None (no study folder)"
+        from kosmic.de.saved import gene_de_runs_in
+        from kosmic.paths import counts_folder_name, de_stats_dir
+
+        def runs_on(source):
+            folder = counts_folder_name(source)
+            try:
+                runs = [r for r in gene_de_runs_in(de_stats_dir(Path(proj)), Path(proj).name,
+                                                   counts=folder)
+                        if r.method == 'deseq2']
+            except OSError:
+                runs = []
+            n_types = sum(1 for r in runs if r.cell_type)
+            whole = len(runs) - n_types
+            parts = []
+            if n_types:
+                parts.append(f"{n_types} cell type{'s' if n_types != 1 else ''}")
+            if whole:
+                parts.append("the whole study")
+            return " and ".join(parts)
+
+        here = runs_on(loaded)
+        if here:
+            return here
+        for layer, label in self._COUNTS_OPTIONS:
+            other = 'raw' if layer is None else layer
+            if other != loaded:
+                found = runs_on(other)
+                if found:
+                    return f"None on these counts; {label.lower()}: {found}"
+        return "None yet"
+
+    def _counts_setting_key(self):
+        """The settings key of the counts choice of the open project: the
+        folder holding the study, so every study of a project shares it."""
+        proj = self.ws.project_dir
+        if not proj:
+            return None
+        return "de/counts_choice/" + Path(proj).resolve().parent.as_posix()
+
+    def _restore_counts_choice(self, h5ad_path) -> None:
+        """Use the counts last chosen for this project, when this study has
+        them; the original counts otherwise."""
+        key = self._counts_setting_key()
+        if key is None:
+            return
+        saved = self.ws.settings.value(key, "") or None
+        if saved is not None:
+            from kosmic.scrna.load.h5ad_meta import read_layer_names
+            try:
+                if saved not in (read_layer_names(h5ad_path) or ()):
+                    saved = None
+            except OSError:
+                saved = None
+        if saved != self.ws.counts_choice:
+            self.ws.counts_choice = saved
+            self._sync_counts_button()
+
     def _choose_counts(self, layer):
         """Read 'layer' (None: the original counts) from now on, reloading
-        the study that is open so the analysis reads them."""
+        the study that is open so the analysis reads them. The choice is
+        remembered for the project."""
         if layer == self.ws.counts_choice:
             return
         self.ws.counts_choice = layer
+        key = self._counts_setting_key()
+        if key is not None:
+            self.ws.settings.setValue(key, layer or "")
         self._sync_counts_button()
         path = getattr(self.ws, 'h5ad_path', None)
         if path and self.ws.current_adata is not None:
@@ -613,6 +689,11 @@ class SetupPage(SimplePage):
         self.ws.log_message.emit(f"Loaded h5ad: {path}: {message}")
         self.ws.status_message.emit(f"DE: Loaded {path} ({adata.n_obs:,} cells)")
         self.ws.mark_step_complete(0)  # Step 0 = Load Data
+        # The study's saved runs on these counts, listed now: the load runs
+        # in the background, so the Gene DE page may already be open.
+        refresh = getattr(self.ws, 'refresh_saved_runs', None)
+        if refresh is not None:
+            refresh()
 
     def _on_load_failed(self, message: str) -> None:
         self._counts_btn.setEnabled(True)
@@ -859,6 +940,7 @@ class SetupPage(SimplePage):
             self._dataset_panel.set_value(
                 'counts', f"{text} (the chosen counts are not in this study)",
                 ok=False)
+        self._dataset_panel.set_value('saved_runs', self._saved_runs_text(loaded))
 
         sample_col = self.ws.sample_col
         if sample_col and sample_col in adata.obs.columns:
