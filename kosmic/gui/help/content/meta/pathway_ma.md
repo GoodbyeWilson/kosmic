@@ -14,7 +14,7 @@ Only tables made with the current Pathway DE are pooled: their score and test ar
 
 ## Pooling method
 
-**REML** (restricted maximum likelihood, the default) or **DL** (DerSimonian–Laird) random effects, the same code as the gene meta-analysis. **Min studies** sets how many studies must have a pathway for it to be pooled.
+REML (restricted maximum likelihood) random effects, the same code as the gene meta-analysis. **Min studies** sets how many studies must have a pathway for it to be pooled.
 
 Across studies, the pathway question can also be asked of the pooled gene results: the meta-analysis **Enrichment** step runs preranked GSEA on the genes ranked by their pooled z-statistic.
 

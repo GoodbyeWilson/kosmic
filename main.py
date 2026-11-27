@@ -338,10 +338,6 @@ class AppWindow(QMainWindow):
         plot_settings_action.triggered.connect(self._open_plot_settings)
         view_menu.addAction(plot_settings_action)
 
-        ma_settings_action = QAction("Meta-Analysis Settings...", self)
-        ma_settings_action.triggered.connect(self._open_ma_settings)
-        view_menu.addAction(ma_settings_action)
-
         from kosmic.gui.help.about_dialogs import show_about
         help_menu = menu_bar.addMenu("Help")
 
@@ -474,16 +470,6 @@ class AppWindow(QMainWindow):
         self._plot_settings_dlg.show()
         self._plot_settings_dlg.raise_()
         self._plot_settings_dlg.activateWindow()
-
-    def _open_ma_settings(self):
-        from kosmic.gui.meta_analysis.dialogs.ma_settings_dialog import (
-            MASettingsDialog, load_de_method)
-        dlg = MASettingsDialog(self.settings, parent=self)
-        if dlg.exec():
-            ws = self._meta_workspace
-            if ws is not None:
-                ws.gene_ma_page.refresh_method_controls()
-                ws.de_method = load_de_method(self.settings)
 
     # Mode registry: stack page index, log label, "is this workspace
     # built yet" attr name, loader method name, activator method name.

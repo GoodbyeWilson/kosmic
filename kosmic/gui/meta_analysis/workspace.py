@@ -70,12 +70,8 @@ class MetaAnalysisWorkspace(QWidget):
         # Project folder (set by AppWindow.project_changed)
         self._project_folder = ""
 
-        # DE method picked in View > Meta-Analysis Settings; used by
-        # _rescan_project to choose which {accession}_DE_*.csv files
-        # to load. Initial value loaded from QSettings; main.py rewrites
-        # it whenever the MA Settings dialog is closed.
-        from kosmic.gui.meta_analysis.dialogs.ma_settings_dialog import load_de_method
-        self.de_method = load_de_method(self.settings)
+        # The DE results _rescan_project loads: DESeq2's, the only method.
+        self.de_method = 'DESeq2'
 
         self._setup_ui()
         self._load_settings()

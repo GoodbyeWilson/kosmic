@@ -47,28 +47,29 @@ way.
 Independently published studies differ in protocol, platform,
 dissociation, and cohort, so between-study heterogeneity (τ²) is
 structurally large. A random-effects model is the appropriate one for
-that regime and is KOSMIC's primary pooling method: DerSimonian–Laird
-(DerSimonian & Laird, *Controlled Clinical Trials* 1986), with REML as
-an alternative estimator and the Hartung–Knapp–Sidik–Jonkman
-adjustment (IntHout et al., *BMC Medical Research Methodology* 2014)
-available for small numbers of studies.
+that regime and is KOSMIC's effect-size pooling method. The
+between-study variance τ² is estimated by restricted maximum likelihood
+(REML; Viechtbauer, *Journal of Educational and Behavioral Statistics*
+2005), the default of metafor, and the pooled effect is tested with a
+normal (Wald) test.
 
 I² is the share of the total variation that comes from between-study
 heterogeneity (Higgins & Thompson, *Statistics in Medicine* 2002):
 τ² / (τ² + s²), where s² is the typical within-study variance,
 (k − 1) Σw / ((Σw)² − Σw²) with w = 1 / SE². This is how metafor
-computes it for every τ² estimator. For DerSimonian–Laird it equals
-(Q − df) / Q; for REML it uses the REML τ².
+computes it, here with the REML τ².
 
-Two other families are implemented alongside it, because they make
+Three other methods are implemented alongside it, because they make
 different assumptions and fail in different ways:
 
-- **Rank aggregation** — SumRank, and gwOP — which pool the *ranking*
-  of genes within each study and are insensitive to effect-size scale.
-- **p-value combination** — Fisher's method (unsigned) and Stouffer's
-  (signed) — which pool evidence without an effect size. Both are the
-  textbook methods: each study's p-value is used as it is, with no floor,
-  and a study with p = 1 counts (it adds z = 0 to Stouffer's sum). The
+- **SumRank** pools the *ranking* of genes within each study, for up-
+  and for down-regulation, and is insensitive to effect-size scale. It
+  can sum every study's rank or only each gene's best share of them (see
+  [Gene Meta-Analysis](gene_ma.md#sumrank-best-n-of-studies)).
+- **Stouffer's method** combines each study's signed z-score and pools
+  evidence without an effect size. It is the textbook method: each
+  study's p-value is used as it is, with no floor, and a study with
+  p = 1 counts (it adds z = 0 to the sum). The
   only limit is numerical: a p-value that underflowed to 0 is taken as
   10⁻³⁰⁰. With p-values as small as single-cell studies give, the pooled
   p-value of the strongest genes can therefore be very small; their order
@@ -78,7 +79,7 @@ different assumptions and fail in different ways:
   [Vote counting](#vote-counting).
 
 The Discovery Meta-Analysis step can run any combination and show the
-overlap. Genes found by every family are a **high-confidence consensus
+overlap. Genes found by every method ticked are the **consensus
 set**: a gene that survives effect-size pooling, rank aggregation and
 p-value combination is not depending on the assumptions of any one of
 them. It is a consensus of statistical methods on the same data, not an
@@ -86,9 +87,7 @@ independent validation; the Validation step's proteomics (Olink) and
 GWAS comparisons are the external evidence.
 
 With two studies, τ² rests on a single difference between them and is
-very uncertain whichever estimator is used, Hartung–Knapp has one degree of freedom
-in its t-distribution and finds nothing, and the rank methods have
-almost no resolution. Two studies is the minimum that runs; five or
+very uncertain, and the rank method has almost no resolution. Two studies is the minimum that runs; five or
 more is where the method choice starts to matter.
 
 ### Vote counting
@@ -112,9 +111,9 @@ the genes another method of the run calls significant overlaid.
 
 Vote counting ignores the size of the effects and their standard
 errors, and gives no pooled estimate or confidence interval: the log2
-fold change shown for it in the volcano and results table is the
-inverse-variance mean, as for Fisher's method. It is a robustness check
-beside DerSimonian–Laird or REML, not a replacement: a gene with a
+fold change shown for it in the volcano and results table is REML's
+pooled estimate, as for Stouffer's method. It is a robustness check
+beside REML, not a replacement: a gene with a
 consistent but modest effect that no single study calls significant
 gets no votes, however many studies there are. In the DCM ventricular
 cardiomyocyte meta-analysis (five studies, 9,263 genes), 1,131 of the
@@ -123,14 +122,14 @@ study, and 571 by four or five.
 
 ### Direction of effect across studies
 
-Fisher's method, SumRank and gwOP combine per-study p-values or ranks
-without using the sign of the fold change. A gene that is significantly
-up-regulated in one study and significantly down-regulated in another
-can therefore be called significant by these methods, although the
-studies disagree about what happens to it. Stouffer's method uses the
-sign, and DerSimonian–Laird and REML pool the signed effect, so such a
-gene is less likely to reach significance with them, but it is not
-excluded.
+SumRank over the best share of each gene's studies sums only the
+studies in which the gene ranks highest, so the studies it leaves out do
+not count against it. A gene that is significantly up-regulated in some
+studies and significantly down-regulated in another can therefore be
+called significant, although the studies disagree about what happens to
+it. Stouffer's method and SumRank over all studies use every study's
+sign, and REML pools the signed effect, so such a gene is less likely
+to reach significance with them, but it is not excluded.
 
 Every pooled table (gene and pathway) therefore carries three columns:
 
@@ -140,10 +139,7 @@ Every pooled table (gene and pathway) therefore carries three columns:
 - `direction_conflict` — true when both counts are above zero.
 
 The counts use each study's adjusted p-value (`pvals_adj`) as written
-by the study's DE step. The DESeq2 + VIF pathway summaries carry only a
-pooled log2 fold change and a VIF-adjusted standard error per study, so
-for them each study's p-value is a two-sided Wald test of log2FC / SE,
-adjusted by Benjamini–Hochberg across that study's pathways. A study
+by the study's DE step (Gene DE for genes, Pathway DE for pathways). A study
 whose results table has no adjusted p-value is not counted, and the
 output panel names it when the run starts. When no study has adjusted
 p-values the columns are omitted rather than reported as zero. A significant gene with `direction_conflict` set should be read
@@ -195,14 +191,14 @@ five studies on 14 cores for DCM cardiomyocytes; 30 s against 307 s per
 permutation on one core for endothelial cells), so the default is
 1,000 permutations, saved in `cc_permutation_vec/`. It uses scipy's own
 L-BFGS-B through a private scipy function; KOSMIC checks at run time that
-the function behaves as expected and, if it does not, uses the
-approximation below and says so. On the DCM endothelial cells (five
+the function behaves as expected and, if it does not, says so and
+does not run. On the DCM endothelial cells (five
 studies, 1,000 permutations, the same shuffles for every engine) the exact
 and fast engines gave identical numbers of genes at a Benjamini–Hochberg
 FDR below 0.05 for every method, and null tail fractions equal to within
 0.00001.
 
-**Approximate.** Used only where the fast engine cannot run. The
+**Approximate.** Used by leave-one-study-out validation. The
 dispersions are estimated once on the observed labels, and each
 permutation refits a vectorised two-group model (condition only, no
 covariates) with them. A permutation of five studies takes under a second.
@@ -211,11 +207,8 @@ the same cells:
 
 | Method | Exact | Fast | Approximate |
 |---|---|---|---|
-| DL | 4,350 | 4,350 | 4,251 |
 | REML | 4,287 | 4,287 | 4,158 |
 | SumRank, top 50% | 291 | 291 | 178 |
-| gwOP | 5,951 | 5,951 | 5,492 |
-| Fisher | 7,447 | 7,447 | 6,790 |
 | Stouffer | 6,612 | 6,612 | 6,306 |
 
 This is one cell type, so the size of the difference in another data set

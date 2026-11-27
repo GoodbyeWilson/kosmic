@@ -3,9 +3,10 @@
 
 The Calibration box names the engine; the page turns that into the
 permutation's DE engine and, for the engines that re-fit each study, a resume
-folder beside the selection's results. The tests cover the choice, what Welch
-input does with it, the file name that keeps the engines' runs apart, and that
-a run in progress turns the run button into a Stop button.
+folder beside the selection's results. No other engine is ever run in their
+place. The tests cover the choice, the refusal when the fast engine cannot run,
+the file name that keeps the engines' runs apart, and that a run in progress
+turns the run button into a Stop button.
 """
 from __future__ import annotations
 
@@ -61,16 +62,20 @@ def test_fast_uses_the_vectorised_engine_with_its_own_resume_folder(page, tmp_pa
     assert folder.startswith(str(tmp_path))
 
 
-def test_fast_falls_back_to_the_approximation_when_the_optimiser_is_unusable(
+def test_fast_is_refused_not_substituted_when_the_optimiser_is_unusable(
         page, monkeypatch):
+    from kosmic.gui.meta_analysis.pages import gene_ma_page
     from kosmic.meta_analysis import vec_lbfgsb
     monkeypatch.setattr(vec_lbfgsb, '_SETULB', None)
     monkeypatch.setattr(vec_lbfgsb, '_AVAILABLE', None)
+    warned = []
+    monkeypatch.setattr(gene_ma_page.dialogs, 'warning',
+                        lambda *a, **k: warned.append(a))
     messages = []
     page.log_message.connect(messages.append)
     page._cal_combo.setCurrentIndex(1)
-    assert page._cc_engine_settings('cc_perm', 'deseq2') == ('deseq2_fast', None)
-    assert any('approximation' in m for m in messages)
+    assert page._cc_engine_settings('cc_perm', 'deseq2') == (None, None)
+    assert warned and any('exact' in m for m in messages)
 
 
 def test_exact_uses_the_exact_engine_with_a_folder_beside_the_results(page, tmp_path):
@@ -82,22 +87,9 @@ def test_exact_uses_the_exact_engine_with_a_folder_beside_the_results(page, tmp_
     assert folder.startswith(str(tmp_path))
 
 
-def test_welch_input_keeps_the_welch_engine_under_fast(page):
-    page._cal_combo.setCurrentIndex(1)
-    assert page._cc_engine_settings('cc_perm', 'welch_cpm') == ('welch_cpm', None)
-
-
-def test_welch_input_keeps_the_welch_engine_under_exact(page):
-    page._cal_combo.setCurrentIndex(2)
-    messages = []
-    page.log_message.connect(messages.append)
-    assert page._cc_engine_settings('cc_perm', 'welch_cpm') == ('welch_cpm', None)
-    assert any('Welch' in m for m in messages)
-
-
-def test_analytical_calibration_never_selects_the_exact_engine(page):
+def test_analytical_calibration_selects_no_permutation_engine(page):
     page._cal_combo.setCurrentIndex(0)
-    assert page._cc_engine_settings('analytical', 'deseq2') == ('deseq2_fast', None)
+    assert page._cc_engine_settings('analytical', 'deseq2') == ('analytical', None)
 
 
 def test_saved_runs_of_every_engine_are_listed(page):
@@ -132,14 +124,7 @@ def test_the_saved_file_name_tags_the_engine_that_made_the_run(page):
     page._cal_combo.setCurrentIndex(0)
     assert page._cal_tag() == 'analytical'
     page._cal_combo.setCurrentIndex(1)
-    for engine, tag in (('deseq2_vec', 'ccvec'), ('deseq2_exact', 'ccexact'),
-                        ('deseq2_fast', 'cc'), ('welch_cpm', 'cc')):
+    for engine, tag in (('deseq2_vec', 'ccvec'), ('deseq2_exact', 'ccexact')):
         page._last_consensus_params = {'de_method': engine}
         assert page._cal_tag() == tag
 
-
-def test_a_fast_run_leaves_the_run_button_alone(page):
-    page._run_btn.setText("Run Meta-Analysis")
-    page._after_worker_start({'calibration': 'cc_perm', 'de_method': 'deseq2_fast'})
-    assert page._exact_run_active is False
-    assert page._run_btn.text() == "Run Meta-Analysis"

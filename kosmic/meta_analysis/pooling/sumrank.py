@@ -16,6 +16,13 @@ import numpy as np
 import pandas as pd
 
 
+def top_r(k: int, proportion_top: float) -> int:
+    """How many of a gene's k study ranks SumRank sums: ceil(k x proportion),
+    at least 1. The product is rounded first, so 10 x 0.3 gives 3, not the
+    4 that ceil(3.0000000000000004) would."""
+    return max(int(np.ceil(round(float(k) * float(proportion_top), 9))), 1)
+
+
 # Rank matrices (gene × study)
 
 def _build_rank_matrices(datasets):
@@ -188,7 +195,7 @@ def sumrank_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0,
     if proportion_top < 1.0:
         unique_k = set(n_studies[gene_mask])
         for k_val in unique_k:
-            k_top = max(int(np.ceil(k_val * proportion_top)), 1)
+            k_top = top_r(k_val, proportion_top)
             if k_top < k_val:
                 _top_r_sum_cdf(0.5, int(k_val), k_top)  # triggers cache build
 
@@ -200,7 +207,7 @@ def sumrank_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0,
         k = n_studies[i]
 
         if proportion_top < 1.0:
-            k_top = max(int(np.ceil(k * proportion_top)), 1)
+            k_top = top_r(k, proportion_top)
             ru_nz = np.sort(ru[i][ru[i] > 0])
             rd_nz = np.sort(rd[i][rd[i] > 0])
             s_up = ru_nz[:k_top].sum() if len(ru_nz) >= k_top else ru[i].sum()

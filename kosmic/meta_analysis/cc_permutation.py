@@ -37,10 +37,8 @@
 #     'welch_cpm' / 'welch_cpm_eb' / 'welch_raw' -- Welch t-test variants
 #                           using 'fast_ttest_de' here
 #
-# Pooling is dispatched via '_MATRIX_POOLERS'; every key corresponds to a
-# method exposed by the app UI (see ``kosmic/gui/meta_analysis/dialogs/
-# ma_settings_dialog.py::METHOD_FAMILIES`` + the Top50/HKSJ modifiers on
-# the consensus page).
+# Pooling is dispatched via '_matrix_pooler' (the '_MATRIX_POOLERS' table,
+# plus SumRank over any best share of studies, 'sumrank_top<NN>').
 
 from __future__ import annotations
 from kosmic import MIN_STUDIES, CC_N_PERMS
@@ -615,7 +613,8 @@ def _pool_sumrank_pvals(pval_matrix, effects_matrix, valid_mask, proportion_top=
 
         k_eff = k
         if proportion_top < 1.0:
-            k_eff = max(int(np.ceil(k * proportion_top)), 1)
+            from kosmic.meta_analysis.pooling.sumrank import top_r
+            k_eff = top_r(k, proportion_top)
 
         ru_group = np.where(np.isnan(rank_up[gmask]), 1.0, rank_up[gmask])
         rd_group = np.where(np.isnan(rank_down[gmask]), 1.0, rank_down[gmask])
@@ -797,8 +796,8 @@ def _pool_stouffer_pvals(effects, var_matrix, valid_mask, pval_matrix=None,
 # Dispatch: pooling_key -> (pool_fn, calling_convention).
 # Rule methods (pooling_dispatch.RULE_METHODS, vote counting) have no
 # p-value to calibrate and are not listed.
-# Keys mirror the method options in ma_settings_dialog.METHOD_FAMILIES
-# combined with the top50 / hksj modifier checkboxes.
+# SumRank over another share of studies is built by '_matrix_pooler'. Keys of
+# methods the app no longer offers are removed with the engines (review list).
 _MATRIX_POOLERS = {
     # Effect-size families (DL/REML), 4 variants each: base / top50 / hksj / top50_hksj.
     'dl':              (lambda e, v, m: _pool_dl_pvals(e, v, m), True),
@@ -824,6 +823,18 @@ _MATRIX_POOLERS = {
                           'pvals'),
 }
 
+
+
+def _matrix_pooler(key):
+    """(pool_fn, kind) for a pooling key, including SumRank over any best
+    share of studies ('sumrank_top<NN>'); None for a key not calibrated."""
+    if key in _MATRIX_POOLERS:
+        return _MATRIX_POOLERS[key]
+    from kosmic.meta_analysis.pooling_dispatch import sumrank_proportion
+    prop = sumrank_proportion(key)
+    if prop is None:
+        return None
+    return (lambda pv, eff, mask, _p=prop: _pool_sumrank_pvals(pv, eff, mask, _p), 'rank')
 
 
 # Worker-process state, populated once by '_worker_init'. Reading from
@@ -1036,9 +1047,10 @@ def _worker_init(pseudobulk_data, precomputed,
     global _W_STATE
     method_specs = []
     for key in method_keys:
-        if key not in _MATRIX_POOLERS:
+        entry = _matrix_pooler(key)
+        if entry is None:
             continue
-        pool_fn, kind = _MATRIX_POOLERS[key]
+        pool_fn, kind = entry
         if kind == 'rank':
             mode = 'rank'
         elif kind == 'weighted_rank':
