@@ -13,8 +13,7 @@ from kosmic.scrna.counts import count_source, count_var_names, counts_adata, has
 from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD,
     PATHWAY_GENE_DETECTION_PCT, PATHWAY_MIN_GENES, PATHWAY_MIN_COVERAGE,
-    DE_MIN_CELLS, DE_MIN_COUNTS, DE_MIN_EXPRESSING_SAMPLES, DE_MAX_SE,
-    DE_SE_FLOOR,
+    DE_MIN_CELLS, DE_MIN_COUNTS, DE_MIN_EXPRESSING_SAMPLES,
     DE_FILTER_MIN_COUNT, DE_FILTER_MIN_TOTAL_COUNT, DE_FILTER_MIN_SAMPLES,
     DE_DETECTION_MIN_PCT, DE_DETECTION_ON, DE_DETECTION_MIN_DONOR_FRAC,
     DE_DESEQ2_INDEPENDENT_FILTER, DE_DESEQ2_COOKS_FILTER,
@@ -617,13 +616,11 @@ def pseudobulk_expression_matrix(adata, sample_col, condition_col,
 
 
 def run_pseudobulk_de(pseudobulk_matrix, sample_df, gene_names,
-                      min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES, method='ttest',
-                      max_se=DE_MAX_SE, moderate=True,
-                      pre_transformed=False, normalize='cpm', se_floor=DE_SE_FLOOR,
-                      filter_min_count=DE_FILTER_MIN_COUNT,
-                      filter_min_samples=DE_FILTER_MIN_SAMPLES,
-                      study_col=None):
-    """Run pseudobulk differential expression analysis (Welch's t-test on log2-CPM).
+                      min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES,
+                      pre_transformed=True):
+    """Welch's t-test, disease vs control donors, on each column of a
+    donor-level matrix of scores (the Pathway DE page's per-donor pathway
+    scores). Count data goes to DESeq2 instead (run_de_pipeline).
 
     Sample filtering is by sample_df['role'] ('disease' / 'control' /
     'exclude'), populated by create_pseudobulk from adata.obs['_role'].
@@ -631,47 +628,36 @@ def run_pseudobulk_de(pseudobulk_matrix, sample_df, gene_names,
     Parameters
     ----------
     pseudobulk_matrix : numpy.ndarray
-        '(n_samples, n_genes)'. Sum counts per sample, unless
-        'pre_transformed=True' in which case already log2-CPM.
+        '(n_samples, n_scores)', already on the scale to be tested.
     sample_df : pandas.DataFrame
         Must have a 'role' column.
     gene_names : list of str
-        Gene names matching matrix columns.
+        Names matching the matrix columns.
     min_expressing_samples : int
-        Min samples with expression > 0 to test a gene.
-    method : str
-        'ttest' (Welch's t-test).
-    max_se : float
-        Standard-error cap.
-    moderate : bool
-        Apply limma-style empirical Bayes variance moderation.
+        A column is tested when at least this many donors of either arm
+        have a score above 0.
     pre_transformed : bool
-        Set True when the matrix is already on the log2 scale.
-    normalize : 'cpm' | 'log2'
-        'cpm': CPM-normalise then log2(CPM+1) (for sum-count input).
-        'log2': log2(x+1) only (for mean-count input).
+        Must be True: the values are tested as they are.
 
     Returns
     -------
     pandas.DataFrame
-        Columns: names, logfoldchanges, pvals, pvals_adj, disease_mean,
-        control_mean, disease_var, control_var, disease_samples,
-        control_samples, cohens_d, se, ci_lower, ci_upper, se_diff,
-        statistic.
+        Columns: names, logfoldchanges (difference of the arm means),
+        pvals, pvals_adj, disease_mean, control_mean, disease_var,
+        control_var, disease_samples, control_samples, cohens_d, se,
+        ci_lower, ci_upper, se_diff, statistic. 'se' is the Welch standard
+        error of the difference, sqrt(var_d / n_d + var_c / n_c); it is
+        blank (NaN), with its p-value, where it is 0 or undefined (no
+        variation in either arm), rather than replaced by a made-up value.
     """
     from scipy.stats import ttest_ind
     from kosmic.numerical import bh_fdr
 
-    # Normalise + log2-transform per sample.
-    if pre_transformed:
-        log2_cpm = pseudobulk_matrix
-    elif normalize == 'log2':
-        log2_cpm = np.log2(pseudobulk_matrix + 1)
-    else:
-        lib_sizes = pseudobulk_matrix.sum(axis=1, keepdims=True)
-        lib_sizes = np.clip(lib_sizes, 1, None)
-        cpm_matrix = pseudobulk_matrix / lib_sizes * 1e6
-        log2_cpm = np.log2(cpm_matrix + 1)
+    if not pre_transformed:
+        raise ValueError(
+            "run_pseudobulk_de tests scores as they are; count data is tested "
+            "with DESeq2 (run_de_pipeline).")
+    values = np.asarray(pseudobulk_matrix, dtype=float)
 
     if 'role' not in sample_df.columns:
         raise ValueError(
@@ -681,72 +667,39 @@ def run_pseudobulk_de(pseudobulk_matrix, sample_df, gene_names,
     disease_mask = (sample_df['role'] == 'disease').values
     control_mask = (sample_df['role'] == 'control').values
 
-    # Sample-level gene filter. Raw counts use the expression-prevalence rule
-    # (donor-aware, library-size-adjusted); pre-transformed inputs (e.g. pathway
-    # scores) are not counts, so they keep a simple presence threshold.
-    if pre_transformed:
-        genes_to_test = []
-        for idx, gene in enumerate(gene_names):
-            n_expr_d = (pseudobulk_matrix[disease_mask, idx] > 0).sum()
-            n_expr_c = (pseudobulk_matrix[control_mask, idx] > 0).sum()
-            if (n_expr_d >= min_expressing_samples
-                    or n_expr_c >= min_expressing_samples):
-                genes_to_test.append((idx, gene))
-    else:
-        keep = filter_by_expression(
-            pseudobulk_matrix, sample_df['role'].astype(str).values,
-            min_count=filter_min_count, min_samples=filter_min_samples,
-            studies=_study_values(sample_df, study_col))
-        genes_to_test = [(idx, gene) for idx, gene in enumerate(gene_names)
-                         if keep[idx]]
-
-    if not genes_to_test:
-        return pd.DataFrame()
-
-    # Run DE tests on the log2-CPM matrix.
     results = []
-    for gene_idx, gene_name in genes_to_test:
-        disease_vals = log2_cpm[disease_mask, gene_idx]
-        control_vals = log2_cpm[control_mask, gene_idx]
-
-        if len(disease_vals) < 2 or len(control_vals) < 2:
+    for idx, name in enumerate(gene_names):
+        disease_vals = values[disease_mask, idx]
+        control_vals = values[control_mask, idx]
+        if ((disease_vals > 0).sum() < min_expressing_samples
+                and (control_vals > 0).sum() < min_expressing_samples):
+            continue
+        nd, nc = len(disease_vals), len(control_vals)
+        if nd < 2 or nc < 2:
             continue
 
-        disease_mean = np.mean(disease_vals)
-        control_mean = np.mean(control_vals)
+        disease_mean = float(np.mean(disease_vals))
+        control_mean = float(np.mean(control_vals))
+        difference = disease_mean - control_mean
+        disease_var = float(np.var(disease_vals, ddof=1))
+        control_var = float(np.var(control_vals, ddof=1))
 
-        fold_change = disease_mean - control_mean  # log2-CPM mean difference
-
-        # Welch's t-test on log2-CPM values.
-        try:
+        se = float(np.sqrt(disease_var / nd + control_var / nc))
+        if np.isfinite(se) and se > 0:
             statistic, pvalue = ttest_ind(disease_vals, control_vals, equal_var=False)
-        except ValueError:
-            pvalue, statistic = 1.0, 0.0  # n<2 or both groups zero-variance
+            statistic, pvalue = float(statistic), float(pvalue)
+            ci_lower, ci_upper = difference - 1.96 * se, difference + 1.96 * se
+        else:
+            se = statistic = pvalue = ci_lower = ci_upper = np.nan
 
-        disease_var = np.var(disease_vals, ddof=1)
-        control_var = np.var(control_vals, ddof=1)
-
-        nd, nc = len(disease_vals), len(control_vals)
-        pooled_std = np.sqrt(
-            ((nd - 1) * disease_var + (nc - 1) * control_var) /
-            max(nd + nc - 2, 1)
-        )
-
-        cohens_d = fold_change / pooled_std if pooled_std > 0 else 0.0
-
-        # SE directly from t-test on log2-CPM (no delta method needed).
-        se_logfc = np.sqrt(disease_var / nd + control_var / nc)
-        if se_logfc > max_se or not np.isfinite(se_logfc):
-            se_logfc = np.sqrt(1 / max(nd, 1) + 1 / max(nc, 1))
-        se_logfc = np.clip(se_logfc, se_floor, max_se)
-
-        ci_lower = fold_change - 1.96 * se_logfc
-        ci_upper = fold_change + 1.96 * se_logfc
-        se_diff = pooled_std * np.sqrt(1 / nd + 1 / nc) if pooled_std > 0 else 0
+        pooled_std = np.sqrt(((nd - 1) * disease_var + (nc - 1) * control_var)
+                             / (nd + nc - 2))
+        cohens_d = difference / pooled_std if pooled_std > 0 else np.nan
+        se_diff = pooled_std * np.sqrt(1 / nd + 1 / nc) if pooled_std > 0 else np.nan
 
         results.append({
-            'names': gene_name,
-            'logfoldchanges': fold_change,
+            'names': name,
+            'logfoldchanges': difference,
             'pvals': pvalue,
             'disease_mean': disease_mean,
             'control_mean': control_mean,
@@ -755,7 +708,7 @@ def run_pseudobulk_de(pseudobulk_matrix, sample_df, gene_names,
             'disease_samples': nd,
             'control_samples': nc,
             'cohens_d': cohens_d,
-            'se': se_logfc,
+            'se': se,
             'ci_lower': ci_lower,
             'ci_upper': ci_upper,
             'se_diff': se_diff,
@@ -764,69 +717,9 @@ def run_pseudobulk_de(pseudobulk_matrix, sample_df, gene_names,
 
     if not results:
         return pd.DataFrame()
-
     de_results = pd.DataFrame(results)
-
-    # Unmoderated SE preserved for meta-analysis: moderated SEs are
-    # deflated and cause overconfident pooling (same issue as DESeq2 shrinkage).
-    unshrunk_se = de_results['se'].copy()
-
-    # --- Empirical Bayes variance moderation (limma-style) ---
-    if moderate:
-        from scipy.stats import t as t_dist
-
-        dv = de_results['disease_var'].values
-        cv = de_results['control_var'].values
-        nd = de_results['disease_samples'].values
-        nc = de_results['control_samples'].values
-        df_gene = nd + nc - 2
-
-        # Pooled residual variance (sum-of-squares would inflate the prior).
-        s2 = ((nd - 1) * dv + (nc - 1) * cv) / np.maximum(df_gene, 1)
-
-        s2_pos = s2[s2 > 0]
-        if len(s2_pos) >= 3:
-            log_s2 = np.log(s2_pos)
-            s0_sq = np.exp(np.median(log_s2))
-            var_log_s2 = np.var(log_s2, ddof=1)
-            from scipy.special import polygamma
-            mean_trigamma = np.mean([polygamma(1, d / 2) for d in df_gene[s2 > 0]])
-            trigamma_d0_half = max(var_log_s2 - mean_trigamma, 0.01)
-            d0 = max(2.0 / trigamma_d0_half, 1.0)
-            d0 = min(d0, 50.0)  # cap to prevent over-shrinkage
-
-            s2_mod = (df_gene * s2 + d0 * s0_sq) / (df_gene + d0)
-            df_mod = df_gene + d0
-
-            for i in range(len(de_results)):
-                if s2[i] <= 0 or nd[i] < 2 or nc[i] < 2:
-                    continue
-                se_pooled = np.sqrt(s2_mod[i] * (1.0 / nd[i] + 1.0 / nc[i]))
-                if se_pooled > 0:
-                    d_mean = de_results.iloc[i]['disease_mean']
-                    c_mean = de_results.iloc[i]['control_mean']
-                    t_mod = (d_mean - c_mean) / se_pooled
-                    p_mod = 2.0 * t_dist.sf(abs(t_mod), df_mod[i])
-                    de_results.at[de_results.index[i], 'pvals'] = p_mod
-                    de_results.at[de_results.index[i], 'statistic'] = t_mod
-
-                    # Update SE of logFC using moderation ratio
-                    var_ratio = s2_mod[i] / s2[i]
-                    se_orig = de_results.iloc[i]['se']
-                    se_mod = se_orig * np.sqrt(var_ratio)
-                    se_mod = np.clip(se_mod, 0.01, max_se)
-                    lfc = de_results.iloc[i]['logfoldchanges']
-                    de_results.at[de_results.index[i], 'se'] = se_mod
-                    de_results.at[de_results.index[i], 'ci_lower'] = lfc - 1.96 * se_mod
-                    de_results.at[de_results.index[i], 'ci_upper'] = lfc + 1.96 * se_mod
-
-    # 'se' for meta-analysis stays unmoderated; moderated kept as a separate column.
-    de_results['se_moderated'] = de_results['se'].copy()
-    de_results['se'] = unshrunk_se
-
-    # FDR correction
+    # bh_fdr leaves a blank p-value out of the correction and gives it 1.
     de_results['pvals_adj'] = bh_fdr(de_results['pvals'])
-
     return de_results
 
 
@@ -1214,8 +1107,8 @@ def check_sample_column(obs, sample_col, condition_col) -> None:
 def run_de_pipeline(adata, sample_col, condition_col,
                     pathway_gene_sets, min_cells=DE_MIN_CELLS, min_expressing_samples=DE_MIN_EXPRESSING_SAMPLES,
                     min_counts=DE_MIN_COUNTS,
-                    de_method='ttest', max_se=DE_MAX_SE, full_genome=False,
-                    moderate=False, unit='sample', counts_layer=None,
+                    de_method='deseq2', full_genome=False,
+                    unit='sample', counts_layer=None,
                     detection_min_pct=DE_DETECTION_DEFAULT,
                     detection_min_donor_frac=DE_DETECTION_MIN_DONOR_FRAC,
                     detection_study_col=None,
@@ -1257,10 +1150,9 @@ def run_de_pipeline(adata, sample_col, condition_col,
         Min summed transcripts per sample; 0 disables.
     min_expressing_samples : int
         Min expressing samples per gene.
-    de_method : 'ttest' | 'ttest_raw' | 'deseq2'
-        Engine for pseudobulk mode (unit='sample'). Ignored when unit='cell'.
-    max_se : float
-        Standard-error cap.
+    de_method : 'deseq2'
+        Engine for pseudobulk mode (unit='sample'), DESeq2, the only one.
+        Ignored when unit='cell'.
     full_genome : bool
         Test all genes. Pathway membership is still annotated on the results.
     detection_min_donor_frac : float
@@ -1283,8 +1175,6 @@ def run_de_pipeline(adata, sample_col, condition_col,
         mode). The fit + normalisation stay genome-wide; only the FDR
         denominator changes, and results are subset to these genes. When None,
         FDR is computed over every tested gene (discovery mode).
-    moderate : bool
-        Apply EB variance moderation (t-test only).
     unit : 'sample' | 'cell'
         Unit of replication. 'sample' (default) aggregates cells into one
         pseudobulk profile per 'sample_col' and tests across samples --
@@ -1337,6 +1227,10 @@ def run_de_pipeline(adata, sample_col, condition_col,
         _progress(f"Excluded {len(excluded):,} {' and '.join(exclude_gene_groups)} "
                   f"genes before testing")
 
+    if unit != 'cell' and de_method != 'deseq2':
+        raise ValueError(
+            f"Pseudobulk DE runs DESeq2; method {de_method!r} is no longer offered.")
+
     if unit == 'cell':
         if excluded:
             adata = adata[:, ~adata.var_names.isin(excluded)]
@@ -1351,7 +1245,7 @@ def run_de_pipeline(adata, sample_col, condition_col,
             return list(adata.var_names)
         return count_var_names(adata)
 
-    if de_method == 'deseq2' and not full_genome:
+    if not full_genome:
         # DESeq2 must see the full transcriptome -- median-of-ratios
         # normalisation assumes most genes don't change, which is violated
         # by curated subsets where most pathway members shift one way.
@@ -1359,12 +1253,9 @@ def run_de_pipeline(adata, sample_col, condition_col,
         genes_to_test = _genome_var_names()
         _progress(f"DESeq2: running on full transcriptome ({len(genes_to_test):,} genes) "
                   f"for proper normalization, then filtering to {len(metabolic_genes)} pathway genes")
-    elif full_genome:
+    else:
         genes_to_test = _genome_var_names()
         _progress(f"Full-genome DE: testing {len(genes_to_test):,} genes")
-    else:
-        genes_to_test = metabolic_genes
-        _progress(f"Pathway DE: testing {len(genes_to_test)} pathway genes")
 
     if excluded:
         drop = set(excluded)
@@ -1423,9 +1314,8 @@ def run_de_pipeline(adata, sample_col, condition_col,
         if not genes_to_test:
             return pd.DataFrame(), pd.DataFrame(), pathway_coverage, pd.DataFrame()
 
-    # Pseudobulk: sum counts for CPM/DESeq2, mean for raw t-test.
-    use_mean = (de_method == 'ttest_raw')
-    aggregate = 'mean' if use_mean else 'sum'
+    # Pseudobulk: sum the counts per donor, as DESeq2 models them.
+    aggregate = 'sum'
     _progress("Creating pseudobulk profiles...")
     # The study column has to reach the gene filter, which lives past
     # pseudobulk aggregation -- so it travels as a sample-level covariate
@@ -1449,56 +1339,42 @@ def run_de_pipeline(adata, sample_col, condition_col,
 
     # Log the DE engine + version so provenance is captured in the run log.
     deseq2_filter_counts = None
-    if de_method == 'deseq2':
-        import pydeseq2
+    # DESeq2, the only pseudobulk engine.
+    import pydeseq2
+    _progress(
+        f"DE engine: pydeseq2 v{pydeseq2.__version__} (DESeq2) on "
+        f"{len(genes_used):,} genes...")
+    de_results = _run_deseq2(
+        pseudobulk_matrix, sample_df, genes_used,
+        min_expressing_samples=min_expressing_samples,
+        independent_filter=deseq2_independent_filter,
+        cooks_filter=deseq2_cooks_filter,
+        filter_min_count=filter_min_count,
+        filter_min_samples=filter_min_samples,
+        covariates=covariates,
+        study_col=detection_study_col,
+    )
+    if not de_results.empty and de_results.attrs.get('design'):
+        _progress(f"DESeq2 design: {de_results.attrs['design']}")
+        dropped = [c for c in (covariates or ())
+                   if c not in de_results.attrs.get('covariates_used', [])]
+        if dropped:
+            _progress("  dropped as not estimable: " + ", ".join(dropped))
+    fcounts = de_results.attrs.get('deseq2_filter_counts', {}) if not de_results.empty else {}
+    deseq2_filter_counts = fcounts
+    n_indep = fcounts.get('independent_filter', 0)
+    n_cooks = fcounts.get('cooks_outlier', 0)
+    if n_indep or n_cooks:
         _progress(
-            f"DE engine: pydeseq2 v{pydeseq2.__version__} (DESeq2) on "
-            f"{len(genes_used):,} genes...")
-        de_results = _run_deseq2(
-            pseudobulk_matrix, sample_df, genes_used,
-            min_expressing_samples=min_expressing_samples,
-            independent_filter=deseq2_independent_filter,
-            cooks_filter=deseq2_cooks_filter,
-            filter_min_count=filter_min_count,
-            filter_min_samples=filter_min_samples,
-            covariates=covariates,
-            study_col=detection_study_col,
-        )
-        if not de_results.empty and de_results.attrs.get('design'):
-            _progress(f"DESeq2 design: {de_results.attrs['design']}")
-            dropped = [c for c in (covariates or ())
-                       if c not in de_results.attrs.get('covariates_used', [])]
-            if dropped:
-                _progress("  dropped as not estimable: " + ", ".join(dropped))
-        fcounts = de_results.attrs.get('deseq2_filter_counts', {}) if not de_results.empty else {}
-        deseq2_filter_counts = fcounts
-        n_indep = fcounts.get('independent_filter', 0)
-        n_cooks = fcounts.get('cooks_outlier', 0)
-        if n_indep or n_cooks:
-            _progress(
-                f"DESeq2 filtering: {n_indep:,} independent-filtered (low mean "
-                f"count), {n_cooks:,} Cook's outliers -- FDR left blank for "
-                f"these, not collapsed to 1.0")
-        # If we ran genome-wide for normalisation, filter results to pathway genes.
-        if not full_genome and not de_results.empty:
-            metabolic_set = set(metabolic_genes)
-            de_results = de_results[de_results['names'].isin(metabolic_set)].copy()
-            de_results.reset_index(drop=True, inplace=True)
-            _progress(f"Filtered to {len(de_results)} pathway genes")
-    else:
-        normalize = 'log2' if de_method == 'ttest_raw' else 'cpm'
-        _progress(
-            f"DE engine: Welch t-test (normalize={normalize}, "
-            f"moderate={moderate}) on {len(genes_used):,} genes...")
-        de_results = run_pseudobulk_de(
-            pseudobulk_matrix, sample_df, genes_used,
-            min_expressing_samples=min_expressing_samples,
-            method='ttest', max_se=max_se,
-            moderate=moderate, normalize=normalize,
-            filter_min_count=filter_min_count,
-            filter_min_samples=filter_min_samples,
-            study_col=detection_study_col,
-        )
+            f"DESeq2 filtering: {n_indep:,} independent-filtered (low mean "
+            f"count), {n_cooks:,} Cook's outliers -- FDR left blank for "
+            f"these, not collapsed to 1.0")
+    # If we ran genome-wide for normalisation, filter results to pathway genes.
+    if not full_genome and not de_results.empty:
+        metabolic_set = set(metabolic_genes)
+        de_results = de_results[de_results['names'].isin(metabolic_set)].copy()
+        de_results.reset_index(drop=True, inplace=True)
+        _progress(f"Filtered to {len(de_results)} pathway genes")
 
     # Hypothesis mode: correct over the committed gene list only. The fit and
     # normalisation above stayed genome-wide; here we just swap the BH

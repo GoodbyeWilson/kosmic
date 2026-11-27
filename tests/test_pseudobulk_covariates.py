@@ -108,7 +108,7 @@ def _adata_with_sex():
 def test_batch_run_writes_the_runs_covariates_into_the_pseudobulk(tmp_path):
     runs = B.run_de_by_cell_type(
         _adata_with_sex(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+        'GSE1', cell_types=['Endothelial'], de_method='deseq2', min_cells=10,
         detection_min_pct=0.0, covariates=['sex_inferred'])
     cov = load_pseudobulk_covariates(runs[0].pseudobulk_path)
     assert cov is not None
@@ -122,7 +122,7 @@ def test_batch_run_writes_the_runs_covariates_into_the_pseudobulk(tmp_path):
 def test_batch_run_without_covariates_writes_none(tmp_path):
     runs = B.run_de_by_cell_type(
         _adata_with_sex(), 'cell_type', 'donor', 'condition', tmp_path / 'GSE1',
-        'GSE1', cell_types=['Endothelial'], de_method='ttest', min_cells=10,
+        'GSE1', cell_types=['Endothelial'], de_method='deseq2', min_cells=10,
         detection_min_pct=0.0)
     assert load_pseudobulk_covariates(runs[0].pseudobulk_path) is None
 

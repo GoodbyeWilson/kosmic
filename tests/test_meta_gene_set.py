@@ -146,7 +146,7 @@ def test_a_mapping_gives_each_cell_type_its_own_fdr_list(tmp_path):
              "Fibroblast": {f"GENE{i}" for i in range(5, 12)}}
     runs = run_de_by_cell_type(
         _adata(), "cell_type", "donor", "condition", tmp_path / "GSE1", "GSE1",
-        de_method="ttest", min_cells=10, detection_min_pct=0.0,
+        de_method="deseq2", min_cells=10, detection_min_pct=0.0,
         fdr_genes=lists, write=False)
     by = {r.cell_type: r for r in runs}
     assert set(by["Endothelial"].de_results["names"]) <= lists["Endothelial"]
@@ -158,7 +158,7 @@ def test_a_cell_type_missing_from_the_mapping_is_skipped_not_run_genome_wide(tmp
     from kosmic.de.batch import run_de_by_cell_type
     runs = run_de_by_cell_type(
         _adata(), "cell_type", "donor", "condition", tmp_path / "GSE1", "GSE1",
-        de_method="ttest", min_cells=10, detection_min_pct=0.0,
+        de_method="deseq2", min_cells=10, detection_min_pct=0.0,
         fdr_genes={"Endothelial": {"GENE0", "GENE1"}}, write=False)
     by = {r.cell_type: r for r in runs}
     assert by["Endothelial"].status == "ok"
