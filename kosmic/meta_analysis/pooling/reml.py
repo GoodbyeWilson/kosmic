@@ -76,9 +76,6 @@ def _vectorized_reml(effects_matrix, var_matrix, valid_mask,
 
     weights_fe = np.where(valid_mask, 1.0 / var, 0.0)
     sum_w_fe = weights_fe.sum(axis=1)
-    pooled_fe = np.where(sum_w_fe > 0,
-                         (weights_fe * eff).sum(axis=1) / sum_w_fe, 0.0)
-    resid_fe = np.where(valid_mask, eff - pooled_fe[:, None], 0.0)
     # I² as metafor computes it for any tau² estimator (Higgins & Thompson
     # 2002): tau² / (tau² + s²), where s² is the 'typical' within-study
     # variance (k-1) Σw / ((Σw)² - Σw²), w = 1/v. For DerSimonian-Laird this

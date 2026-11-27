@@ -11,7 +11,6 @@ import time
 import anndata as ad
 import numpy as np
 import pandas as pd
-import pytest
 from scipy.sparse import csr_matrix
 
 from kosmic.meta_analysis.gene_set import (
