@@ -39,6 +39,12 @@ Preranked GSEA orders every gene by one value. In the DE workspace, **Rank genes
 
 A DE result saved by a version of KOSMIC that did not keep the test statistic cannot be ranked by it; run the DE again. The meta-analysis Enrichment step has no choice: it ranks by the pooled z-statistic, the pooled effect divided by its pooled standard error. The ranking used is recorded with each run.
 
+## Which gene sets GSEA tests
+
+A gene set is tested only when enough of its genes are in the ranking. **Min genes per set** and **Max genes per set**, under Term filters, set the bounds; the defaults, 15 and 500, are those of the Broad Institute's GSEA and of GSEApy. A smaller set gives an unstable enrichment score; a larger one is too broad to interpret. When few genes are tested, as in a small cell population, many sets fall below 15 and are not tested: the status line gives how many of the library's sets were tested. The bounds used are recorded with each run. (**Min genes per term** applies to ORA only.)
+
+The a-priori panel on the Pathway DE page tests the pathways you chose whatever their size.
+
 ## GSEA p-values and FDR
 
 A library GSEA run estimates each gene set's p-value and FDR from 1,000 permutations of the gene sets. When none of the permutations reaches the gene set's observed enrichment score, the estimate is 0, which means the value is below 0.001 rather than zero. The results table, the bar plot and the figures show such a value as < 0.001; the saved results table keeps the 0.

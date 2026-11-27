@@ -947,8 +947,11 @@ class FgseaWorker(BaseWorker):
     def _run(self):
         from kosmic.de.fgsea import run_fgsea
         self.progress.emit("Running preranked GSEA (fgsea)...")
+        # The pathways here are the few the user chose, so each is tested
+        # whatever its size (the 15-500 bounds are for screening a library).
+        # Unchanged from before; on the list for review.
         return run_fgsea(self._gene_de, self._gene_sets, rank_by=self._rank_by,
-                         return_details=True)
+                         min_size=3, max_size=5000, return_details=True)
 
 
 class LibraryGseaWorker(BaseWorker):
@@ -963,11 +966,15 @@ class LibraryGseaWorker(BaseWorker):
     """
 
     def __init__(self, gene_de_results, library_name,
-                 rank_by='logfoldchanges', parent=None):
+                 rank_by='logfoldchanges', min_size=None, max_size=None,
+                 parent=None):
+        from kosmic.de.fgsea import GSEA_MIN_SIZE, GSEA_MAX_SIZE
         super().__init__(parent)
         self._gene_de = gene_de_results
         self._library_name = library_name
         self._rank_by = rank_by
+        self._min_size = GSEA_MIN_SIZE if min_size is None else int(min_size)
+        self._max_size = GSEA_MAX_SIZE if max_size is None else int(max_size)
         self.library_source = None
 
     def _run(self):
@@ -983,6 +990,7 @@ class LibraryGseaWorker(BaseWorker):
             f"Preranked GSEA over {len(gene_sets):,} gene sets...")
         res, details = run_fgsea(
             self._gene_de, gene_sets, rank_by=self._rank_by,
+            min_size=self._min_size, max_size=self._max_size,
             return_details=True)
         # Keep running-enrichment curves only for the most-enriched sets (what a
         # mountain-plot figure would ever show), so a big library does not pin
@@ -992,5 +1000,7 @@ class LibraryGseaWorker(BaseWorker):
                 ascending=False).index)['names'].astype(str).head(40))
             details = {k: v for k, v in details.items() if k in keep}
         n_sig = int((res['pvals_adj'] < DEFAULT_FDR).sum()) if not res.empty else 0
-        return res, details, (f"GSEA complete -- {len(res):,} gene sets, "
-                              f"{n_sig} at FDR < {DEFAULT_FDR}")
+        return res, details, (
+            f"GSEA complete -- {len(res):,} of {len(gene_sets):,} gene sets had "
+            f"{self._min_size}-{self._max_size} genes in the ranking and were "
+            f"tested; {n_sig} at FDR < {DEFAULT_FDR}")

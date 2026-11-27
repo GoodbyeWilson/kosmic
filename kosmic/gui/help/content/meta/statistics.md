@@ -53,6 +53,13 @@ an alternative estimator and the Hartung–Knapp–Sidik–Jonkman
 adjustment (IntHout et al., *BMC Medical Research Methodology* 2014)
 available for small numbers of studies.
 
+I² is the share of the total variation that comes from between-study
+heterogeneity (Higgins & Thompson, *Statistics in Medicine* 2002):
+τ² / (τ² + s²), where s² is the typical within-study variance,
+(k − 1) Σw / ((Σw)² − Σw²) with w = 1 / SE². This is how metafor
+computes it for every τ² estimator. For DerSimonian–Laird it equals
+(Q − df) / Q; for REML it uses the REML τ².
+
 Two other families are implemented alongside it, because they make
 different assumptions and fail in different ways:
 

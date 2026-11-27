@@ -280,7 +280,8 @@ class EnrichmentPage(SidebarTabbedPage):
             "FDR cutoff for calling a pathway term significant.")
         terms_lay.addWidget(self._p_thresh)
 
-        terms_lay.addWidget(QLabel("Min genes per term:"))
+        self._min_genes_label = QLabel("Min genes per term:")
+        terms_lay.addWidget(self._min_genes_label)
         self._min_genes = NoScrollSpinBox()
         self._min_genes.setRange(2, 500)
         self._min_genes.setValue(5)
@@ -288,6 +289,29 @@ class EnrichmentPage(SidebarTabbedPage):
             "Skip terms with fewer than this many genes in the library. "
             "Very small terms give unstable p-values.")
         terms_lay.addWidget(self._min_genes)
+
+        # Preranked GSEA only: which gene sets are tested, by how many of
+        # their genes are in the ranking. The defaults are GSEA's own.
+        from kosmic.de.fgsea import GSEA_MIN_SIZE, GSEA_MAX_SIZE
+        size_tip = (
+            "Preranked GSEA tests a gene set only when this many of its genes\n"
+            f"are in the ranking. {GSEA_MIN_SIZE} and {GSEA_MAX_SIZE} are the "
+            "defaults of the Broad\nInstitute's GSEA and of GSEApy: smaller sets "
+            "give unstable scores,\nlarger ones are too broad to interpret.")
+        self._gsea_min_label = QLabel("Min genes per set (in the ranking):")
+        self._gsea_min_size = NoScrollSpinBox()
+        self._gsea_min_size.setRange(1, 10000)
+        self._gsea_min_size.setValue(GSEA_MIN_SIZE)
+        self._gsea_min_size.setToolTip(size_tip)
+        self._gsea_max_label = QLabel("Max genes per set (in the ranking):")
+        self._gsea_max_size = NoScrollSpinBox()
+        self._gsea_max_size.setRange(1, 100000)
+        self._gsea_max_size.setValue(GSEA_MAX_SIZE)
+        self._gsea_max_size.setToolTip(size_tip)
+        for w in (self._gsea_min_label, self._gsea_min_size,
+                  self._gsea_max_label, self._gsea_max_size):
+            terms_lay.addWidget(w)
+            w.setVisible(False)
         terms_lay.addStretch()
 
         self._on_library_changed()
@@ -335,6 +359,8 @@ class EnrichmentPage(SidebarTabbedPage):
                      self._lfc_spin.valueChanged,
                      self._p_thresh.valueChanged,
                      self._min_genes.valueChanged,
+                     self._gsea_min_size.valueChanged,
+                     self._gsea_max_size.valueChanged,
                      self._pct_filter.valueChanged):
             _sig.connect(self._refresh_card_summaries)
         self._pct_filter_check.toggled.connect(self._refresh_card_summaries)
@@ -402,6 +428,12 @@ class EnrichmentPage(SidebarTabbedPage):
         offer_rank = is_gsea and bool(self.RANK_CHOICES)
         self._rank_label.setVisible(offer_rank)
         self._rank_combo.setVisible(offer_rank)
+        # The term-size filter is ORA's; GSEA has its own set-size bounds.
+        self._min_genes_label.setVisible(not is_gsea)
+        self._min_genes.setVisible(not is_gsea)
+        for w in (self._gsea_min_label, self._gsea_min_size,
+                  self._gsea_max_label, self._gsea_max_size):
+            w.setVisible(is_gsea)
         # GSEA ranks every gene, so the significant-gene cutoffs don't apply
         # (the pct-cells filter stays -- it scopes the ranking universe).
         self._fdr_spin.setEnabled(not is_gsea)
@@ -473,7 +505,11 @@ class EnrichmentPage(SidebarTabbedPage):
         self._method_card.set_summary([label, library.split(": ")[-1]])
 
         # Term filters
-        terms = f"FDR<{self._p_thresh.value():g}, min {self._min_genes.value()} genes"
+        if is_gsea:
+            terms = (f"FDR<{self._p_thresh.value():g}, sets of "
+                     f"{self._gsea_min_size.value()}-{self._gsea_max_size.value()} genes")
+        else:
+            terms = f"FDR<{self._p_thresh.value():g}, min {self._min_genes.value()} genes"
         # Not isVisible(): that is False whenever the page itself is not
         # shown, so the algorithm silently vanished from the summary.
         # The library is what decides whether an algorithm applies.
@@ -714,7 +750,13 @@ class EnrichmentPage(SidebarTabbedPage):
         rank_df.columns = ['names', 'logfoldchanges']
 
         from kosmic.gui.de_analysis.workers import LibraryGseaWorker
-        self._worker = LibraryGseaWorker(rank_df, lib_id)
+        lo, hi = self._gsea_min_size.value(), self._gsea_max_size.value()
+        if lo > hi:
+            self._status_label.setText(
+                f"The minimum set size ({lo}) is above the maximum ({hi}).")
+            self._run_btn.setEnabled(True)
+            return
+        self._worker = LibraryGseaWorker(rank_df, lib_id, min_size=lo, max_size=hi)
         if self.ws.progress_bar:
             self.ws.progress_bar.setRange(0, 0)  # indeterminate
         run_worker(
@@ -767,7 +809,9 @@ class EnrichmentPage(SidebarTabbedPage):
             'fdr':         self._p_thresh.value(),
             'gene_fdr':    self._fdr_spin.value(),
             'gene_lfc':    self._lfc_spin.value(),
-            'min_genes':   self._min_genes.value(),
+            'min_genes':   self._min_genes.value() if method != 'gsea' else None,
+            'gsea_min_size': self._gsea_min_size.value() if method == 'gsea' else None,
+            'gsea_max_size': self._gsea_max_size.value() if method == 'gsea' else None,
             'n_genes_in':  len(study or []),
             'n_background': len(background or []),
             'n_terms':     n_terms,

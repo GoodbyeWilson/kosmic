@@ -78,10 +78,18 @@ def _vectorized_reml(effects_matrix, var_matrix, valid_mask,
     pooled_fe = np.where(sum_w_fe > 0,
                          (weights_fe * eff).sum(axis=1) / sum_w_fe, 0.0)
     resid_fe = np.where(valid_mask, eff - pooled_fe[:, None], 0.0)
-    Q = (weights_fe * resid_fe ** 2).sum(axis=1)
+    # I² as metafor computes it for any tau² estimator (Higgins & Thompson
+    # 2002): tau² / (tau² + s²), where s² is the 'typical' within-study
+    # variance (k-1) Σw / ((Σw)² - Σw²), w = 1/v. For DerSimonian-Laird this
+    # equals (Q - df) / Q; for REML it does not, so the REML tau² is used.
     k = valid_mask.sum(axis=1).astype(float)
     df = k - 1
-    I2 = np.where(Q > 0, np.maximum(0, (Q - df) / Q), 0.0)
+    sum_w2_fe = (weights_fe ** 2).sum(axis=1)
+    s2_den = sum_w_fe ** 2 - sum_w2_fe
+    with np.errstate(invalid='ignore', divide='ignore'):
+        s2 = np.where(s2_den > 0, df * sum_w_fe / s2_den, np.nan)
+        I2 = np.where((df > 0) & np.isfinite(s2) & (tau2 + s2 > 0),
+                      tau2 / (tau2 + s2), 0.0)
 
     return pooled, se_pooled, tau2, I2, weights_re
 

@@ -92,10 +92,16 @@ def reml_to_standard(df: pd.DataFrame, alpha: float = None) -> pd.DataFrame:
 
 
 def stouffer_to_standard(df: pd.DataFrame, alpha: float = None) -> pd.DataFrame:
-    """Stouffer: the inverse-variance pooled effect and the Stouffer Z."""
+    """Stouffer: the inverse-variance pooled effect and the Stouffer Z. The
+    direction is the sign of Z, the test's own direction (the pooled effect,
+    shown for reference, can point the other way)."""
     pvalue, padj, a = _pooled_p(df, 'ma_stouffer', alpha)
-    return _p_based(df, 'ma_stouffer', _num(df, 'logfoldchanges'), _num(df, 'z_stat'),
-                    pvalue, padj, a)
+    effect = _num(df, 'logfoldchanges')
+    z = _num(df, 'z_stat')
+    direction = pd.Series(np.where(z.fillna(0) != 0, np.sign(z.fillna(0)),
+                                   np.sign(effect)), index=df.index)
+    return _p_based(df, 'ma_stouffer', effect, z, pvalue, padj, a,
+                    direction=direction)
 
 
 def sumrank_to_standard(df: pd.DataFrame, alpha: float = None) -> pd.DataFrame:

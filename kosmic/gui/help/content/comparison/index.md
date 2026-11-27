@@ -135,6 +135,11 @@ is fitted again.
 
 **Genes called** gives, for each method, where its result came from, the
 genes compared, and the genes called, split into up and down in disease.
+A gene's direction is its method's own: the sign of the log2 fold change
+for merged pseudobulk and REML, the sign of the pooled z for Stouffer
+(which can differ from the pooled log2 fold change shown beside it), and
+for SumRank the direction, up or down, whose rank sum is the more
+significant.
 
 **Agreement between methods** gives, for each pair of methods:
 
@@ -154,7 +159,7 @@ pseudobulk and REML only, and so on). For each group:
 | Genes | Genes in the group. |
 | Same direction | The percentage whose log2 fold change has the same sign in every study's own DE result. |
 | Median \|log2FC\| (REML) | The median absolute REML pooled log2 fold change. |
-| Median I² | The median REML I², the share of the variation between studies not explained by chance. |
+| Median I² | The median REML I², τ² / (τ² + s²) with s² the typical within-study variance: the share of the total variation that comes from heterogeneity between studies. |
 | Prediction interval excludes 0 | The percentage whose REML 95% prediction interval, pooled ± t(k−2)·√(SE² + τ²) with k the studies pooled, lies wholly above or below 0. |
 | No single study | The percentage that no study's own analysis calls (study FDR below the threshold). |
 
