@@ -1,13 +1,9 @@
 # Lint + test on every push and pull request.
 #
-# KOSMIC is a Qt desktop app, so the suite needs a display. Windows runs
-# headless via QT_QPA_PLATFORM=offscreen, which the GUI tests also set
-# for themselves ('setdefault', so a value set here wins). Linux runs
-# the ordinary 'xcb' platform against an Xvfb display instead: under
-# offscreen it segfaults while pyqtgraph builds a PlotItem's QMenu --
-# a window, and window handling is the least exercised part of the
-# offscreen plugin. Linux also needs the xkb/EGL libraries PyQt6 links
-# against, which the GitHub runner image does not carry by default.
+# One job: Windows with Python 3.12, the only platform KOSMIC supports
+# and tests (see the install help). KOSMIC is a Qt desktop app, so the
+# suite runs headless via QT_QPA_PLATFORM=offscreen, which the GUI tests
+# also set for themselves ('setdefault', so a value set here wins).
 name: CI
 
 on:
@@ -21,36 +17,17 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.os }} / py${{ matrix.python }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        # 3.12 as well: numpy 2.5, anndata 0.13 and scanpy 1.12 need it,
-        # so 3.11 alone never installs the versions a new user gets.
-        python: ['3.11', '3.12']
+    # The name is the check the 'protect main' ruleset requires.
+    name: windows-latest / py3.12
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
           cache: pip
-
-      # PyQt6 links these at import time; without them every GUI test
-      # fails with a missing-plugin error rather than a real failure.
-      # Xvfb provides the display the xcb platform connects to.
-      - name: Install Qt system libraries (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            xvfb \
-            libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-xinerama0 libdbus-1-3
 
       - name: Install
         run: |
@@ -60,29 +37,14 @@ jobs:
       - name: Lint
         run: ruff check kosmic/ main.py tests/
 
-      # '--forked' runs each test in its own forked process, so no test
-      # can be affected by Qt objects another test left behind. That is
-      # what kept killing this job: a widget freed by the cycle
-      # collector during a later test's pyqtgraph construction, always
-      # a different test, on about half of runs. Isolation settles it
-      # whatever the object was, and a test that crashes on its own now
-      # fails by name instead of taking the run with it. Forking is
-      # Unix-only; Windows has never shown the fault and runs the suite
-      # in one process.
-      - name: Test (Linux, Xvfb, one process per test)
-        if: runner.os == 'Linux'
-        env:
-          QT_QPA_PLATFORM: xcb
-        run: xvfb-run -a pytest tests/ -q --forked
-
-      # Windows cannot fork, so it keeps the split that has held there:
-      # the two Meta-page GUI files in a second process. Running the
-      # whole suite in one process fails on Windows too (a workspace
-      # test, and once a hard crash), so the split is doing real work.
-      - name: Test (Windows, offscreen)
-        if: runner.os == 'Windows'
+      # Four worker processes, each running whole test files (loadfile),
+      # so no file shares a process with more of the suite than before.
+      # The two Meta-page GUI files still run in a process of their own:
+      # in the same process as the rest of the suite they have failed on
+      # Windows (a workspace test, and once a hard crash).
+      - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          pytest tests/ -q --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
+          pytest tests/ -q -n 4 --dist loadfile --ignore=tests/test_ma_gene_search.py --ignore=tests/test_meta_workflow_steps.py
           pytest tests/test_ma_gene_search.py tests/test_meta_workflow_steps.py -q
