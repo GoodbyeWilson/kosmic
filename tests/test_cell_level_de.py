@@ -246,7 +246,7 @@ def test_cell_mode_inflates_false_positives_vs_pseudobulk():
     _, sig_pb, _, _ = run_de_pipeline(
         adata, sample_col="donor", condition_col="_role",
         pathway_gene_sets={}, full_genome=True, unit="sample",
-        de_method="ttest", min_cells=10,
+        de_method="deseq2", min_cells=10,
     )
     # Pseudobulk should find essentially nothing; cell mode over-calls.
     assert len(sig_cell) > len(sig_pb)

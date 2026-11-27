@@ -91,7 +91,7 @@ def test_batch_writes_a_significant_file_per_cell_type(tmp_path):
 
     runs = B.run_de_by_cell_type(
         adata, "cell_type", "donor", "condition", tmp_path / "GSE1", "GSE1",
-        de_method="ttest", min_cells=10, detection_min_pct=0.0)
+        de_method="deseq2", min_cells=10, detection_min_pct=0.0)
 
     for r in runs:
         assert r.significant_path is not None

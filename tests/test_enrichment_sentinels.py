@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 
@@ -227,27 +228,31 @@ def test_pathway_gene_standardization():
 
 
 # ----------------------------------------------------------------------
-# SE floor: the config knob bounds the reported SE without touching the
-# effect, so inverse-variance meta-analysis weights are not silently capped.
+# Per-donor score test: the reported SE is the Welch SE of the difference,
+# never a substituted or clipped value; an undefined one is left blank.
 # ----------------------------------------------------------------------
-def test_pseudobulk_de_se_floor_bounds_reported_se():
-    # Near-identical donor scores -> tiny natural SE, well below any floor.
-    scores = np.array([[5.00], [5.001], [5.002],
-                       [5.50], [5.501], [5.502]])
+def test_pathway_score_test_reports_the_welch_se():
+    scores = np.array([[5.00, 2.0], [5.001, 2.0], [5.002, 2.0],
+                       [5.50, 2.0], [5.501, 2.0], [5.502, 2.0]])
     sample_df = pd.DataFrame({
         'sample': [f'd{i}' for i in range(6)],
         'condition': ['ctrl'] * 3 + ['dis'] * 3,
         'role': ['control'] * 3 + ['disease'] * 3,
     })
-    hi = run_pseudobulk_de(scores, sample_df, ['PW'], pre_transformed=True,
-                           moderate=False, se_floor=0.5, min_expressing_samples=1)
-    lo = run_pseudobulk_de(scores, sample_df, ['PW'], pre_transformed=True,
-                           moderate=False, se_floor=0.0, min_expressing_samples=1)
+    res = run_pseudobulk_de(scores, sample_df, ['PW', 'FLAT'], pre_transformed=True,
+                            min_expressing_samples=1).set_index('names')
+    d, c = scores[3:, 0], scores[:3, 0]
+    welch_se = np.sqrt(d.var(ddof=1) / 3 + c.var(ddof=1) / 3)
+    assert np.isclose(res.loc['PW', 'se'], welch_se)        # tiny, and kept tiny
+    assert np.isclose(res.loc['PW', 'logfoldchanges'], d.mean() - c.mean())
+    # No variation in either arm: no SE, no p-value, not a made-up number.
+    assert np.isnan(res.loc['FLAT', 'se']) and np.isnan(res.loc['FLAT', 'pvals'])
 
-    assert hi['se'].iloc[0] >= 0.5 - 1e-9   # floored up
-    assert lo['se'].iloc[0] < 0.5           # not floored
-    # The effect (log2FC) is unchanged by the SE floor.
-    assert np.isclose(hi['logfoldchanges'].iloc[0], lo['logfoldchanges'].iloc[0])
+
+def test_pathway_score_test_refuses_counts():
+    sample_df = pd.DataFrame({'role': ['control'] * 3 + ['disease'] * 3})
+    with pytest.raises(ValueError):
+        run_pseudobulk_de(np.ones((6, 2)), sample_df, ['A', 'B'], pre_transformed=False)
 
 
 # ----------------------------------------------------------------------

@@ -338,34 +338,24 @@ class GeneDEPage(SidebarTabbedPage):
         model_lay.addWidget(self._unit_caveat)
 
         model_lay.addWidget(QLabel("Pseudobulk method:"))
+        # DESeq2 is the pseudobulk method. limma-voom, the standard log-CPM
+        # pseudobulk method, is planned and listed disabled. (The Welch
+        # t-test on log-CPM it replaces took no covariates and did not
+        # weight for the noise of low counts.)
         self.de_method_combo = NoScrollComboBox()
-        self.de_method_combo.addItems(["log-CPM (Welch)", "DESeq2 (NB-GLM)"])
-        self.de_method_combo.setCurrentIndex(1)  # Default to DESeq2
+        self.de_method_combo.addItem("DESeq2 (NB-GLM)", 'deseq2')
+        self.de_method_combo.addItem("limma-voom (coming soon)", 'limma_voom')
+        self.de_method_combo.model().item(1).setEnabled(False)
+        self.de_method_combo.setCurrentIndex(0)
         self.de_method_combo.setToolTip(
-            "Both collapse cells to one value per donor, then test across donors; "
-            "they differ in the normalisation + statistical model (each carries "
-            "its own normalisation).\n"
-            "log-CPM (Welch): pseudobulk sum, CPM-normalised, log2, then Welch's "
-            "t-test per gene. Fast and assumption-light -- a simple cross-check.\n"
-            "DESeq2 (NB-GLM): negative-binomial GLM on raw count sums with DESeq2 "
-            "size factors, Wald test, dispersion + LFC shrinkage. Recommended for "
-            "counts.\n"
+            "Cells are summed to one count profile per donor, then tested across "
+            "donors.\n"
+            "DESeq2 (NB-GLM): negative-binomial GLM on the count sums with DESeq2 "
+            "size factors and a Wald test, with the covariates chosen below.\n"
+            "limma-voom: planned.\n"
             "(Ignored when Replicate unit = Cell, which always uses Wilcoxon.)"
         )
-        self.de_method_combo.currentIndexChanged.connect(self._on_de_method_changed)
         model_lay.addWidget(self.de_method_combo)
-
-        self.eb_checkbox = QCheckBox("Empirical Bayes moderation")
-        self.eb_checkbox.setChecked(False)
-        self.eb_checkbox.setEnabled(False)  # Disabled by default (DESeq2 selected)
-        self.eb_checkbox.setToolTip(
-            "Shrink per-gene variance toward a common prior.\n"
-            "KOSMIC's own version, not limma's: the prior variance is the median\n"
-            "and its degrees of freedom are capped at 50. Under review.\n"
-            "Only applies to t-test method."
-        )
-        self.eb_checkbox.toggled.connect(self._on_eb_toggled)
-        model_lay.addWidget(self.eb_checkbox)
 
         filters_lay.addWidget(QLabel("Donor filter: min cells per donor"))
         self.min_cells_spin = NoScrollSpinBox()
@@ -575,8 +565,6 @@ class GeneDEPage(SidebarTabbedPage):
         self._advanced_btn.clicked.connect(self._show_advanced_filters)
         filters_lay.addWidget(self._advanced_btn)
 
-        is_deseq2 = self.ws.de_method == 'deseq2'
-
         # Sample-level covariates for the DESeq2 design. 'study' is the
         # one this exists for: fitting one model over pooled cohorts
         # without it leaves the cohort offset in the residual, inflating
@@ -584,7 +572,6 @@ class GeneDEPage(SidebarTabbedPage):
         design_lay.addWidget(SecondaryLabel("Adjust for"))
         self.covariate_list = QListWidget()
         self.covariate_list.setMaximumHeight(90)
-        self.covariate_list.setEnabled(is_deseq2)
         self.covariate_list.setToolTip(
             "Extra sample-level columns to put in the DESeq2 design,\n"
             "before condition. Tick 'study' when the dataset pools\n"
@@ -596,7 +583,6 @@ class GeneDEPage(SidebarTabbedPage):
 
         self.indep_filter_check = QCheckBox("DESeq2 independent filtering")
         self.indep_filter_check.setChecked(DE_DESEQ2_INDEPENDENT_FILTER)
-        self.indep_filter_check.setEnabled(is_deseq2)
         self.indep_filter_check.setToolTip(
             "DESeq2 drops low-mean genes from the BH correction to gain power "
             "(Bourgon independent filtering). Filtered genes get a blank FDR and "
@@ -606,7 +592,6 @@ class GeneDEPage(SidebarTabbedPage):
 
         self.cooks_filter_check = QCheckBox("Cook's outlier filtering")
         self.cooks_filter_check.setChecked(DE_DESEQ2_COOKS_FILTER)
-        self.cooks_filter_check.setEnabled(is_deseq2)
         self.cooks_filter_check.setToolTip(
             "DESeq2 blanks a gene's p-value when one sample is an extreme "
             "Cook's-distance outlier. Tagged \"Cook's\" in the results. Uncheck "
@@ -646,9 +631,7 @@ class GeneDEPage(SidebarTabbedPage):
                      self.detection_study_check.toggled,
                      self.exclude_mt_check.toggled,
                      self.exclude_ribo_check.toggled,
-                     self.de_method_combo.currentIndexChanged,
                      self.unit_combo.currentIndexChanged,
-                     self.eb_checkbox.toggled,
                      self.indep_filter_check.toggled,
                      self.cooks_filter_check.toggled):
             _sig.connect(self._refresh_card_summaries)
@@ -1280,13 +1263,6 @@ class GeneDEPage(SidebarTabbedPage):
         self.unit_combo.setCurrentIndex(1 if self.ws.unit == 'cell' else 0)
         self.unit_combo.blockSignals(False)
 
-        self.de_method_combo.blockSignals(True)
-        self.de_method_combo.setCurrentIndex(1 if self.ws.de_method == 'deseq2' else 0)
-        self.de_method_combo.blockSignals(False)
-        self.eb_checkbox.setEnabled(self.ws.de_method != 'deseq2')
-        is_deseq2 = self.ws.de_method == 'deseq2'
-        self.indep_filter_check.setEnabled(is_deseq2)
-        self.cooks_filter_check.setEnabled(is_deseq2)
         self._apply_unit_ui_state()
 
         self.min_cells_spin.blockSignals(True)
@@ -1342,7 +1318,6 @@ class GeneDEPage(SidebarTabbedPage):
             'min_counts': self.ws.min_counts,
             'de_method': self.ws.de_method,
             'unit': self.ws.unit,
-            'moderate': self.eb_checkbox.isChecked(),
             'detection_min_pct': round(self.detection_pct_spin.value(), 4),
             'detection_min_donor_frac': round(
                 self.detection_donor_frac_spin.value(), 4),
@@ -1441,10 +1416,7 @@ class GeneDEPage(SidebarTabbedPage):
             pass
 
     def method_token(self) -> str:
-        """The file-name token of the chosen DE method ('deseq2',
-        'welch_cpm', 'welch_cpm_eb')."""
-        if self.ws.de_method == 'ttest':
-            return 'welch_cpm_eb' if self.eb_checkbox.isChecked() else 'welch_cpm'
+        """The file-name token of the DE method: 'deseq2', the only one run."""
         return 'deseq2'
 
     def counts_folder(self) -> str:
@@ -1694,18 +1666,6 @@ class GeneDEPage(SidebarTabbedPage):
 
     # --- Settings handlers ---
 
-    def _on_de_method_changed(self, index):
-        self.ws.de_method = 'deseq2' if index == 1 else 'ttest'
-        is_ttest = index == 0
-        # In cell mode the method picker is inert (always Wilcoxon).
-        self.eb_checkbox.setEnabled(is_ttest and self.ws.unit != 'cell')
-        if not is_ttest:
-            self.eb_checkbox.setChecked(False)
-        # DESeq2 filter toggles apply only to the DESeq2 engine.
-        self.indep_filter_check.setEnabled(not is_ttest)
-        self.cooks_filter_check.setEnabled(not is_ttest)
-        self._reload_for_current_method()
-
     def _on_unit_changed(self, index):
         self.ws.unit = 'cell' if index == 1 else 'sample'
         self._apply_unit_ui_state()
@@ -1716,13 +1676,6 @@ class GeneDEPage(SidebarTabbedPage):
         is_cell = self.ws.unit == 'cell'
         self._unit_caveat.setVisible(is_cell)
         self.de_method_combo.setEnabled(not is_cell)
-        self.eb_checkbox.setEnabled(
-            (not is_cell) and self.ws.de_method == 'ttest')
-
-    def _on_eb_toggled(self, checked):
-        # EB only applies to t-test (toggles welch_cpm vs welch_cpm_eb storage key).
-        if self.ws.de_method == 'ttest':
-            self._reload_for_current_method()
 
     def _reload_for_current_method(self):
         """Clear current results and try to load stored results for the active method."""
@@ -2000,8 +1953,6 @@ class GeneDEPage(SidebarTabbedPage):
                   else self.de_method_combo.currentText())
         counts = COUNT_SOURCE_TEXT.get(self._count_source(), self._count_source())
         model_lines = [engine, f"{unit} \u00b7 {counts}"]
-        if self.ws.unit == 'sample' and self.eb_checkbox.isChecked():
-            model_lines[1] += " \u00b7 EB"
         self._model_card.set_summary(model_lines)
 
         covariates = self._selected_covariates()
@@ -2289,7 +2240,6 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.pathway_gene_sets, min_cells,
             min_counts=self.ws.min_counts,
             de_method=de_method, full_genome=full_genome,
-            moderate=self.eb_checkbox.isChecked(),
             unit=self.ws.unit,
             fdr_genes=fdr_genes,
             covariates=list(self._run_settings['covariates']),
@@ -2604,7 +2554,6 @@ class GeneDEPage(SidebarTabbedPage):
             self.ws.condition_col, self.ws.project_dir, gse_id,
             cell_types=cell_types,
             de_method=self.ws.de_method,
-            moderate=self.eb_checkbox.isChecked(),
             covariates=self._selected_covariates(),
             # Same source the dialog's eligibility counts came from, so
             # what it promised is what actually runs.
@@ -2958,7 +2907,7 @@ class GeneDEPage(SidebarTabbedPage):
         settings = {**self._exported_run_settings(), 'covariates': covariates}
         self._meta_export_worker = MetaExportWorker(
             self.ws.current_adata, self.ws.sample_col, self.ws.condition_col,
-            self.ws.min_cells, self.ws.de_method, self.eb_checkbox.isChecked(),
+            self.ws.min_cells, self.ws.de_method,
             self.ws.de_results, self.ws.project_dir, gse_id,
             min_counts=self.ws.min_counts,
             run_record=self._run_record(min_cells=self.ws.min_cells,
@@ -3120,12 +3069,7 @@ class GeneDEPage(SidebarTabbedPage):
         if use_raw_pvals:
             active.append("raw-p")
         filter_str = ", ".join(active) if active else "none"
-        if self.ws.unit == 'cell':
-            engine = "Wilcoxon"
-        elif self.ws.de_method == 'deseq2':
-            engine = "DESeq2"
-        else:
-            engine = "Welch's t-test"
+        engine = "Wilcoxon" if self.ws.unit == 'cell' else "DESeq2"
         full_total = len(self.ws.de_results) if self.ws.de_results is not None else 0
         self.ws.log_message.emit(
             f"DE filter: {full_total:,} in results by {engine} → "
@@ -3326,16 +3270,15 @@ class GeneDEPage(SidebarTabbedPage):
         self.heatmap_pathway_combo.blockSignals(False)
 
     def _expr_normalization(self):
-        """Viz normalisation matching the selected DE method: VST for DESeq2,
-        log-CPM for the Welch engine, so plots show the quantity the test used."""
-        return 'vst' if self.ws.de_method == 'deseq2' else 'cpm'
+        """Viz normalisation matching DESeq2: its VST, so plots show the
+        quantity the test used."""
+        return 'vst'
 
     def _bars_normalization(self):
-        """Absolute-expression transform for the bar charts, matching the DE
-        method: log2 size-factor-normalised counts for DESeq2, log2 CPM for
-        Welch. Both are depth-corrected and put zero counts at zero (unlike
-        VST), so undetected genes read as empty bars."""
-        return 'deseq2' if self.ws.de_method == 'deseq2' else 'cpm'
+        """Absolute-expression transform for the bar charts: log2 DESeq2
+        size-factor-normalised counts. Depth-corrected, with zero counts at
+        zero (unlike VST), so undetected genes read as empty bars."""
+        return 'deseq2'
 
     def _bars_label(self):
         return ('log2 norm. counts' if self._bars_normalization() == 'deseq2'
@@ -3344,10 +3287,10 @@ class GeneDEPage(SidebarTabbedPage):
     def _expr_matrix(self, norm):
         """Cached per-donor expression matrix under the given normalisation.
 
-        The heatmap requests the DE-method-matched transform (VST for DESeq2,
-        log-CPM for Welch); the expression bars always request 'cpm' (log2 CPM)
-        because that is an interpretable absolute unit with zeros at zero, where
-        VST's arbitrary scale + non-zero floor would mislead. Computed once per
+        The heatmap requests DESeq2's VST; the expression bars request log2
+        size-factor-normalised counts, an interpretable absolute unit with
+        zeros at zero, where VST's arbitrary scale + non-zero floor would
+        mislead. Computed once per
         (dataset, layer, sample/condition col, normalisation) and cached.
 
         The cells and donors are those of the run chosen in the run bar
@@ -3504,7 +3447,7 @@ class GeneDEPage(SidebarTabbedPage):
         if not in_study:
             # A run made in this session: the whole-study table in the
             # counts folder, as the meta-analysis export writes it.
-            label = method_label(self.ws.de_method, self.eb_checkbox.isChecked())
+            label = method_label(self.ws.de_method)
             de_path = (de_run_dir(self.ws.project_dir, self._count_source())
                        / f"{gse_id}_DE_{label}.csv")
         try:
