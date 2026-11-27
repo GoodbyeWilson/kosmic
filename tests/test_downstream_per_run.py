@@ -153,7 +153,8 @@ def test_pathway_scoring_of_a_cell_type_uses_its_cells_and_donors(ws, monkeypatc
     ws.pathway_gene_sets = {'P': GENES[:4]}
     _choose(ws, 'Fibroblast')
     ws.pathway_de_page._start_scoring()
-    worker = started[0]
+    from kosmic.gui.de_analysis.workers import PathwayScoringWorker
+    worker = next(w for w in started if isinstance(w, PathwayScoringWorker))
     assert set(worker.adata.obs['annotation']) == {'Fibroblast'}
     assert (worker.min_cells, worker.min_counts) == (7, 0)
     folder = de_downstream_dir(ws.project_dir, 'original_counts', 'Fibroblast')

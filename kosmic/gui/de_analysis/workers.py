@@ -16,7 +16,6 @@
 
 from pathlib import Path
 import numpy as np
-import pandas as pd
 
 from kosmic.gui.shared.theme import get_font_sizes
 from kosmic.gui.shared.widgets import BaseWorker
@@ -162,10 +161,11 @@ class PathwayScoringWorker(BaseWorker):
     """
     Worker thread for pathway-level DE using pseudobulk scores.
 
-    Computes per-sample pathway scores from raw counts, then runs the
-    same run_pseudobulk_de() used for gene DE. Output format is identical
-    to gene DE (names, logfoldchanges, se, pvals) so it feeds directly
-    into meta-analysis.
+    Computes one score per donor per pathway (DESeq2-normalised log2
+    expression averaged over the pathway's genes, compute_pathway_scores)
+    and compares disease and control donors with Welch's t-test
+    (run_pseudobulk_de). Output columns follow gene DE (names,
+    logfoldchanges, se, pvals) so the table feeds the meta-analysis.
 
     Emits 'finished_ok' with a tuple '(pathway_de, pathway_de_copy, message)'.
     """
@@ -173,7 +173,7 @@ class PathwayScoringWorker(BaseWorker):
     def __init__(self, adata, sample_col: str, condition_col: str,
                  control_cond: str, disease_cond: str,
                  pathway_gene_sets: dict, scoring_dir: Path,
-                 level_label: str = '', method: str = 'score_genes',
+                 level_label: str = '', method: str = 'deseq2',
                  gene_de_results=None, rho: float = 0.1, counts_layer=None,
                  gene_detection_pct=None, min_coverage=None,
                  min_cells=None, min_counts=None):
@@ -217,137 +217,34 @@ class PathwayScoringWorker(BaseWorker):
         return kw
 
     def _run(self):
-        if self.method == 'deseq2':
-            return self._run_deseq2(normalization='deseq2')
-        if self.method == 'deseq2_vst':
-            return self._run_deseq2(normalization='vst')
-        if self.method == 'deseq2_vst_zscore':
-            return self._run_deseq2(normalization='vst', standardize_genes=True)
-        if self.method == 'pseudobulk_cpm':
-            return self._run_pseudobulk_cpm()
-        return self._run_cell_level_scoring()
-
-    def _run_deseq2(self, normalization='deseq2', standardize_genes=False):
-        """Pseudobulk sum -> DESeq2 normalisation -> per-donor pathway mean
-        -> plain Welch t-test. Effect = average per-gene log2FC (poolable).
-        'normalization' is 'deseq2' (size-factor log2) or 'vst'."""
+        if self.method != 'deseq2':
+            raise ValueError(
+                f"Pathway scoring method {self.method!r} is no longer offered.")
         from kosmic.de.de_analysis import (
             compute_pathway_scores, run_pseudobulk_de, annotate_de_results,
         )
-
-        if standardize_genes:
-            label = 'VST gene-standardised'
-        elif normalization == 'vst':
-            label = 'VST'
-        else:
-            label = 'DESeq2 log2FC'
-        self.progress.emit(f"Computing pathway scores ({label}, per donor)...")
-
+        self.progress.emit("Computing pathway scores (DESeq2-normalised, per donor)...")
         score_matrix, sample_df, pathway_names = compute_pathway_scores(
             self.adata, self.pathway_gene_sets,
             self.sample_col, self.condition_col,
-            normalization=normalization, counts_layer=self.counts_layer,
-            standardize_genes=standardize_genes,
+            normalization='deseq2', counts_layer=self.counts_layer,
             **self._coverage_kwargs(), **self._donor_kwargs(),
         )
-
         if score_matrix.size == 0 or not pathway_names:
             raise RuntimeError("No pathways with sufficient gene coverage")
 
         self._log_dropped(set(pathway_names))
-        self.progress.emit(f"Testing {len(pathway_names)} pathways...")
-
+        self.progress.emit(f"Testing {len(pathway_names)} pathways (Welch's t-test)...")
         pathway_de = run_pseudobulk_de(
-            score_matrix, sample_df, pathway_names,
-            pre_transformed=True,
-        )
-
+            score_matrix, sample_df, pathway_names, pre_transformed=True)
         if pathway_de.empty:
             raise RuntimeError("No pathways passed filtering")
 
         pathway_coverage = self._build_pathway_coverage()
         pathway_de, _ = annotate_de_results(pathway_de, pathway_coverage)
-
         return self._save_and_emit(pathway_de, pathway_names, scores={
             'matrix': score_matrix, 'sample_df': sample_df, 'names': pathway_names},
             coverage_report=self._coverage_report())
-
-    def _run_pseudobulk_cpm(self):
-        """Pseudobulk sum → CPM (full-genome lib sizes) → log2 → t-test."""
-        from kosmic.de.de_analysis import (
-            compute_pathway_scores, run_pseudobulk_de, annotate_de_results,
-        )
-
-        self.progress.emit("Computing pathway scores (pseudobulk CPM-log2)...")
-
-        score_matrix, sample_df, pathway_names = compute_pathway_scores(
-            self.adata, self.pathway_gene_sets,
-            self.sample_col, self.condition_col,
-            counts_layer=self.counts_layer,
-            **self._coverage_kwargs(), **self._donor_kwargs(),
-        )
-
-        if score_matrix.size == 0 or not pathway_names:
-            raise RuntimeError("No pathways with sufficient gene coverage")
-
-        self._log_dropped(set(pathway_names))
-
-        self.progress.emit(f"Testing {len(pathway_names)} pathways...")
-
-        pathway_de = run_pseudobulk_de(
-            score_matrix, sample_df, pathway_names,
-            pre_transformed=True,
-        )
-
-        if pathway_de.empty:
-            raise RuntimeError("No pathways passed filtering")
-
-        pathway_coverage = self._build_pathway_coverage()
-        pathway_de, _ = annotate_de_results(pathway_de, pathway_coverage)
-
-        return self._save_and_emit(pathway_de, pathway_names, scores={
-            'matrix': score_matrix, 'sample_df': sample_df, 'names': pathway_names},
-            coverage_report=self._coverage_report())
-
-    def _run_cell_level_scoring(self):
-        """Cell-level scoring (score_genes, mean, zscore, singscore) → sample aggregation → t-test."""
-        from kosmic.de.pathway_scoring import score_pathways, test_pathway_scores
-        from kosmic.de.de_analysis import annotate_de_results
-
-        self.progress.emit(f"Computing per-cell pathway scores ({self.method})...")
-
-        score_adata, available_pathways = score_pathways(
-            self.adata, self.pathway_gene_sets, method=self.method,
-        )
-
-        if not available_pathways:
-            raise RuntimeError("No pathways with sufficient gene coverage")
-
-        self._log_dropped(set(available_pathways))
-
-        self.progress.emit(f"Testing {len(available_pathways)} pathways...")
-
-        stats_df = test_pathway_scores(
-            score_adata, available_pathways,
-            self.sample_col, self.condition_col,
-            self.control_cond, self.disease_cond,
-        )
-
-        if stats_df.empty:
-            raise RuntimeError("No pathways passed filtering")
-
-        # Convert to standard DE format for the Pathway Activity plot
-        pathway_de = pd.DataFrame({
-            'names': stats_df['Pathway'],
-            'logfoldchanges': stats_df['Effect_Size'],
-            'pvals': stats_df['P_Value'],
-            'pvals_adj': stats_df['P_Adjusted'] if 'P_Adjusted' in stats_df.columns else stats_df['P_Value'],
-        })
-
-        pathway_coverage = self._build_pathway_coverage()
-        pathway_de, _ = annotate_de_results(pathway_de, pathway_coverage)
-
-        return self._save_and_emit(pathway_de, list(available_pathways.keys()))
 
     def _log_dropped(self, kept_names):
         """Surface pathways that were silently filtered out by the scorer."""
@@ -645,7 +542,7 @@ class PathwayDataWorker(BaseWorker):
 
     def __init__(self, adata, genes, sample_col, condition_col,
                  disease_label, control_label, pathway_name,
-                 method='pseudobulk_cpm', counts_layer=None,
+                 method='deseq2', counts_layer=None,
                  precomputed_scores=None, allowed_genes=None, parent=None):
         super().__init__(parent)
         self._adata = adata
@@ -692,11 +589,13 @@ class PathwayDataWorker(BaseWorker):
                     self._sample_col, self._condition_col, self._method,
                     counts_layer=self._counts_layer)
             if pathway_scores.size == 0:
-                # Method couldn't score it (coverage) -> mean-expression fallback.
-                pathway_scores = pb_matrix.mean(axis=1)
-                score_sdf = sample_df
-            disease_mask = (score_sdf['condition'] == self._disease_label).values
-            control_mask = (score_sdf['condition'] == self._control_label).values
+                # Too few of its genes measured to be scored: no score is drawn
+                # (no other score is put in its place).
+                pathway_scores = None
+                disease_mask = control_mask = None
+            else:
+                disease_mask = (score_sdf['condition'] == self._disease_label).values
+                control_mask = (score_sdf['condition'] == self._control_label).values
 
             # Per-gene summary uses pb_matrix (mean expression) with its own
             # condition masks aligned to pb_matrix rows.
@@ -805,7 +704,7 @@ class SpilloverWorker(BaseWorker):
 
     def __init__(self, adata, pathway_name, genes, sample_col, condition_col,
                  disease_label, control_label, contam_key,
-                 method='pseudobulk_cpm', counts_layer=None, parent=None):
+                 method='deseq2', counts_layer=None, parent=None):
         super().__init__(parent)
         self._adata = adata
         self._pathway_name = pathway_name
@@ -831,14 +730,16 @@ class SpilloverWorker(BaseWorker):
 
 
 class FgseaWorker(BaseWorker):
-    """Run preranked GSEA (fgsea) on the DESeq2 gene ranks off-thread.
+    """Preranked GSEA of the chosen pathways against the gene DE ranks,
+    off-thread: genes ranked by the DESeq2 Wald statistic, sets of 15-500
+    genes in the ranking (GSEA's defaults), as on the Enrichment page.
 
-    Emits 'finished_ok' with the fgsea result DataFrame (names, nes, es,
-    pvals, pvals_adj, leading_edge).
+    Emits 'finished_ok' with '(summary, details)' (names, nes, es, pvals,
+    pvals_adj, leading_edge; running-enrichment curves).
     """
 
     def __init__(self, gene_de_results, pathway_gene_sets,
-                 rank_by='logfoldchanges', parent=None):
+                 rank_by='statistic', parent=None):
         super().__init__(parent)
         self._gene_de = gene_de_results
         self._gene_sets = pathway_gene_sets
@@ -846,12 +747,9 @@ class FgseaWorker(BaseWorker):
 
     def _run(self):
         from kosmic.de.fgsea import run_fgsea
-        self.progress.emit("Running preranked GSEA (fgsea)...")
-        # The pathways here are the few the user chose, so each is tested
-        # whatever its size (the 15-500 bounds are for screening a library).
-        # Unchanged from before; on the list for review.
+        self.progress.emit("Running preranked GSEA...")
         return run_fgsea(self._gene_de, self._gene_sets, rank_by=self._rank_by,
-                         min_size=3, max_size=5000, return_details=True)
+                         return_details=True)
 
 
 class LibraryGseaWorker(BaseWorker):

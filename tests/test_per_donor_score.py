@@ -1,10 +1,9 @@
 """Tests for `per_donor_pathway_score` — the single per-donor score used by
 the Pathway Score plot and the spillover diagnostic.
 
-Pins that it (a) returns one value per donor for each scoring method by
-reusing that method's own computation, (b) the `deseq2` method produces a
-DESeq2 size-factor-log2 per-donor score distinct from CPM, and (c) reports
-coverage failure as empty.
+Pins that it (a) returns one value per donor, (b) refuses the scoring
+methods earlier versions offered rather than substituting one, and (c)
+reports coverage failure as empty.
 """
 from __future__ import annotations
 
@@ -39,31 +38,25 @@ def _make_adata(seed=0):
     return adata, pw
 
 
-@pytest.mark.parametrize("method",
-                         ["pseudobulk_cpm", "deseq2",
-                          "mean", "zscore", "singscore"])
-def test_returns_one_score_per_donor(method):
+def test_returns_one_score_per_donor():
     adata, pw = _make_adata()
-    scores, sdf = per_donor_pathway_score(
-        adata, "PW", pw, "sample", "condition", method)
+    scores, sdf = per_donor_pathway_score(adata, "PW", pw, "sample", "condition")
     assert scores.shape == (8,)
     assert list(sdf.columns[:2]) == ["sample", "condition"]
     assert len(sdf) == 8
     assert np.all(np.isfinite(scores))
 
 
-def test_deseq2_differs_from_cpm():
-    """deseq2 produces a DESeq2 size-factor-log2 per-donor score, not CPM."""
+@pytest.mark.parametrize("method", ["pseudobulk_cpm", "mean", "zscore", "singscore",
+                                    "score_genes", "deseq2_vst"])
+def test_removed_methods_are_refused_not_substituted(method):
     adata, pw = _make_adata()
-    cpm, _ = per_donor_pathway_score(adata, "PW", pw, "sample", "condition",
-                                     "pseudobulk_cpm")
-    dsq, _ = per_donor_pathway_score(adata, "PW", pw, "sample", "condition",
-                                     "deseq2")
-    assert not np.allclose(cpm, dsq)
+    with pytest.raises(ValueError):
+        per_donor_pathway_score(adata, "PW", pw, "sample", "condition", method)
 
 
 def test_coverage_failure_returns_empty():
     adata, _ = _make_adata()
     scores, sdf = per_donor_pathway_score(
-        adata, "PW", ["NOT_A_GENE"], "sample", "condition", "pseudobulk_cpm")
+        adata, "PW", ["NOT_A_GENE"], "sample", "condition")
     assert scores.size == 0 and sdf.empty

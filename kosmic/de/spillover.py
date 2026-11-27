@@ -118,12 +118,12 @@ def spillover_attribution(score, contamination, is_disease):
 
 def pathway_spillover(adata, pathway_name, genes, sample_col, condition_col,
                       disease_label, control_label, contam_key,
-                      method='pseudobulk_cpm', counts_layer=None):
+                      method='deseq2', counts_layer=None):
     """Per-sample spillover diagnostic for one pathway.
 
-    Scores the pathway per donor **using the selected scoring method**
-    (via :func:`kosmic.de.pathway_scoring.per_donor_pathway_score`, so the
-    diagnostic operates on the same score the Pathway Score plot shows),
+    Scores the pathway per donor with the pathway score
+    (:func:`kosmic.de.pathway_scoring.per_donor_pathway_score`, so the
+    diagnostic operates on the same score the pathway test uses),
     aggregates the contamination metric ``obs[contam_key]`` to a per-sample
     mean, restricts to the two conditions, and runs
     :func:`spillover_attribution`.
@@ -141,8 +141,7 @@ def pathway_spillover(adata, pathway_name, genes, sample_col, condition_col,
     contam_key : str
         An ``obs`` column, e.g. ``'pct_counts_cardiomyocyte'``.
     method : str
-        Scoring method (``'deseq2'``, ``'pseudobulk_cpm'``, ``'mean'``,
-        ``'zscore'``, ``'singscore'``, ``'score_genes'``).
+        ``'deseq2'``, the only pathway score.
     counts_layer : str, optional
         Counts layer to score (e.g. ``'decontX_counts'``); scores the
         pathway on decontaminated counts so the diagnostic can be re-run

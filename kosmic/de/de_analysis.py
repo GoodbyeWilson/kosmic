@@ -398,21 +398,17 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
                            gene_detection_pct=PATHWAY_GENE_DETECTION_PCT,
                            min_coverage=PATHWAY_MIN_COVERAGE,
                            min_genes=PATHWAY_MIN_GENES,
-                           normalization='cpm', counts_layer=None,
-                           min_counts=DE_MIN_COUNTS,
-                           standardize_genes=False):
+                           normalization='deseq2', counts_layer=None,
+                           min_counts=DE_MIN_COUNTS):
     """Compute per-donor pathway scores from raw counts.
 
-    For each pathway, builds pseudobulk profiles then averages (equal
-    weight) across the pathway's genes per donor. Returns a
-    (samples x pathways) matrix passable to run_pseudobulk_de().
-
-    'normalization' sets the per-donor transform:
-    'cpm' (full-genome library size, log2), 'deseq2' (median-of-ratios
-    size factors then log2 -- the same estimator the DESeq2 DE uses), or
-    'vst' (DESeq2 variance-stabilising transform via pydeseq2, fit on the
-    full-genome pseudobulk). All three yield a donor-level score whose
-    disease-vs-control difference is a pathway log2FC.
+    Each donor's counts are summed over its cells (pseudobulk), divided by
+    DESeq2's median-of-ratios size factors (estimated from every gene) and
+    log2(x + 1) transformed, DESeq2's normTransform; the pathway's genes
+    are then averaged per donor (equal weight). Returns a (samples x
+    pathways) matrix passable to run_pseudobulk_de(). The score's
+    disease-vs-control difference is the average of its genes' log2
+    differences.
 
     Parameters
     ----------
@@ -438,15 +434,12 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
     min_genes : int
         Minimum absolute number of retained pathway genes required.
         Defaults to 'PATHWAY_MIN_GENES'.
+    normalization : 'deseq2'
+        The only normalisation (kept as a parameter for callers that name it).
     counts_layer : str, optional
         Counts layer to score (e.g. 'decontX_counts'); when set, that
         layer -- keyed on 'adata.var_names' -- is the count source and the
         gene universe, in place of the counts / raw / X default.
-    standardize_genes : bool
-        Z-score each gene across donors before averaging the module, so every
-        subunit contributes equally and high-abundance genes cannot dominate.
-        The score is then in standardised units (a robustness view), not log2
-        expression -- its group difference is not a log2FC.
 
     Returns
     -------
@@ -457,6 +450,10 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
     pathway_names : list of str
         Pathway names matching columns of score_matrix.
     """
+    if normalization != 'deseq2':
+        raise ValueError(
+            f"Pathway scores use DESeq2 normalisation; {normalization!r} is no "
+            "longer offered.")
     pathway_gene_map, _, base_var_names = _pathway_retention(
         adata, pathway_gene_sets, gene_detection_pct, min_coverage, min_genes,
         counts_layer=counts_layer)
@@ -478,42 +475,19 @@ def compute_pathway_scores(adata, pathway_gene_sets, sample_col, condition_col,
     if pb_matrix.size == 0:
         return np.array([]), pd.DataFrame(), []
 
-    # Full-genome pseudobulk drives normalisation (library sizes / size
-    # factors / VST dispersion trend).
+    # Full-genome pseudobulk drives the size factors.
     pb_full, _, full_genes_used = create_pseudobulk(
         adata, base_var_names, sample_col, condition_col,
         min_cells=min_cells, aggregate='sum', counts_layer=counts_layer,
         min_counts=min_counts,
     )
 
-    # Each branch yields a per-donor gene matrix 'values' plus the gene
-    # index into its columns; the pathway loop is shared.
-    if normalization == 'vst':
-        values = _vst_transform(pb_full, full_genes_used, sample_df, condition_col)
-        gene_to_idx = {g: i for i, g in enumerate(full_genes_used)}
-    elif normalization == 'deseq2':
-        # Median-of-ratios size factors, matching the gene-level DESeq2 DE.
-        from kosmic.meta_analysis.deseq2_fast import _compute_size_factors
-        size_factors = _compute_size_factors(pb_full).reshape(-1, 1)
-        size_factors = np.clip(size_factors, 1e-8, None)
-        values = np.log2(pb_matrix / size_factors + 1)
-        gene_to_idx = {g: i for i, g in enumerate(genes_used)}
-    else:
-        # CPM-normalise pathway genes using full-genome library sizes.
-        lib_sizes = pb_full.sum(axis=1, keepdims=True)
-        lib_sizes = np.clip(lib_sizes, 1, None)
-        values = np.log2(pb_matrix / lib_sizes * 1e6 + 1)
-        gene_to_idx = {g: i for i, g in enumerate(genes_used)}
-
-    # Optionally z-score each gene across donors so every subunit contributes
-    # equally and high-abundance genes cannot dominate the module average. The
-    # score is then standardised, not log2 -- its group difference is not a
-    # log2FC (see the 'deseq2_vst_zscore' scoring method).
-    if standardize_genes:
-        mu = values.mean(axis=0, keepdims=True)
-        sd = values.std(axis=0, ddof=0, keepdims=True)
-        sd = np.where(sd == 0, 1.0, sd)
-        values = (values - mu) / sd
+    # Median-of-ratios size factors, matching the gene-level DESeq2 DE.
+    from kosmic.meta_analysis.deseq2_fast import _compute_size_factors
+    size_factors = _compute_size_factors(pb_full).reshape(-1, 1)
+    size_factors = np.clip(size_factors, 1e-8, None)
+    values = np.log2(pb_matrix / size_factors + 1)
+    gene_to_idx = {g: i for i, g in enumerate(genes_used)}
 
     # Equal-weight mean of the pathway's genes per donor.
     pathway_names = []
