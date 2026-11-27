@@ -72,8 +72,6 @@ DE_DESEQ2_INDEPENDENT_FILTER = _cfg["de"]["deseq2_independent_filter"]
 DE_DESEQ2_COOKS_FILTER       = _cfg["de"]["deseq2_cooks_filter"]
 
 # DE independent filtering
-DE_ENRICH_IF_DEFAULT_PCT     = _cfg["de"]["independent_filtering"]["enrichment_default_pct"]
-DE_ENRICH_IF_ON_BY_DEFAULT   = _cfg["de"]["independent_filtering"]["enrichment_on_by_default"]
 
 # Meta-analysis independent filtering
 META_IF_DEFAULT_PCT          = _cfg["meta_analysis"]["independent_filtering"]["default_pct"]

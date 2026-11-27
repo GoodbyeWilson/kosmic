@@ -1,11 +1,8 @@
 # Discovery step 4: pathway enrichment of the pooled gene list.
 #
-# This IS the DE workspace's EnrichmentPage, subclassed rather than
-# reimplemented. The meta side previously had its own cut-down copy --
-# ORA only, seven hardcoded libraries, fixed thresholds -- while DE had
-# ORA plus preranked GSEA, eleven libraries and configurable cutoffs.
-# Two UIs over one shared worker is how they drifted apart, so there is
-# now one UI and one implementation.
+# This IS the DE workspace's EnrichmentPage (preranked GSEA), subclassed
+# rather than reimplemented, so the two cannot drift apart. It ranks the
+# pooled genes by their pooled z-statistic.
 #
 # EnrichmentPage reads four things off its "workspace": the DE table, a
 # progress bar, log/status signals, and a writable gsea_library_name.
@@ -69,7 +66,7 @@ class MetaEnrichmentPage(EnrichmentPage):
     # effect resting on one noisy study does not outrank a
     # well-estimated smaller one.
     rank_column = 'z_stat'
-    RANK_CHOICES = ()     # always the pooled z
+    rank_description = "the pooled z-statistic (the pooled effect / its pooled SE)"
 
     def __init__(self, parent: Optional[QWidget] = None):
         self._ctx = _MetaEnrichmentContext()
@@ -108,18 +105,14 @@ class MetaEnrichmentPage(EnrichmentPage):
         stem of the saved run it is ('consensus_reml_analytical'), when known."""
         self._ctx.set_meta_results(meta_df)
         self._run_stem = run_stem
-        self._update_gene_count()
+        self._refresh_ranking_note()
 
     # -- provenance ----------------------------------------------------
     #
     # Recorded here rather than in the DE page so that page keeps its
     # own behaviour: the meta run writes into the project-level sidecar
     # that the Methods step renders, which the DE workspace has no part
-    # in. Both finish handlers funnel through _record_enrichment.
-
-    def _on_enrichr_finished(self, payload):
-        super()._on_enrichr_finished(payload)
-        self._record_enrichment('ora')
+    # in. The finish handler funnels through _record_enrichment.
 
     def _on_gsea_finished(self, payload):
         super()._on_gsea_finished(payload)

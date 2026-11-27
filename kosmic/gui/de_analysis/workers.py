@@ -10,7 +10,6 @@
 # - 'PathwayScoringWorker' -- pathway-level DE on pseudobulk scores
 # - 'PathwayDataWorker'   -- loads the gene sets a pathway run needs
 # - 'CellTypeBatchWorker' -- the per-cell-type batch run ('kosmic.de.batch')
-# - 'EnrichrORAWorker' -- over-representation of a gene list
 # - 'SpilloverWorker'     -- the ambient-spillover diagnostic for one pathway
 # - 'MetaExportWorker'    -- writes the DE result + pseudobulk where the
 #                            Meta-Analysis workspace will find them
@@ -636,59 +635,6 @@ class CellTypeBatchWorker(BaseWorker):
                    + (f", {n_failed} failed" if n_failed else "")
                    + (" (cancelled)" if self._cancelled else ""))
         return runs, summary, message
-
-
-class EnrichrORAWorker(BaseWorker):
-    """
-    Worker thread for over-representation analysis against a library.
-
-    Loads the library (bundled with KOSMIC, or downloaded from Enrichr),
-    then runs Fisher's exact test for each term against the study gene
-    list. BH correction applied. Emits 'finished_ok' with
-    '(results_df, message)'; 'library_source' then records where the
-    library came from (kosmic.reference.pathways.libraries).
-    """
-
-    def __init__(self, study_genes, background_genes, library_name,
-                 alpha=DEFAULT_FDR, min_genes=5):
-        super().__init__()
-        self.study_genes = set(study_genes)
-        self.background_genes = set(background_genes)
-        self.library_name = library_name
-        self.alpha = alpha
-        self.min_genes = min_genes
-        self.library_source = None
-
-    def _run(self):
-        from kosmic.de.ora import run_ora
-        from kosmic.reference.pathways.libraries import load_library
-
-        self.progress.emit(f"Loading {self.library_name}...")
-        library, self.library_source = load_library(self.library_name)
-        if not library:
-            raise RuntimeError(f"Empty library: {self.library_name}")
-
-        n_study = len(set(self.study_genes) & set(self.background_genes))
-        self.progress.emit(
-            f"Testing {len(library)} terms ({n_study} study genes)..."
-        )
-
-        def _on_progress(i, total):
-            self.progress_pct.emit(int(i / max(total, 1) * 100))
-
-        df = run_ora(
-            self.study_genes, self.background_genes, library,
-            min_genes=self.min_genes, progress_callback=_on_progress,
-        )
-
-        if df.empty:
-            return (df, "No enriched terms found.")
-
-        n_sig = int((df['FDR'] < self.alpha).sum())
-        message = (
-            f"Enrichment complete: {n_sig} significant terms from "
-            f"{len(df)} tested ({self.library_name})")
-        return (df, message)
 
 
 class PathwayDataWorker(BaseWorker):

@@ -172,32 +172,6 @@ def _enrichment_page(study):
     return EnrichmentPage(ws), ws
 
 
-def test_the_enrichment_page_saves_an_ora_run(app, study):
-    page, _ws = _enrichment_page(study)
-    page._annotate_direction_and_display(pd.DataFrame({
-        'Term': ['T1', 'T2'], 'P_value': [0.001, 0.2], 'FDR': [0.01, 0.4],
-        'Fold_Enrichment': [3.0, 1.1], 'Gene_Count': [2, 1], 'Term_Size': [20, 30],
-        'Genes': ['PKM, HK2', 'HK2']}))
-    from kosmic.paths import de_pathway_scoring_dir
-    back = saved.read_enrichment(de_pathway_scoring_dir(study))
-    assert list(back['Term']) == ['T1', 'T2'] and 'Direction' in back.columns
-
-
-def test_the_meta_enrichment_step_saves_an_ora_run_in_its_selection(app, tmp_path):
-    from kosmic.gui.meta_analysis.pages.enrichment_step import MetaEnrichmentPage
-    from kosmic.paths import meta_output_dir
-
-    p = MetaEnrichmentPage()
-    p.set_project_folder(tmp_path, selection='Cardiomyocyte')
-    p.set_meta_results(pd.DataFrame({'names': ['G1', 'G2'], 'logfoldchanges': [1.0, -1.0],
-                                     'fdr': [0.01, 0.2], 'pvals_pooled': [0.001, 0.1]}))
-    p._on_enrichr_finished((pd.DataFrame({
-        'Term': ['a'], 'P_value': [1e-5], 'FDR': [3e-5], 'Fold_Enrichment': [3.0],
-        'Gene_Count': [2], 'Genes': [['G1', 'G2']]}), 'done'))
-    back = saved.read_enrichment(meta_output_dir(tmp_path, 'Cardiomyocyte'))
-    assert list(back['Term']) == ['a']
-
-
 def test_the_enrichment_page_saves_gsea_curves(app, study):
     page, ws = _enrichment_page(study)
     ws.gsea_library_name = 'MSigDB Hallmark'
