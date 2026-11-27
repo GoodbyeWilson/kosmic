@@ -365,6 +365,32 @@ def require_se(df: pd.DataFrame, filepath: str = '<unknown>') -> None:
 
 # Pseudobulk-set loader (for CC permutation + consensus LOO)
 
+def recorded_design_covariates(pb_path) -> Optional[List[str]]:
+    """The covariates a study's DESeq2 run adjusted for, from its run record.
+
+    Reads the '{accession}_DE_deseq2.json' beside a '{accession}_pseudobulk.csv'
+    and takes the covariates out of its 'design' ('~sex_inferred + condition'
+    gives ['sex_inferred']): the design that was fitted, not what was ticked.
+    Returns None when there is no DESeq2 record to read.
+    """
+    import json
+    from pathlib import Path
+
+    path = Path(pb_path)
+    suffix = '_pseudobulk.csv'
+    if not path.name.endswith(suffix):
+        return None
+    record = path.with_name(path.name[:-len(suffix)] + '_DE_deseq2.json')
+    try:
+        design = json.loads(record.read_text(encoding='utf-8')).get('design')
+    except (OSError, ValueError):
+        return None
+    if not isinstance(design, str) or '~' not in design:
+        return None
+    terms = [t.strip() for t in design.split('~', 1)[1].split('+')]
+    return [t for t in terms if t and t != 'condition']
+
+
 def load_pseudobulk_set(
     pb_paths: Sequence,
     labels: Optional[Sequence[str]] = None,
@@ -395,7 +421,12 @@ def load_pseudobulk_set(
         One dict per successfully-loaded path, with keys: 'expression'
         (ndarray), 'conditions' (ndarray of str), 'gene_names' (list
         of str), 'n_cells' (ndarray), 'dataset_name' (str), 'role'
-        (ndarray of str: 'disease' / 'control' / 'exclude' per sample).
+        (ndarray of str: 'disease' / 'control' / 'exclude' per sample),
+        'samples' (list of str: the donor ids, in row order) and
+        'covariates' (DataFrame of the DE run's sample-level covariates,
+        one row per donor, or 'None' for a file that carries none;
+        ADR-018) and 'missing_covariates' (the covariates the study's
+        DESeq2 run adjusted for that the file does not carry).
 
     Notes
     -----
@@ -406,7 +437,8 @@ def load_pseudobulk_set(
     'None' and downstream code raises a clear error pointing the user
     back to the Inspect tab to set roles.
     """
-    from kosmic.meta_analysis.cc_permutation import load_pseudobulk
+    from kosmic.meta_analysis.cc_permutation import (
+        load_pseudobulk, load_pseudobulk_covariates)
 
     pb_data: List[dict] = []
     labels_seq = list(labels) if labels else []
@@ -414,6 +446,7 @@ def load_pseudobulk_set(
     for i, pb_path in enumerate(pb_paths):
         try:
             expr, conds, genes, samples, n_cells, roles = load_pseudobulk(pb_path)
+            covariates = load_pseudobulk_covariates(pb_path)
         except Exception as e:  # noqa: BLE001
             if skip_errors:
                 if progress_cb is not None:
@@ -430,6 +463,14 @@ def load_pseudobulk_set(
             'n_cells': n_cells,
             'dataset_name': ds_name,
             'role': roles,
+            'samples': list(samples),
+            'covariates': covariates,
+            # Covariates the study's DE run adjusted for that this file
+            # does not carry: the exact permutation cannot reproduce
+            # that run's model and refuses (ADR-018).
+            'missing_covariates': [
+                c for c in (recorded_design_covariates(pb_path) or [])
+                if covariates is None or c not in covariates.columns],
         })
 
         if progress_cb is not None:

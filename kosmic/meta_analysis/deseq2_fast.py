@@ -1,9 +1,10 @@
 # CC-permutation accelerator for two-group NB GLM DE.
 #
 # This is *not* a from-scratch DESeq2 reimplementation and *not* a drop-in
-# replacement for PyDESeq2. It is a two-tier hybrid built solely to make
-# the consensus CC permutation in 'kosmic/meta_analysis/cc_permutation.py'
-# tractable:
+# replacement for PyDESeq2, and it is an APPROXIMATION of the exact
+# permutation ('deseq2_exact' in cc_permutation.py, ADR-018), which re-runs
+# the study's own DE with its covariates on every shuffle. It is a two-tier
+# hybrid built solely to make the consensus CC permutation tractable:
 #
 # * 'precompute_deseq2' runs the full PyDESeq2 pipeline once per
 #   dataset (Cox-Reid-adjusted dispersion MLE, parametric trend with
@@ -17,8 +18,14 @@
 # plain PyDESeq2 via 'kosmic/de/de_analysis._run_deseq2'. The file's only
 # production caller is 'cc_permutation.py', hence its location here.
 #
-# See 'dev/simulations/validate_deseq2_fast.py' for the head-to-head
-# validation against full PyDESeq2.
+# Limits, measured: it fits a two-group model without covariates, and it
+# reuses dispersions fitted on the observed labels. On the DCM endothelial
+# cells its null is heavier-tailed than the exact permutation's, so it calls
+# fewer genes (REML 4,287 against 4,427; top-50% SumRank 193 against 305;
+# Stouffer 6,462 against 6,789 at BH FDR 5%); see
+# 'dev/validation/cc_exact_vs_fast.py'. 'dev/simulations/validate_deseq2_fast.py'
+# compares its fold changes and p-values with PyDESeq2 on simulated data
+# under the observed labels, which does not test the permutation null.
 
 import numpy as np
 import pandas as pd

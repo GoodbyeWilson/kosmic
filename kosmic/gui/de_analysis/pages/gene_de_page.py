@@ -418,6 +418,22 @@ class GeneDEPage(SidebarTabbedPage):
         filters_lay.addWidget(self.atlas_genes_check)
         self._refresh_atlas_genes_option()
 
+        # Gene universe for a per-cell-type batch: each cell type's
+        # meta-analysis gene set, so a merged run tests the meta's genes.
+        self.meta_genes_check = QCheckBox(
+            "Cell-type batch: each cell type's meta-analysis genes only")
+        self.meta_genes_check.setToolTip(
+            "For Run by cell type. Correct and report each cell type over the\n"
+            "genes its newest meta-analysis tested (saved beside the\n"
+            "meta-analysis results as *_genes.csv, under the same counts and\n"
+            "cell type), so a merged run on the atlas tests the same genes as\n"
+            "the meta-analysis. A cell type with no saved meta-analysis is\n"
+            "skipped. The fit still uses every gene, and this run's own\n"
+            "expression filter still applies within the list.")
+        self.meta_genes_check.setChecked(bool(self.ws.fdr_meta_gene_sets))
+        self.meta_genes_check.toggled.connect(self._on_meta_genes_toggled)
+        filters_lay.addWidget(self.meta_genes_check)
+
 
         # Built here, shown in the Advanced dialog rather than the sidebar:
         # all three are at standard values and an ordinary run never
@@ -1134,17 +1150,24 @@ class GeneDEPage(SidebarTabbedPage):
             'exclude_gene_groups': self._excluded_gene_groups(),
         }
 
-    def _fdr_scope(self) -> str:
+    def _fdr_scope(self, batch: bool = False) -> str:
         """The genes the BH correction runs over, as _committed_fdr_genes
         chooses them: 'genome', 'gene_sets', 'shared_atlas' or
-        'gene_sets_and_shared_atlas'."""
+        'gene_sets_and_shared_atlas'. A cell-type batch with "each cell
+        type's meta-analysis genes only" ticked is 'meta_genes', or
+        '<scope>_and_meta_genes' with the others. (Not 'meta_gene_sets':
+        kosmic.comparison.design.uses_gene_sets looks for 'gene_sets' to
+        recognise pathway gene sets.)"""
         sets = (getattr(self.ws, 'analysis_mode', None) == 'scoring'
                 and bool(self.ws.pathway_gene_sets))
         atlas = (getattr(self.ws, 'gene_universe', None) == 'shared_atlas'
                  and bool(self._atlas_genes()))
-        return {(False, False): 'genome', (True, False): 'gene_sets',
-                (False, True): 'shared_atlas',
-                (True, True): 'gene_sets_and_shared_atlas'}[(sets, atlas)]
+        scope = {(False, False): 'genome', (True, False): 'gene_sets',
+                 (False, True): 'shared_atlas',
+                 (True, True): 'gene_sets_and_shared_atlas'}[(sets, atlas)]
+        if batch and getattr(self.ws, 'fdr_meta_gene_sets', False):
+            return 'meta_genes' if scope == 'genome' else f'{scope}_and_meta_genes'
+        return scope
 
     def _exported_run_settings(self) -> dict:
         """The covariates, filters and FDR scope of the run being exported:
@@ -1746,14 +1769,50 @@ class GeneDEPage(SidebarTabbedPage):
 
     def _gene_universe_record(self):
         """What the provenance says about the gene universe."""
+        parts = []
         if getattr(self.ws, 'gene_universe', None) == 'shared_atlas':
             genes = self._atlas_genes()
-            return f"shared atlas ({len(genes):,} genes)" if genes else "shared atlas"
-        return "all genes"
+            parts.append(f"shared atlas ({len(genes):,} genes)" if genes else "shared atlas")
+        if getattr(self.ws, 'fdr_meta_gene_sets', False):
+            parts.append("each cell type's meta-analysis gene set")
+        return "; ".join(parts) or "all genes"
 
     def _on_atlas_genes_toggled(self, on: bool):
         self.ws.gene_universe = 'shared_atlas' if on else None
         self._refresh_run_dirty()
+
+    def _on_meta_genes_toggled(self, on: bool):
+        self.ws.fdr_meta_gene_sets = bool(on)
+        self._refresh_run_dirty()
+
+    def _batch_fdr_genes(self, cell_type_col, cell_types):
+        """The batch's FDR gene list: the committed list, or with the
+        meta-analysis option, a cell type -> genes mapping (intersected with
+        the committed list when there is one). Each cell type's source file
+        is logged; one with no saved gene set is left out and skipped."""
+        base = self._committed_fdr_genes()
+        if not getattr(self.ws, 'fdr_meta_gene_sets', False):
+            return base
+        from kosmic.meta_analysis.gene_set import meta_gene_sets, read_gene_set
+        study_dir = getattr(self.ws, 'project_dir', None)
+        project = Path(study_dir).parent if study_dir else None
+        if cell_types is None:
+            cell_types = sorted(self.ws.current_adata.obs[cell_type_col]
+                                .dropna().astype(str).unique())
+        found = meta_gene_sets(project, self._count_source(), cell_types) if project else {}
+        mapping = {}
+        for ct in cell_types:
+            path = found.get(ct)
+            if path is None:
+                self.ws.log_message.emit(
+                    f"{ct}: no saved meta-analysis gene set; it will be skipped")
+                continue
+            genes = read_gene_set(path)
+            mapping[ct] = genes if base is None else (genes & set(base))
+            self.ws.log_message.emit(
+                f"{ct}: FDR over {len(mapping[ct]):,} genes from "
+                f"{path.relative_to(project).as_posix()}")
+        return mapping
 
     # --- Run DE ---
 
@@ -2196,6 +2255,14 @@ class GeneDEPage(SidebarTabbedPage):
 
         full_genome = True  # per-cell normalisation needs the full matrix
 
+        if getattr(self.ws, 'fdr_meta_gene_sets', False):
+            dialogs.warning(
+                self, "Cell-type batch only",
+                "\"Each cell type's meta-analysis genes only\" applies to Run by "
+                "cell type, where each cell type has its own meta-analysis. "
+                "Untick it for a single run, or run by cell type.")
+            return
+
         fdr_genes = self._committed_fdr_genes()
         filters = self._filter_settings()
         # What this run used, for the record its export saves: the controls
@@ -2531,7 +2598,7 @@ class GeneDEPage(SidebarTabbedPage):
             min_cells=self.min_cells_spin.value(),
             min_counts=self.min_counts_spin.value(),
             pathway_gene_sets=self.ws.pathway_gene_sets,
-            fdr_genes=self._committed_fdr_genes(),
+            fdr_genes=self._batch_fdr_genes(cell_type_col, cell_types),
             **filters,
             # The rule the summary counts and significant-gene files use.
             fdr=self.pval_filter.value(), lfc=self.fc_filter.value(),
@@ -2539,7 +2606,7 @@ class GeneDEPage(SidebarTabbedPage):
                 min_cells=self.min_cells_spin.value(),
                 min_counts=self.min_counts_spin.value(),
                 covariates=self._selected_covariates(),
-                filters=filters, fdr_scope=self._fdr_scope()),
+                filters=filters, fdr_scope=self._fdr_scope(batch=True)),
         )
         run_worker(
             self._batch_worker,
@@ -2869,6 +2936,13 @@ class GeneDEPage(SidebarTabbedPage):
         """
         gse_id = self.ws.gse_accession or (
             Path(self.ws.h5ad_path).stem if self.ws.h5ad_path else "unknown")
+        # What the run's design actually used, not what is ticked now: a
+        # covariate can be dropped as inestimable (ADR-018).
+        covariates = list(getattr(self.ws.de_results, 'attrs', {})
+                          .get('covariates_used', ()) or ())
+        # The filters and FDR scope of the run being exported, with the
+        # covariates its design used.
+        settings = {**self._exported_run_settings(), 'covariates': covariates}
         self._meta_export_worker = MetaExportWorker(
             self.ws.current_adata, self.ws.sample_col, self.ws.condition_col,
             self.ws.min_cells, self.ws.de_method, self.eb_checkbox.isChecked(),
@@ -2876,7 +2950,8 @@ class GeneDEPage(SidebarTabbedPage):
             min_counts=self.ws.min_counts,
             run_record=self._run_record(min_cells=self.ws.min_cells,
                                         min_counts=self.ws.min_counts,
-                                        **self._exported_run_settings()),
+                                        **settings),
+            covariates=covariates,
         )
         if self.ws.progress_bar:
             self.ws.progress_bar.setValue(0)

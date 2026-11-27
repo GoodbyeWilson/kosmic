@@ -45,7 +45,7 @@ def test_the_shared_genes_are_those_every_method_tested(table):
 
 
 def test_the_significance_rule_uses_padj_and_vote_pass(table):
-    sets = call_sets(apply_rule(table, Rule()))
+    sets = call_sets(apply_rule(table, Rule(fdr_over='own')))
     # F is called by merged but outside the shared genes.
     assert sets == {'pb_merged': {'A', 'B', 'C', 'D'}, 'ma_reml': {'A', 'B', 'E'},
                     'ma_vote': {'A', 'E'}}
@@ -57,13 +57,13 @@ def test_the_top_n_rule_calls_n_genes_per_method_within_the_shared_genes(table):
 
 
 def test_the_direction_rule_drops_genes_whose_methods_disagree(table):
-    sets = call_sets(apply_rule(table, Rule('significance_and_direction')))
+    sets = call_sets(apply_rule(table, Rule('significance_and_direction', fdr_over='own')))
     # B goes up in merged and down in REML.
     assert sets['pb_merged'] == {'A', 'C', 'D'} and sets['ma_reml'] == {'A', 'E'}
 
 
 def test_pairwise_measures_on_known_sets(table):
-    pw = pairwise(apply_rule(table, Rule())).set_index(['method_a', 'method_b'])
+    pw = pairwise(apply_rule(table, Rule(fdr_over='own'))).set_index(['method_a', 'method_b'])
     row = pw.loc[('pb_merged', 'ma_reml')]
     assert (row['n_a'], row['n_b'], row['n_both']) == (4, 3, 2)
     assert row['jaccard'] == pytest.approx(2 / 5)

@@ -17,6 +17,7 @@ analysis is the donor / sample rather than the cell.
 | **Min cells per donor** | A donor contributing fewer cells is dropped. |
 | **Min transcripts per donor** | A donor whose cells sum to fewer transcripts is dropped. Off (0) by default. |
 | **Shared atlas genes only** | Correct and report over the gene list of the project's shared atlas. Enabled only when the project has an atlas; the label shows how many genes that is. |
+| **Cell-type batch: each cell type's meta-analysis genes only** | Run by cell type only. Correct and report each cell type over the genes its newest meta-analysis tested -- see below. |
 | **Filter genes within each study** | Atlas only -- see below. |
 | **Exclude mitochondrial genes (MT-)** | Removes MT- genes before testing. In single-nucleus data, mitochondrial transcripts come from cytoplasmic carry-over or ambient RNA, so differences between conditions are technical. Off by default. |
 | **Exclude ribosomal protein genes (RPL/RPS)** | Removes cytosolic ribosomal protein genes before testing; mitochondrial ribosomal genes (MRPL/MRPS) are kept. These genes are transcribed in the nucleus, so exclude them only if you treat their changes as technical. Off by default. |
@@ -39,6 +40,22 @@ mega-analysis are comparable gene for gene. The DESeq2 fit still uses
 every gene the study has -- size factors and the dispersion trend want
 the whole transcriptome -- and the study's own expression filter still
 applies within the list. The methods text records the choice.
+
+The meta-analysis may test fewer genes than the atlas holds, when its
+gene-set settings are used (see [Gene Meta-Analysis](../meta/gene_ma.md#gene-set)).
+For the merged analysis to test the same genes, tick **Cell-type batch:
+each cell type's meta-analysis genes only** and run by cell type on the
+atlas. Each cell type is then corrected and reported over the genes its
+newest meta-analysis tested, read from
+`meta_analysis/<counts>/<cell type>/consensus_*_genes.csv` for the counts
+loaded here. The output panel names the file used for each cell type. A
+cell type with no saved meta-analysis is skipped, not run over every gene.
+The fit still uses every gene, and this run's own expression filter still
+applies within the list, so a few genes near its threshold can drop out.
+
+The [Methods Comparison](../comparison/index.md) workspace makes the same
+comparison itself. With its **FDR over the genes compared** unticked, it
+gives what comparing these results with the meta-analysis's by hand gives.
 
 ## The two filters
 

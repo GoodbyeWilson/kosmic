@@ -82,7 +82,8 @@ def gwop_fast(datasets, r=None, min_studies=MIN_STUDIES, proportion_top=1.0,
     pathway_map: Dict[str, str] = {}
 
     for ds_i, df in enumerate(datasets):
-        pval_col = 'pvals_adj' if 'pvals_adj' in df.columns else 'pvals'
+        # Raw p-values (ADR-018); adjusted ones only for a table without them.
+        pval_col = 'pvals' if 'pvals' in df.columns else 'pvals_adj'
         if pval_col not in df.columns:
             continue
         for _, row in df.iterrows():

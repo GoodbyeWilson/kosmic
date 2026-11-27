@@ -28,7 +28,7 @@ merged pseudobulk.
 | **Selection** | A cell type and counts source with a DESeq2 run in two or more studies, for example *Ventricular Cardiomyocyte, decontX counts (5 studies)*. |
 | Studies | The studies of the selection, all ticked. Untick a study to leave it out of the meta-analysis methods. Merged pseudobulk is fitted to every study in the atlas, so the page warns when the atlas holds a study that is not ticked. |
 | **Methods** | The methods compared. At least two must be ticked. |
-| **Calls** | The rule that decides which genes each method calls (below), with its threshold. |
+| **Calls** | The rule that decides which genes each method calls (below), with its threshold, and **FDR over the genes compared** (ticked by default; below). |
 | **Run comparison** | Collects each method's result, compares them and saves the comparison. |
 
 ## The merged pseudobulk design
@@ -80,7 +80,7 @@ so.
 | Method | Read from | Computed when |
 |---|---|---|
 | Merged pseudobulk | The atlas's saved DESeq2 run for the selection, when its design matches | There is no saved run, or you choose **Resolve** (below). It is fitted with the DE workspace's per-cell-type run and saved in the atlas's DE results, so the DE workspace lists it. |
-| REML, SumRank, Stouffer, vote counting | A run of that method alone, saved by the Meta-Analysis workspace for the same studies with the same settings | There is no such run. The method is pooled again from the studies' saved DE tables, with the expression filter and minimum number of studies of the selection's latest meta-analysis run, or the Meta-Analysis defaults. |
+| REML, SumRank, Stouffer, vote counting | A run of that method alone, saved by the Meta-Analysis workspace for the same studies with the same settings | There is no such run. The method is pooled again from the studies' saved DE tables with the settings of the selection's latest meta-analysis run, or the Meta-Analysis defaults: the minimum number of studies, the expression filter, and the gene-set settings **Current gene symbols only** and **Leave out genes merged inconsistently across studies** (see [Gene Meta-Analysis](../meta/gene_ma.md#gene-set)). |
 
 When the atlas's saved merged run does not match the design, a dialog
 opens before anything runs. It shows the two designs and their differences,
@@ -99,6 +99,29 @@ and offers three choices:
 The comparison uses only the genes that every selected method tested. A
 gene that DESeq2 filtering removed from one method's results is therefore
 not counted as a gene that method did not call.
+
+**FDR over the genes compared** (ticked by default) corrects every method
+again, with Benjamini-Hochberg, from its raw p-values, over the genes
+compared. Every method's FDR then has the same denominator, so a
+difference between two methods' calls is not a difference in how many
+genes each corrected over. A method has tested a gene when it gave a raw
+p-value for it: DESeq2's independent filter withholds only the adjusted
+p-value, and the correction is made again here, as the DE workspace does
+when it corrects over a committed gene list. Merged pseudobulk fitted over
+every gene is then corrected over the same genes as the meta-analysis
+without fitting it again; the fit, and so its raw p-values, do not depend
+on the genes corrected over. Unticked, each method's adjusted p-value is
+used as the method gave it, and the genes compared are those with one in
+every method. Vote counting has no p-value and is not affected.
+
+Unticked, the comparison gives what you get by comparing the tables
+yourself, when merged pseudobulk was run on the DE page with **Cell-type
+batch: each cell type's meta-analysis genes only** (see
+[Gene DE](../de/gene_de.md#one-gene-universe-for-both-arms)): merged
+pseudobulk corrected over the meta-analysis genes it tested, each
+meta-analysis method over its own genes. The two settings differ only when
+one method tests genes another does not, for example a gene the merged
+model's expression filter removes.
 
 | Rule | A method calls a gene when |
 |---|---|
@@ -122,6 +145,23 @@ genes compared, and the genes called, split into up and down in disease.
 | Same direction | Of the genes both call, the percentage that change in the same direction in both. |
 | Rank correlation | Spearman correlation of the two methods' ranks over the genes compared. |
 
+**Genes by the methods that call them** groups the genes called by at
+least one method by exactly which methods call them (all of them, merged
+pseudobulk and REML only, and so on). For each group:
+
+| Column | Meaning |
+|---|---|
+| Genes | Genes in the group. |
+| Same direction | The percentage whose log2 fold change has the same sign in every study's own DE result. |
+| Median \|log2FC\| (REML) | The median absolute REML pooled log2 fold change. |
+| Median I² | The median REML I², the share of the variation between studies not explained by chance. |
+| Prediction interval excludes 0 | The percentage whose REML 95% prediction interval, pooled ± t(k−2)·√(SE² + τ²) with k the studies pooled, lies wholly above or below 0. |
+| No single study | The percentage that no study's own analysis calls (study FDR below the threshold). |
+
+The REML columns use the REML fit with the comparison's meta-analysis
+settings; REML is pooled for them when it is not among the methods
+compared.
+
 The notes under the tables state where each method's result came from.
 
 ## Saved output
@@ -133,6 +173,8 @@ Each comparison is saved in the project in
 |---|---|
 | `results.csv` | One row per gene and method: effect, direction, statistic, p-value, adjusted p-value, rank, whether the method tested and called the gene, and whether the gene was compared. |
 | `pairwise.csv` | The agreement between each pair of methods. |
+| `genes.csv` | Per gene: the number of studies, same direction in every study, the number of studies calling it, REML's effect, I² and prediction interval. |
+| `method_groups.csv` | The table *Genes by the methods that call them*. |
 | `params.json` | The methods, the call rule, the merged design and its warnings, where each result came from, and the studies. |
 | `provenance.json`, `methods.md` | The comparison's methods record. A new run replaces it. |
 

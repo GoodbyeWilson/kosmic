@@ -20,6 +20,7 @@ from .pooling_core import (
     _build_effect_matrices,
     _vectorized_dl,
     _hksj_se,
+    _prediction_interval,
     _build_result_df,
 )
 
@@ -115,7 +116,8 @@ def reml_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0, hksj=False,
         pvals_pooled, n_studies, pathways, study_effects, heterogeneity_i2,
         pooling_method.
         Random-effects reporting columns: tau_squared, Q, p_heterogeneity,
-        pi_lower, pi_upper (95% prediction interval).
+        pi_lower, pi_upper (95% prediction interval for a new study:
+        pooled +/- t(k-2) * sqrt(se^2 + tau2), k = studies pooled for the gene).
     """
     from scipy.stats import chi2 as _chi2
 
@@ -181,9 +183,8 @@ def reml_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0, hksj=False,
             p_het = np.where(df_row > 0,
                              1.0 - _chi2.cdf(Q_row, df_row),
                              1.0)
-        pi_se = np.sqrt(se_row ** 2 + tau2_row)
-        pi_lower = result['logfoldchanges'].values - 1.96 * pi_se
-        pi_upper = result['logfoldchanges'].values + 1.96 * pi_se
+        pi_lower, pi_upper = _prediction_interval(
+            result['logfoldchanges'].values.astype(float), se_row, tau2_row, k_row)
 
         result['tau_squared'] = tau2_row
         result['Q'] = Q_row

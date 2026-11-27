@@ -231,3 +231,16 @@ class _NoWorker:
 
     def wait(self):
         return True
+
+
+def test_a_run_saves_the_genes_by_the_methods_that_call_them(project):
+    from kosmic.comparison import bundle as B
+    (sel,) = available_selections(project)
+    # REML not compared: it is still pooled for the per-gene summaries.
+    b = run_comparison(project, sel, ['pb_merged', 'ma_stouffer'], Rule())
+    assert b.genes is not None and {'same_direction', 'pi_excludes_0'} <= set(b.genes.columns)
+    assert b.genes['i2'].notna().any()
+    groups = b.method_groups
+    assert groups['genes'].sum() == len(set().union(*b.sets.values()))
+    folder = project / 'methods_comparison' / sel.path
+    assert (folder / B.GROUPS_FILE).is_file() and (folder / B.GENES_FILE).is_file()

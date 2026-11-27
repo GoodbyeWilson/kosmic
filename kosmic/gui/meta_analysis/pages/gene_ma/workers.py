@@ -43,6 +43,9 @@ class GeneMAWorker(BaseWorker):
         self.datasets = datasets
         self.labels = labels
         self.params = params
+        # Set when the user stops an exact permutation run: the run
+        # ended on request, it did not fail (ADR-018).
+        self.stopped = False
 
     def _run(self):
         method_keys = self.params['method_keys']
@@ -81,20 +84,28 @@ class GeneMAWorker(BaseWorker):
                 raise RuntimeError("Failed to load pseudobulk data.")
 
             from kosmic.meta_analysis.cc_permutation import (
-                consensus_cc_permutation)
+                CCPermutationCancelled, consensus_cc_permutation)
 
             cc_de_method = self.params.get('de_method', 'deseq2_fast')
             self.progress.emit(
                 f"CC permutation (shared DE, {cc_de_method})...")
-            method_dfs = consensus_cc_permutation(
-                pb_data, analytical_dfs,
-                n_perms=n_cc_perms, seed=42,
-                de_method=cc_de_method,
-                min_studies=min_st,
-                progress_cb=lambda cur, tot: self.progress.emit(
-                    f"CC permutation {cur}/{tot}"),
-                status_cb=lambda msg: self.progress.emit(msg),
-            )
+            try:
+                method_dfs = consensus_cc_permutation(
+                    pb_data, analytical_dfs,
+                    n_perms=n_cc_perms, seed=42,
+                    de_method=cc_de_method,
+                    min_studies=min_st,
+                    progress_cb=lambda cur, tot: self.progress.emit(
+                        f"CC permutation {cur}/{tot}"),
+                    status_cb=lambda msg: self.progress.emit(msg),
+                    resume_dir=self.params.get('cc_resume_dir'),
+                    cancelled=self.isInterruptionRequested,
+                    gene_universe=self.params.get('cc_gene_universe'),
+                    refilter=self.params.get('cc_refilter', True),
+                )
+            except CCPermutationCancelled:
+                self.stopped = True
+                raise
             self.progress.emit("CC permutation complete")
         else:
             method_dfs = analytical_dfs
@@ -111,10 +122,14 @@ class GeneMAWorker(BaseWorker):
         self.progress.emit(
             f"Pooling complete: {len(consensus_df)} genes")
 
+        # The genes every method tested: saved with the run so the merged
+        # arm can correct its FDR over the same genes.
+        from kosmic.meta_analysis.gene_set import genes_tested
         return {
             'meta_df': consensus_df,
             'method_dfs': method_dfs,
             'method_keys': method_keys,
+            'tested_genes': genes_tested(method_dfs, method_keys),
         }
 
     def _load_pseudobulk(self, pb_paths):

@@ -190,6 +190,25 @@ selection spans cell types. Each subfolder holds that selection's
 result tables and its meta-analysis `provenance.json` and `methods.md`. It does not read anything from the
 per-study workspaces in memory.
 
+Pooled p-values can be calibrated by case–control permutation
+(`kosmic/meta_analysis/cc_permutation.py`, ADR-018, ADR-019). Two engines
+re-fit each study's own model on every shuffle. The exact engine,
+`deseq2_exact`, runs `fit_deseq2_wald` in `kosmic/de/de_analysis.py`, the
+function the DE workspace's `_run_deseq2` also calls. The fast engine,
+`deseq2_vec`, fits the same model by array code over genes
+(`kosmic/meta_analysis/vec_deseq2.py`, with scipy's L-BFGS-B driven in
+lockstep by `vec_lbfgsb.py`, which checks at run time that scipy's private
+interface still behaves as expected) and returns the same estimates in about
+a fifth to a tenth of the time. Both shuffle the roles within the covariate groups of
+the study's design, read the covariates from the pseudobulk file, and save
+each permutation in the selection's `cc_permutation/` (exact) or
+`cc_permutation_vec/` folder so a stopped run continues. The approximation,
+`deseq2_fast` (`kosmic/meta_analysis/deseq2_fast.py`), is used where the
+vectorised engine cannot run, by leave-one-study-out and by the pathway
+permutation. Fisher, Stouffer, gwOP, WOP and the permutation null combine the
+raw per-study `pvals`; vote counting and the direction counts use
+`pvals_adj`.
+
 **Figures** renders figures for one study, the active study or the one
 opened with the Project page's *Open in Figures*, and for the project's
 meta-analysis (ADR-014). Its pages read the study through one object,
@@ -316,10 +335,14 @@ study it pools, a `{accession}_DE_{method}.csv` and a
 `{accession}_pseudobulk.csv` containing a `role` column. The role
 column is how Meta-Analysis identifies disease and control samples. The
 pseudobulk file's other leading columns, `condition`, `n_cells` and
-`total_counts` (the donor's summed transcripts), are per-donor metadata;
-every column after them is a gene. Which donors appear is decided once,
-by `profile_table` in `kosmic/de/de_analysis.py`, from the cell-count
-and transcript-depth floors.
+`total_counts` (the donor's summed transcripts), are per-donor metadata.
+The sample-level covariates of the DE run, such as `sex_inferred`, follow
+`role` as `cov:<name>` columns (ADR-018); `load_pseudobulk` leaves them
+out of the genes and `load_pseudobulk_covariates` reads them, returning
+`None` for a file written before ADR-018. Every other column is a gene.
+Which donors appear is decided once, by `profile_table` in
+`kosmic/de/de_analysis.py`, from the cell-count and transcript-depth
+floors.
 
 **Subsets are studies.** Extracting a cell type in the scRNA Subset
 step creates a new study folder whose provenance record's `source`

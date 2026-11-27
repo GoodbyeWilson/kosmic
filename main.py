@@ -35,6 +35,15 @@
 #     a Project-page line would help.
 # 11. Run the remaining DCM studies (chaffin, koenig, reichart) through
 #     DE to reach k = 5 for the meta-analysis.
+# 12. ADR-018 / ADR-019 follow-ups. (a) Repeat each DCM study's DE run for
+#     the cell types not yet done so its pseudobulk file carries the run's
+#     covariates; the exact and fast CC permutations refuse a study
+#     without them (the cardiomyocyte files have them). (b) MetaExportWorker
+#     (gui/de_analysis/workers.py) calls create_pseudobulk without a counts
+#     layer, unlike the batch runner: check the whole-study export sums
+#     the counts the DE tested. (c) The pathway CC permutation (item 7)
+#     and leave-one-study-out still use deseq2_fast, which has the
+#     fixed-dispersion limits ADR-018 measured.
 
 # System Imports
 import os

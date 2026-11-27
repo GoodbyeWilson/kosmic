@@ -123,6 +123,10 @@ class DEWorkspace(QWidget):
         # project's shared atlas holds, so per-study results are tested
         # over the same list as the mega-analysis on the atlas).
         self.gene_universe = None
+        # Batch runs: correct each cell type's FDR over the genes its
+        # meta-analysis tested (kosmic.meta_analysis.gene_set), so a merged
+        # run on the atlas tests the same genes as the meta-analysis.
+        self.fdr_meta_gene_sets = False
         self.de_method = 'deseq2'
         self.unit = 'sample'   # 'sample' (pseudobulk) or 'cell' (scanpy Wilcoxon)
         self.geneset_label = 'Metabolic -- Comprehensive (12 pathways)'

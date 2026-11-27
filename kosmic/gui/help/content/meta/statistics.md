@@ -138,17 +138,76 @@ as a disagreement between studies, not as a consistent change.
 
 ## Permutation calibration
 
-Analytical p-values from pooled single-cell DE are anticonservative
-when the per-study tests share structure. KOSMIC calibrates them by
-case–control permutation: shuffling the disease/control labels within
-each study, re-running DE and the pooling, and building an empirical
-null for each gene. Re-fitting DESeq2 per permutation is not tractable,
-so the permutation loop reuses each gene's dispersion estimated once on
-the observed data and refits only the coefficients — an accelerator
-validated head-to-head against the full model
-(`dev/simulations/validate_deseq2_fast.py`). The assumption this makes,
-that dispersions are fixed across label shuffles, is recorded here so
-that it can be stated in a methods section.
+The analytical p-value of a pooling method rests on assumptions about
+the per-study tests that pseudobulk DE does not always meet. KOSMIC can
+calibrate the p-values by case–control permutation. On each permutation
+the disease and control labels are shuffled among the donors of each
+study, the study-level DE is repeated on the shuffled labels, and the
+studies are pooled by each method. The pooled statistics of all genes and
+all permutations form one null distribution. Each observed pooled
+statistic then receives the permutation p-value
+
+(1 + *n*<sub>extreme</sub>) / (1 + *n*<sub>null</sub>),
+
+where *n*<sub>extreme</sub> is the number of null values at least as
+extreme as the observed one and *n*<sub>null</sub> is the number of null
+values. The observed statistic counts as one draw of its own null, so a
+calibrated p-value is never zero.
+
+Three engines can produce the study-level DE on the shuffled labels.
+
+**Exact.** Every permutation re-runs the study's own DE: the same
+function the DE workspace uses, the same design including the covariates
+the run adjusted for (for example `sex_inferred`), the same expression
+filter, and dispersions estimated again from the shuffled labels. Donors
+with role *exclude* are not in the analysis and do not take part. When
+the design has covariates, the roles are shuffled within each combination
+of covariate levels, so the covariate-by-condition table of every study
+is the same on every permutation. The covariates come from the
+`cov:<name>` columns of the pseudobulk file; a study whose DE run
+adjusted for covariates but whose pseudobulk file has none must have its
+DE run repeated. A permutation takes about 30–40 s per study on one core
+for a small cell type and several minutes for five studies of a large
+one, so the default is 200 permutations. Each finished permutation is
+saved in the `cc_permutation/` folder beside the results, and a stopped
+run continues from them.
+
+**Fast.** The same model, the same shuffles and the same saved
+permutations as the exact engine, with the fit of each study written as
+array code over genes (`kosmic/meta_analysis/vec_deseq2.py`). It follows
+PyDESeq2 step by step, including the dispersion fits, the Cook's outlier
+refit and the Wald test, and returns the same log2 fold changes, standard
+errors and p-values. It takes a fifth to a tenth of the time (4.9 s against 31.9 s per permutation of
+five studies on 14 cores for DCM cardiomyocytes; 30 s against 307 s per
+permutation on one core for endothelial cells), so the default is
+1,000 permutations, saved in `cc_permutation_vec/`. It uses scipy's own
+L-BFGS-B through a private scipy function; KOSMIC checks at run time that
+the function behaves as expected and, if it does not, uses the
+approximation below and says so. On the DCM endothelial cells (five
+studies, 1,000 permutations, the same shuffles for every engine) the exact
+and fast engines gave identical numbers of genes at a Benjamini–Hochberg
+FDR below 0.05 for every method, and null tail fractions equal to within
+0.00001.
+
+**Approximate.** Used only where the fast engine cannot run. The
+dispersions are estimated once on the observed labels, and each
+permutation refits a vectorised two-group model (condition only, no
+covariates) with them. A permutation of five studies takes under a second.
+Its null has heavier tails than the exact null, so it calls fewer genes. On
+the same cells:
+
+| Method | Exact | Fast | Approximate |
+|---|---|---|---|
+| DL | 4,350 | 4,350 | 4,251 |
+| REML | 4,287 | 4,287 | 4,158 |
+| SumRank, top 50% | 291 | 291 | 178 |
+| gwOP | 5,951 | 5,951 | 5,492 |
+| Fisher | 7,447 | 7,447 | 6,790 |
+| Stouffer | 6,612 | 6,612 | 6,306 |
+
+This is one cell type, so the size of the difference in another data set
+is not known. Leave-one-study-out validation repeats the pipeline once
+per study and always uses the approximate engine.
 
 ## Pathway-level testing
 

@@ -9,6 +9,10 @@ and the parameters. It is saved in
 - ``results.csv``: the long table, every gene of every method, so the
   comparison can be cut under another rule without refitting;
 - ``pairwise.csv``: :func:`kosmic.comparison.agreement.pairwise`;
+- ``genes.csv``: per gene, what the studies and REML say about it
+  (:func:`kosmic.comparison.agreement.gene_characteristics`), when known;
+- ``method_groups.csv``: the genes each group of methods calls, with those
+  characteristics (:func:`kosmic.comparison.agreement.method_groups`);
 - ``params.json``: the methods, the rule, the merged design and its
   warnings, where each result came from, and what the comparison was made
   of (selection, studies, KOSMIC version).
@@ -27,10 +31,14 @@ from typing import Optional
 
 import pandas as pd
 
-from kosmic.comparison.agreement import Rule, apply_rule, call_sets, methods_in, pairwise
+from kosmic.comparison.agreement import (
+    Rule, apply_rule, call_sets, method_groups, methods_in, pairwise,
+)
 
 RESULTS_FILE = 'results.csv'
 PAIRWISE_FILE = 'pairwise.csv'
+GENES_FILE = 'genes.csv'
+GROUPS_FILE = 'method_groups.csv'
 PARAMS_FILE = 'params.json'
 PROVENANCE_STAGE = 'methods_comparison'
 
@@ -51,18 +59,22 @@ class ComparisonBundle:
     rule: Rule
     params: dict = field(default_factory=dict)
     folder: Optional[Path] = None
+    #: Per gene, from the studies and REML (agreement.gene_characteristics).
+    genes: Optional[pd.DataFrame] = None
 
     @classmethod
     def build(cls, standard: pd.DataFrame, rule: Rule, params: Optional[dict] = None,
-              methods=None) -> 'ComparisonBundle':
+              methods=None, genes: Optional[pd.DataFrame] = None) -> 'ComparisonBundle':
         """A bundle from the concatenated standard tables of the methods."""
-        return cls(apply_rule(standard, rule, methods), rule, dict(params or {}))
+        return cls(apply_rule(standard, rule, methods), rule, dict(params or {}),
+                   genes=genes)
 
     def recut(self, rule: Rule, methods=None) -> 'ComparisonBundle':
         """The same results under another rule or set of methods."""
-        base = self.results.drop(columns=['in_universe', 'significant'], errors='ignore')
+        base = self.results.drop(columns=['in_universe', 'significant', 'padj_used'],
+                                 errors='ignore')
         return ComparisonBundle(apply_rule(base, rule, methods), rule, dict(self.params),
-                                self.folder)
+                                self.folder, self.genes)
 
     @property
     def methods(self) -> list:
@@ -75,6 +87,10 @@ class ComparisonBundle:
     @property
     def pairwise(self) -> pd.DataFrame:
         return pairwise(self.results)
+
+    @property
+    def method_groups(self) -> pd.DataFrame:
+        return method_groups(self.results, self.genes)
 
     @property
     def n_universe(self) -> int:
@@ -96,6 +112,9 @@ class ComparisonBundle:
         folder.mkdir(parents=True, exist_ok=True)
         self.results.to_csv(folder / RESULTS_FILE, index=False)
         self.pairwise.to_csv(folder / PAIRWISE_FILE, index=False)
+        if self.genes is not None:
+            self.genes.to_csv(folder / GENES_FILE)
+        self.method_groups.to_csv(folder / GROUPS_FILE, index=False)
         params = {**self.full_params(), 'selection': selection}
         (folder / PARAMS_FILE).write_text(json.dumps(params, indent=2, default=str),
                                           encoding='utf-8')
@@ -121,9 +140,25 @@ def load(folder) -> Optional[ComparisonBundle]:
         if col in results.columns:
             results[col] = results[col].astype(str).str.lower().isin(['true', '1'])
     results['rank'] = pd.to_numeric(results['rank'], errors='coerce').astype('Int64')
-    rule = Rule(**{k: v for k, v in (params.get('rule') or {}).items()
-                   if k in ('rule', 'alpha', 'top_n')})
-    return ComparisonBundle(results, rule, params, folder)
+    # A comparison saved before the FDR scope was part of the rule used each
+    # method's own adjusted p-values.
+    rule_params = {k: v for k, v in (params.get('rule') or {}).items()
+                   if k in ('rule', 'alpha', 'top_n', 'fdr_over')}
+    rule_params.setdefault('fdr_over', 'own')
+    rule = Rule(**rule_params)
+    genes = None
+    if (folder / GENES_FILE).is_file():
+        try:
+            genes = pd.read_csv(folder / GENES_FILE, index_col='gene')
+        except (OSError, ValueError):
+            genes = None
+    if genes is not None:
+        # CSV gives 'True'/'False' (or bools); NA stays NA.
+        flags = {'True': 1.0, 'False': 0.0, True: 1.0, False: 0.0}
+        for col in ('same_direction', 'no_single_study', 'pi_excludes_0'):
+            if col in genes.columns:
+                genes[col] = genes[col].map(flags)
+    return ComparisonBundle(results, rule, params, folder, genes)
 
 
 def list_saved(project) -> list:

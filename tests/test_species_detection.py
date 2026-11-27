@@ -80,3 +80,19 @@ def test_format_gene_for_species_ambiguous_without_same_name_falls_back():
     # AGTR1 -> Agtr1a, Agtr1b has no same-name mouse gene, so it is not
     # in the table and gets the naive guess rather than one paralog.
     assert format_gene_for_species("AGTR1", "mouse") == "Agtr1"
+
+
+def test_human_open_reading_frame_symbols_keep_their_lower_case_orf():
+    # Upper-casing C11orf58 gave C11ORF58, which no human dataset holds, so
+    # the gene silently dropped out of committed FDR sets and gene lists.
+    assert format_gene_for_species("C11orf58", "human") == "C11orf58"
+    assert format_gene_for_species("c11orf58", "human") == "C11orf58"
+    assert format_gene_for_species("CXORF38", "human") == "CXorf38"
+    assert format_gene_for_species("HSPB2-C11orf52", "human") == "HSPB2-C11orf52"
+    assert format_gene_for_species("tp53", "human") == "TP53"
+
+
+def test_every_current_hgnc_symbol_is_left_unchanged_for_human():
+    from kosmic.scrna.inspect.gene_names import load_locus_groups
+    changed = [g for g in load_locus_groups() if format_gene_for_species(g, "human") != g]
+    assert changed == []

@@ -215,6 +215,17 @@ def significant_path(study_dir, accession):
     return de_stats_dir(study_dir) / f"{accession}_significant_genes.csv"
 
 
+#: Columns of a pseudobulk CSV that describe the donor. Every other column
+#: before the genes is a covariate (written with the prefix below), and
+#: every column after them is a gene.
+PSEUDOBULK_META_COLUMNS = ('sample', 'condition', 'n_cells', 'total_counts', 'role')
+
+#: Prefix of a covariate column in a pseudobulk CSV (ADR-018). A gene
+#: symbol does not contain a colon, so a reader that treats unrecognised
+#: columns as genes can still exclude covariates by this prefix.
+PSEUDOBULK_COVARIATE_PREFIX = 'cov:'
+
+
 def pseudobulk_path(study_dir: PathLike, accession: str) -> Path:
     """Path to the per-study pseudobulk counts CSV, in the flat layout of
     the versions before ADR-015 (see :func:`de_result_path`).

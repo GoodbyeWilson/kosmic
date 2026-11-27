@@ -149,6 +149,10 @@ def unclip_contained(fig, tolerance: float = 1.0) -> int:
         else fig._get_renderer()
     n = 0
     for ax in fig.get_axes():
+        # Autoscaled limits are applied lazily, at the first draw; reading
+        # them applies them, so the data transform below is the one drawn.
+        ax.get_xlim()
+        ax.get_ylim()
         box = ax.get_window_extent(renderer)
         artists = [*ax.collections, *ax.lines, *ax.patches, *ax.images, *ax.texts]
         for artist in artists:
@@ -205,9 +209,16 @@ NO_LIGATURES = ('-liga', '-clig', '-dlig')
 
 
 def disable_ligatures(fig) -> None:
-    """Switch off ligatures in every text object of *fig*."""
+    """Switch off ligatures in every text object of *fig*.
+
+    Font features exist from Matplotlib 3.11, which brought the HarfBuzz
+    shaping that makes the ligatures. Earlier versions lay text out one
+    glyph at a time and make none, so there is nothing to switch off.
+    """
     from matplotlib.text import Text
 
+    if not hasattr(Text, 'set_fontfeatures'):
+        return
     for text in fig.findobj(Text):
         own = [f for f in (text.get_fontfeatures() or ()) if f not in NO_LIGATURES]
         text.set_fontfeatures([*own, *NO_LIGATURES])

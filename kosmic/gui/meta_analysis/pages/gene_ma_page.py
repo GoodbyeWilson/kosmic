@@ -138,6 +138,10 @@ class GeneMAPage(SidebarTabbedPage):
         self._method_dfs = None
         self._method_keys = None
         self._worker = None
+        # True while an exact-permutation run is in progress: the run
+        # button then stops it instead of starting another (ADR-018).
+        self._exact_run_active = False
+        self._run_btn_text = None
         self._last_logged_perm_decile = -1
         self._scatter_data = None
         self._highlight_scatter = None
@@ -335,9 +339,48 @@ class GeneMAPage(SidebarTabbedPage):
         r = 0
         grid.addWidget(QLabel("Calibration:"), r, 0)
         self._cal_combo = QComboBox()
-        self._cal_combo.addItems(["Analytical", "CC permutation"])
+        self._cal_combo.addItems([
+            "Analytical",
+            "CC permutation (fast)",
+            "CC permutation (exact, slow)"])
+        self._cal_combo.setToolTip(
+            "Analytical: each method's own p-value.\n"
+            "Fast: shuffles the disease/control labels within each study and "
+            "fits each study's own DE model, with its covariates, on every "
+            "shuffle by array code (ADR-019). It gives the exact permutation's "
+            "results five to ten times faster: about an hour and a half for 1,000 "
+            "permutations of five studies of a large cell type on 14 cores. Where scipy's optimiser "
+            "interface is not usable it falls back to a quick two-group "
+            "approximation, which calls somewhat fewer genes.\n"
+            "Exact: re-runs PyDESeq2 itself on every shuffle. About 30-40 s per "
+            "study per permutation on one core, so hours for 200 "
+            "permutations. For both, a stopped run continues where it stopped.")
         grid.addWidget(self._cal_combo, r, 1)
         r += 1
+
+        # Permutation settings (consensus_cc_permutation's gene_universe and
+        # refilter). Off by default; shown only for a permutation.
+        self._cc_universe_check = QCheckBox("Null from the pooled gene set only")
+        self._cc_universe_check.setToolTip(
+            "Each shuffle still fits every study on all its genes, but only "
+            "the genes this run pools (after the gene-set settings below) "
+            "enter the null distribution and are calibrated. Off: every gene "
+            "pooled from enough studies enters the null.")
+        grid.addWidget(self._cc_universe_check, r, 1)
+        r += 1
+        self._cc_refilter_check = QCheckBox(
+            "Don't re-apply the CPM filter on shuffles")
+        self._cc_refilter_check.setToolTip(
+            "Fast and exact engines. The saved pseudobulk holds only the genes "
+            "the study's DE tested, so its library sizes are smaller than in "
+            "the real fit and re-applying the CPM rule on every shuffle drops "
+            "some genes the real fit tested. Ticked, the CPM rule is off on "
+            "shuffles; the summed-count rule still applies (a shuffle cannot "
+            "change it).")
+        grid.addWidget(self._cc_refilter_check, r, 1)
+        r += 1
+        self._cal_combo.currentIndexChanged.connect(self._show_cc_settings)
+        self._show_cc_settings()
 
         grid.addWidget(QLabel("DE method:"), r, 0)
         self._de_combo = QComboBox()
@@ -417,6 +460,27 @@ class GeneMAPage(SidebarTabbedPage):
         if_row.addWidget(self._if_check, 1)
         if_row.addWidget(self._if_pct_spin)
         sg.addLayout(if_row)
+
+        # --- Gene-set rules (kosmic.meta_analysis.gene_set) ---
+        # Off by default: a run that sets none pools what it always pooled.
+        self._symbols_check = QCheckBox("Current gene symbols only")
+        self._symbols_check.setToolTip(
+            "Pool only genes named by a current approved symbol (HGNC for "
+            "human, MGI for mouse). Names that are not current symbols -- "
+            "withdrawn or renamed symbols, Ensembl IDs, clone names -- are "
+            "left out. The number removed is logged and saved with the run.")
+        sg.addWidget(self._symbols_check)
+        self._merge_check = QCheckBox(
+            "Leave out genes merged inconsistently across studies")
+        self._merge_check.setToolTip(
+            "Gene-name harmonisation sums two features into one symbol where "
+            "HGNC has merged the loci, but only in studies whose annotation "
+            "carried both. Such a gene is a sum of two features in one study "
+            "and a single feature in another. This leaves those genes out, "
+            "using the same check the Combine step offers when building an "
+            "atlas. Studies with no harmonisation record cannot be checked; "
+            "the log names them.")
+        sg.addWidget(self._merge_check)
 
         self._card_pages['settings'][1].addLayout(sg)
 
@@ -1159,6 +1223,16 @@ class GeneMAPage(SidebarTabbedPage):
         return 'deseq2'
 
     def _run_consensus(self):
+        if (self._exact_run_active and self._worker is not None
+                and self._worker.isRunning()):
+            # The button reads 'Stop' during an exact run: finish the
+            # permutations in progress, keep them, and end the run.
+            self._worker.requestInterruption()
+            self._run_btn.setEnabled(False)
+            self._status_label.setText(
+                "Stopping after the permutations in progress; the finished "
+                "ones are kept.")
+            return
         self.log_message.emit(f"Run clicked (mode={getattr(self, '_mode', '?')})")
         # Dispatch based on mode
         if getattr(self, '_mode', 'exploratory') == 'hypothesis':
@@ -1219,7 +1293,7 @@ class GeneMAPage(SidebarTabbedPage):
                     f"{de_method_key} DE files.")
                 return
 
-        cal_key = ['analytical', 'cc_perm'][self._cal_combo.currentIndex()]
+        cal_key = self._calibration_key()
         self.log_message.emit(f"Exploratory: calibration = {cal_key}")
 
         pb_paths = []
@@ -1236,33 +1310,12 @@ class GeneMAPage(SidebarTabbedPage):
                     "CC permutation requires pseudobulk CSV files.")
                 return
 
-        # Independent filter: shrink the gene universe before pooling so
-        # BH FDR runs on the survivors. Per-dataset DataFrames are
-        # filtered to that universe before being handed to the worker.
-        from kosmic import META_IF_FILTER_STAT
-        from kosmic.meta_analysis.independent_filter import (
-            apply_filter, filter_datasets_to_universe,
-        )
-        if_active = self._if_check.isChecked()
-        if if_active:
-            if_threshold = self._if_pct_spin.value() / 100.0
-            gene_universe = apply_filter(
-                self._datasets,
-                threshold=if_threshold,
-                stat=META_IF_FILTER_STAT,
-                min_studies=self._min_studies_spin.value(),
-            )
-            datasets_for_pool = filter_datasets_to_universe(
-                self._datasets, gene_universe)
-            n_pre = sum(len(d['df']) for d in self._datasets) // max(len(self._datasets), 1)
-            n_post = len(gene_universe)
-            self.log_message.emit(
-                f"Independent filter: {n_post:,} genes pass "
-                f"(threshold = {if_threshold:.0%}, stat = {META_IF_FILTER_STAT}; "
-                f"~{n_pre:,} per-study before filter)"
-            )
-        else:
-            datasets_for_pool = self._datasets
+        # Gene-set rules (independent filter, current symbols, inconsistent
+        # merges): shrink the gene universe before pooling so BH FDR runs
+        # on the survivors.
+        datasets_for_pool = self._apply_gene_set_rules(self._datasets)
+        if datasets_for_pool is None:
+            return
 
         de_dfs = [d['df'] for d in datasets_for_pool]
         labels = [d['name'] for d in datasets_for_pool]
@@ -1277,20 +1330,23 @@ class GeneMAPage(SidebarTabbedPage):
         if self.progress_bar:
             self.progress_bar.setRange(0, 0)
 
-        # CC permutation uses fast NB GLM as the DESeq2 equivalent; Welch passes through.
-        cc_de_method = {
-            'deseq2':    'deseq2',
-            'welch_cpm': 'welch_cpm',
-            'welch_raw': 'welch_raw',
-        }.get(de_method_key, 'deseq2')
+        # The permutation's DE engine: fast or exact for DESeq2 (the
+        # Calibration choice); Welch passes through.
+        cc_de_method, cc_resume_dir = self._cc_engine_settings(
+            cal_key, de_method_key)
 
         params = {
             'method_keys': method_keys,
             'calibration': cal_key,
             'min_studies': self._min_studies_spin.value(),
-            'cc_n_perms': 1000,
+            # The exact engine costs about 3 minutes a permutation per
+            # core, so it defaults to 200 (a null of millions of values);
+            # the fast engine to 1000.
+            'cc_n_perms': 200 if cc_de_method == 'deseq2_exact' else 1000,
             'pseudobulk_paths': pb_paths,
             'de_method':   cc_de_method,
+            'cc_resume_dir': cc_resume_dir,
+            **self._cc_gene_set_params(cal_key, cc_de_method),
             **self._vote_params(method_keys),
         }
 
@@ -1318,6 +1374,162 @@ class GeneMAPage(SidebarTabbedPage):
             on_failed=self._on_failed,
             on_progress=self._on_progress,
         )
+        self._after_worker_start(params)
+
+    def _apply_gene_set_rules(self, datasets):
+        """The datasets restricted to the selected gene-set rules, or None
+        when the rules leave nothing to pool (the user has been told).
+
+        The rules and what each removed are kept for the run's settings
+        file and provenance (`_last_gene_set_record`); the set itself for
+        the permutation null (`_last_gene_set`).
+        """
+        from kosmic.meta_analysis.gene_set import (
+            build_gene_set, current_symbols, inconsistent_merge_genes,
+            study_folders)
+        from kosmic.meta_analysis.independent_filter import (
+            filter_datasets_to_universe)
+        from kosmic.scrna.inspect.detection import detect_species
+
+        threshold = (self._if_pct_spin.value() / 100.0
+                     if self._if_check.isChecked() else None)
+        symbols = exclude = None
+        if self._symbols_check.isChecked():
+            names = [g for d in datasets for g in d['df']['names'].astype(str)[:200]]
+            symbols = current_symbols(detect_species(names))
+        unknown = []
+        if self._merge_check.isChecked():
+            folders = study_folders(datasets, self._project_folder)
+            known = sorted({f for f in folders.values() if f})
+            exclude, unknown = inconsistent_merge_genes(self._project_folder, known)
+            unknown = sorted(set(unknown) | {n for n, f in folders.items() if not f})
+            if unknown:
+                self.log_message.emit(
+                    "Inconsistent merges could not be checked for (no "
+                    f"harmonisation record): {', '.join(unknown)}")
+        genes, record = build_gene_set(
+            datasets, min_studies=self._min_studies_spin.value(),
+            filter_threshold=threshold, symbols=symbols, exclude=exclude,
+            exclude_reason=('merged inconsistently across studies'
+                            if exclude is not None else None))
+        if exclude is not None:
+            record['inconsistent_merge_unchecked'] = unknown
+        self._last_gene_set_record = record
+        self._last_gene_set = genes
+        if genes is None:
+            return datasets
+        for step in record['rules']:
+            self.log_message.emit(
+                f"Gene set, {step['rule']}: {step['n_removed']:,} of "
+                f"{step['n_before']:,} genes removed")
+        self.log_message.emit(f"Gene set: {len(genes):,} genes go to pooling")
+        out = filter_datasets_to_universe(datasets, genes)
+        if not any(len(d['df']) > 0 for d in out):
+            dialogs.warning(
+                self, "Gene Set Is Empty",
+                "The gene-set settings removed every gene. Lower the "
+                "independent filter threshold or untick a setting.")
+            return None
+        return out
+
+    def _show_cc_settings(self, *_):
+        """The permutation settings mean nothing under analytical calibration."""
+        on = self._cal_combo.currentIndex() != 0
+        self._cc_universe_check.setVisible(on)
+        self._cc_refilter_check.setVisible(on)
+
+    def _cc_gene_set_params(self, cal_key, cc_de_method):
+        """The permutation's gene-set settings, for the worker: the pooled
+        gene set as its null universe, and whether shuffles re-apply the CPM
+        rule. Defaults (None, True) under analytical calibration."""
+        if cal_key != 'cc_perm':
+            return {'cc_gene_universe': None, 'cc_refilter': True}
+        universe = (sorted(self._last_gene_set)
+                    if self._cc_universe_check.isChecked()
+                    and getattr(self, '_last_gene_set', None) else None)
+        refilter = not self._cc_refilter_check.isChecked()
+        if not refilter and cc_de_method not in ('deseq2_exact', 'deseq2_vec'):
+            self.log_message.emit(
+                f"The {cc_de_method} permutation engine does not refit each "
+                "study, so the CPM filter setting does not apply to it.")
+            refilter = True
+        return {'cc_gene_universe': universe, 'cc_refilter': refilter}
+
+    def _calibration_key(self):
+        """'analytical' or 'cc_perm' (either permutation engine)."""
+        return 'analytical' if self._cal_combo.currentIndex() == 0 else 'cc_perm'
+
+    def _cc_engine(self):
+        """'fast' or 'exact': the permutation engine the Calibration box names."""
+        return 'exact' if self._cal_combo.currentIndex() == 2 else 'fast'
+
+    def _cc_engine_settings(self, cal_key, de_method_key):
+        """The permutation's DE engine and, for the engines that re-fit each
+        study, their resume folder.
+
+        Both of them fit DESeq2, so they apply to the DESeq2 DE method only;
+        Welch input keeps its own (already fast) engine. The fast choice is
+        the vectorised engine (ADR-019) where scipy's optimiser interface is
+        usable, and the two-group approximation where it is not.
+        """
+        de_engine = {'deseq2': 'deseq2_fast', 'welch_cpm': 'welch_cpm',
+                     'welch_raw': 'welch_raw'}.get(de_method_key, 'deseq2_fast')
+        resume = None
+        folder = None
+        if cal_key == 'cc_perm' and de_engine == 'deseq2_fast':
+            if self._cc_engine() == 'exact':
+                de_engine, folder = 'deseq2_exact', 'cc_permutation'
+            else:
+                from kosmic.meta_analysis.vec_lbfgsb import available
+                if available():
+                    de_engine, folder = 'deseq2_vec', 'cc_permutation_vec'
+                else:
+                    self.log_message.emit(
+                        "The vectorised permutation needs scipy's private "
+                        "L-BFGS-B interface, which this scipy does not provide "
+                        "in the form it expects; using the two-group "
+                        "approximation. The exact engine is still available.")
+        elif cal_key == 'cc_perm' and self._cc_engine() == 'exact':
+            self.log_message.emit(
+                "The exact permutation re-runs DESeq2; with Welch input the "
+                "permutation uses the Welch engine.")
+        if folder and self._project_folder:
+            resume = str(meta_output_dir(
+                self._project_folder, self._output_selection) / folder)
+        return de_engine, resume
+
+    def _cal_tag(self):
+        """The calibration part of a saved run's file name: 'analytical', or
+        the permutation engine that made the run ('ccexact', 'ccvec', 'cc')."""
+        if self._calibration_key() == 'analytical':
+            return 'analytical'
+        engine = (getattr(self, '_last_consensus_params', None) or {}).get('de_method')
+        return {'deseq2_exact': 'ccexact', 'deseq2_vec': 'ccvec'}.get(engine, 'cc')
+
+    def _cc_permutation_record(self):
+        """How the calibration was made, from the calibrated tables."""
+        for df in (self._method_dfs or {}).values():
+            info = getattr(df, 'attrs', {}).get('cc_permutation')
+            if info:
+                return info
+        return None
+
+    def _after_worker_start(self, params):
+        """A re-fitting run (exact or vectorised) is long and resumable: the run
+        button becomes its Stop button."""
+        self._exact_run_active = (
+            params.get('calibration') == 'cc_perm'
+            and params.get('de_method') in ('deseq2_exact', 'deseq2_vec'))
+        if self._exact_run_active:
+            self._run_btn_text = self._run_btn.text()
+            self._run_btn.setText("Stop (finished permutations are kept)")
+            self._run_btn.setEnabled(True)
+
+    def _reset_run_button(self):
+        if self._run_btn_text is not None:
+            self._run_btn.setText(self._run_btn_text)
+        self._exact_run_active = False
+        self._run_btn.setEnabled(True)
 
     def _warn_unadjusted(self, de_dfs):
         """Name the studies left out of the direction counts."""
@@ -1349,7 +1561,18 @@ class GeneMAPage(SidebarTabbedPage):
             self.log_message.emit(message)
 
     def _on_failed(self, message):
-        self._run_btn.setEnabled(True)
+        self._reset_run_button()
+        if getattr(self._worker, 'stopped', False):
+            # A run the user stopped is not a failure.
+            if self.progress_bar:
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(0)
+            text = message.splitlines()[0] if message else 'stopped'
+            self._status_label.setText(f"Stopped: {text}")
+            self.log_message.emit(
+                f"Permutation run {text}. Run again with the same settings "
+                "to continue from the saved permutations.")
+            return
         if self.progress_bar:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
@@ -1360,7 +1583,7 @@ class GeneMAPage(SidebarTabbedPage):
         dialogs.warning(self, "Failed", message)
 
     def _on_finished(self, data):
-        self._run_btn.setEnabled(True)
+        self._reset_run_button()
         if self.progress_bar:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
@@ -1372,6 +1595,7 @@ class GeneMAPage(SidebarTabbedPage):
         self._log_direction_summary()
         self._method_dfs = data['method_dfs']
         self._method_keys = data['method_keys']
+        self._tested_genes = data.get('tested_genes')
         self._log_hksj_none_significant()
 
         # Annotate with Olink panel membership + (hypothesis mode)
@@ -2283,15 +2507,27 @@ class GeneMAPage(SidebarTabbedPage):
                 'pooling_described': '; '.join(
                     describe_pooling_method(k, n_run)
                     for k in (self._method_keys or [])),
-                'calibration': ('cc_perm' if self._cal_combo.currentIndex() == 1
-                                else 'analytical'),
+                'calibration': self._calibration_key(),
+                'calibration_engine': (self._cc_engine()
+                                       if self._calibration_key() == 'cc_perm'
+                                       else None),
+                'cc_permutation': self._cc_permutation_record(),
                 'mode': getattr(self, '_mode', None),
                 'min_studies': self._min_studies_spin.value(),
                 'independent_filter': if_active,
+                'gene_set': getattr(self, '_last_gene_set_record', None),
+                'cc_null_from_gene_set': bool(
+                    (self._last_consensus_params or {}).get('cc_gene_universe')),
+                'cc_refilter': (self._last_consensus_params or {}).get(
+                    'cc_refilter', True),
                 'n_studies': len(self._run_study_names()),
                 'studies': self._run_study_names(),
                 'counts': self._run_counts(),
                 'study_tokens': tokens,
+                # Fisher, Stouffer, gwOP and the permutation null combine
+                # the raw per-study p-values (ADR-018); vote counting and
+                # the direction counts use the adjusted ones.
+                'study_p_value_pooled': 'raw (pvals)',
             }
             params.update(self._direction_params())
             min_votes = (self._last_consensus_params or {}).get('min_votes')
@@ -2323,9 +2559,7 @@ class GeneMAPage(SidebarTabbedPage):
                                          self._run_output_selection)
             output_dir.mkdir(parents=True, exist_ok=True)
             keys_str = '_'.join(self._method_keys) if self._method_keys else 'consensus'
-            cal = ('cc' if self._cal_combo.currentIndex() == 1
-                   else 'analytical')
-            stem = f'consensus_{keys_str}_{cal}'
+            stem = f'consensus_{keys_str}_{self._cal_tag()}'
 
             csv_path = output_dir / f'{stem}.csv'
             export_df = self._meta_df.drop(
@@ -2335,9 +2569,17 @@ class GeneMAPage(SidebarTabbedPage):
             json_path = output_dir / f'{stem}.json'
             self._write_settings_sidecar(json_path)
 
+            # The genes the run tested, for the merged arm's FDR
+            # (kosmic.meta_analysis.gene_set).
+            saved = [csv_path.name, json_path.name]
+            if getattr(self, '_tested_genes', None):
+                from kosmic.meta_analysis.gene_set import gene_set_path, save_gene_set
+                saved.append(save_gene_set(gene_set_path(csv_path),
+                                           self._tested_genes).name)
+
             self.log_message.emit(
                 f"Results saved to {output_dir.relative_to(self._project_folder).as_posix()}: "
-                f"{csv_path.name} + {json_path.name}"
+                + " + ".join(saved)
             )
             from kosmic.meta_analysis.io import mixed_selection_warning
             warning = mixed_selection_warning(self._run_output_selection)
@@ -2354,6 +2596,14 @@ class GeneMAPage(SidebarTabbedPage):
         params = dict(getattr(self, '_last_consensus_params', {}) or {})
         # Drop large transient fields we don't want in the JSON.
         params.pop('pseudobulk_paths', None)
+        # The null's gene set is the run's gene set (saved beside it as
+        # *_genes.csv); a flag says whether the null was restricted to it.
+        params['cc_gene_universe'] = bool(params.get('cc_gene_universe'))
+        params['gene_set'] = getattr(self, '_last_gene_set_record', None)
+        # The settings themselves, so a later pooling (Methods Comparison,
+        # kosmic.comparison.ma) can build the same gene set.
+        params['current_symbols_only'] = self._symbols_check.isChecked()
+        params['drop_inconsistent_merges'] = self._merge_check.isChecked()
 
         if_active = self._if_check.isChecked() if hasattr(self, '_if_check') else False
         params['independent_filter'] = {
@@ -2539,40 +2789,13 @@ class GeneMAPage(SidebarTabbedPage):
                 "None of the pathway genes were found in the DE results.")
             return
 
-        # Independent filter: drop low-cross-study-pct genes from the
-        # pathway-restricted universe before pooling. Recomputes FDR on
-        # the survivors (gain power on the surviving pathway genes).
-        if self._if_check.isChecked():
-            from kosmic import META_IF_FILTER_STAT
-            from kosmic.meta_analysis.independent_filter import (
-                apply_filter, filter_datasets_to_universe,
-            )
-            if_threshold = self._if_pct_spin.value() / 100.0
-            gene_universe = apply_filter(
-                filtered_dfs,
-                threshold=if_threshold,
-                stat=META_IF_FILTER_STAT,
-                min_studies=self._min_studies_spin.value(),
-            )
-            n_pre = sum(len(d['df']) for d in filtered_dfs) // max(len(filtered_dfs), 1)
-            filtered_dfs = filter_datasets_to_universe(
-                filtered_dfs, gene_universe)
-            self.log_message.emit(
-                f"Independent filter: {len(gene_universe):,} genes pass "
-                f"(threshold = {if_threshold:.0%}, stat = {META_IF_FILTER_STAT}; "
-                f"~{n_pre:,} per-study before filter)"
-            )
-            if not any(len(d['df']) > 0 for d in filtered_dfs):
-                self.log_message.emit(
-                    "Hypothesis: aborting -- independent filter removed all genes")
-                dialogs.warning(
-                    self, "Filter Removed All Genes",
-                    "The independent filter removed every gene from the "
-                    "pathway universe. Lower the threshold or untick the "
-                    "filter.")
-                return
+        # Gene-set rules on the pathway-restricted universe before pooling.
+        # FDR is recomputed on the survivors.
+        filtered_dfs = self._apply_gene_set_rules(filtered_dfs)
+        if filtered_dfs is None:
+            return
 
-        cal_key = ['analytical', 'cc_perm'][self._cal_combo.currentIndex()]
+        cal_key = self._calibration_key()
         self.log_message.emit(f"Hypothesis: calibration = {cal_key}")
 
         # CC perm needs pseudobulk paths (same lookup as exploratory mode).
@@ -2610,19 +2833,21 @@ class GeneMAPage(SidebarTabbedPage):
         de_dfs = [d['df'] for d in filtered_dfs]
         labels = [d['name'] for d in filtered_dfs]
 
-        cc_de_method = {
-            'deseq2':    'deseq2',
-            'welch_cpm': 'welch_cpm',
-            'welch_raw': 'welch_raw',
-        }.get(de_method_key, 'deseq2')
+        cc_de_method, cc_resume_dir = self._cc_engine_settings(
+            cal_key, de_method_key)
 
         params = {
             'method_keys': method_keys,
             'calibration': cal_key,
             'min_studies': self._min_studies_spin.value(),
-            'cc_n_perms': 1000,
+            # The exact engine costs about 3 minutes a permutation per
+            # core, so it defaults to 200 (a null of millions of values);
+            # the fast engine to 1000.
+            'cc_n_perms': 200 if cc_de_method == 'deseq2_exact' else 1000,
             'pseudobulk_paths': pb_paths,
             'de_method':   cc_de_method,
+            'cc_resume_dir': cc_resume_dir,
+            **self._cc_gene_set_params(cal_key, cc_de_method),
             **self._vote_params(method_keys),
         }
 
@@ -2643,4 +2868,5 @@ class GeneMAPage(SidebarTabbedPage):
             on_failed=self._on_failed,
             on_progress=self._on_progress,
         )
+        self._after_worker_start(params)
 

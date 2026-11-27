@@ -16,6 +16,7 @@ from .pooling_core import (
     _build_effect_matrices,
     _vectorized_dl,
     _hksj_se,
+    _prediction_interval,
     _build_result_df,
 )
 
@@ -51,8 +52,11 @@ def dl_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0, hksj=False,
         pvals_pooled, n_studies, pathways, study_effects, heterogeneity_i2,
         pooling_method.
         Random-effects reporting columns: tau_squared, Q, p_heterogeneity,
-        pi_lower, pi_upper (95% prediction interval). Fixed-effects fixes
-        tau_squared to 0 and reports the fixed-effects heterogeneity Q.
+        pi_lower, pi_upper (95% prediction interval for a new study:
+        pooled +/- t(k-2) * sqrt(se^2 + tau2), k = studies pooled for the
+        gene). Fixed-effects fixes tau_squared to 0, reports the
+        fixed-effects heterogeneity Q, and gives a normal interval equal to
+        the pooled confidence interval.
     """
     from scipy.stats import chi2
 
@@ -134,11 +138,15 @@ def dl_fast(datasets, min_studies=MIN_STUDIES, proportion_top=1.0, hksj=False,
             p_het = np.where(df_row > 0,
                              1.0 - chi2.cdf(Q_row, df_row),
                              1.0)
-        pi_se = np.sqrt(se_row ** 2 + tau2_row)
-        # HKSJ uses t-distribution for the diamond CI; the prediction
-        # interval still uses the Z multiplier by convention.
-        pi_lower = result['logfoldchanges'].values - 1.96 * pi_se
-        pi_upper = result['logfoldchanges'].values + 1.96 * pi_se
+        lfc_row = result['logfoldchanges'].values.astype(float)
+        if method == 'random':
+            pi_lower, pi_upper = _prediction_interval(lfc_row, se_row, tau2_row, k_row)
+        else:
+            # Fixed effects assumes one common effect, so the interval for a
+            # new study is the pooled confidence interval (normal, tau2 = 0).
+            pi_se = np.sqrt(se_row ** 2 + tau2_row)
+            pi_lower = lfc_row - 1.96 * pi_se
+            pi_upper = lfc_row + 1.96 * pi_se
 
         result['tau_squared'] = tau2_row
         result['Q'] = Q_row

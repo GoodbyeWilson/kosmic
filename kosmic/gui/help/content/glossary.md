@@ -18,7 +18,7 @@ Log-2 fold change. Positive = up in disease, negative = down in disease.
 Leave-one-out: rebuild the consensus on K-1 studies, test whether the held-out study replicates the call.
 
 ### CC permutation
-Case/control label-permutation calibration of pooled p-values.
+Case/control label-permutation calibration of pooled p-values. The exact engine re-runs each study's own DE on every shuffle; the fast engine fits the same model by array code five to ten times faster; an approximation with dispersions fixed from the observed labels is used only where the fast engine cannot run.
 
 ### HKSJ
 Hartung-Knapp-Sidik-Jonkman: small-sample t-based variance correction for random-effects pooling.

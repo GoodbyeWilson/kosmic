@@ -35,10 +35,12 @@ import pandas as pd
 
 from kosmic.paths import meta_output_dir
 
-_GENE_RUN = re.compile(r'^consensus_(.+)_(analytical|cc)\.csv$')
+_GENE_RUN = re.compile(r'^consensus_(.+)_(analytical|ccexact|ccvec|cc)\.csv$')
 _PATHWAY_RUN = re.compile(r'^pathway_ma_(.+)\.csv$')
 _GSEA_LIBRARY = re.compile(r'^gsea_library_results_(.+)\.csv$')
-_CALIBRATION_TEXT = {'analytical': 'analytical', 'cc': 'calibrated'}
+_CALIBRATION_TEXT = {'analytical': 'analytical', 'cc': 'calibrated',
+                     'ccexact': 'calibrated, exact permutation',
+                     'ccvec': 'calibrated, vectorised permutation'}
 
 
 @dataclass(frozen=True)

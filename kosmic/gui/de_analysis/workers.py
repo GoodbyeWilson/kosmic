@@ -448,9 +448,14 @@ class MetaExportWorker(BaseWorker):
 
     def __init__(self, adata, sample_col, condition_col, min_cells,
                  primary_method, primary_moderate, primary_de_results,
-                 output_dir, gse_id, min_counts=0, run_record=None):
+                 output_dir, gse_id, min_counts=0, run_record=None,
+                 covariates=None):
         super().__init__()
         self.run_record = run_record
+        # The sample-level covariates the DE run's design used (ADR-018);
+        # they are written into the pseudobulk file so the exact
+        # case-control permutation can fit the same model.
+        self.covariates = list(covariates or ())
         self.adata = adata
         self.sample_col = sample_col
         self.condition_col = condition_col
@@ -496,7 +501,7 @@ class MetaExportWorker(BaseWorker):
             pb_matrix, pb_sample_df, pb_genes = create_pseudobulk(
                 self.adata, gene_names, self.sample_col, self.condition_col,
                 min_cells=self.min_cells, min_counts=self.min_counts,
-                aggregate='sum')
+                aggregate='sum', covariates=self.covariates)
 
             # Drop the excluded arm. The DE dropped it, so leaving it here
             # hands the consensus case-control permutation and

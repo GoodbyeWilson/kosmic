@@ -89,3 +89,35 @@ def test_the_runs_filter_settings_are_the_pipelines_keywords_and_are_recorded(wo
     ws.gene_universe = 'shared_atlas'
     page._refresh_atlas_genes_option()
     assert page._fdr_scope() == 'shared_atlas'
+
+
+# --- each cell type's meta-analysis gene set (cell-type batch) -------------
+
+def test_batch_takes_each_cell_types_meta_analysis_gene_set(workspace, tmp_path):
+    from kosmic.meta_analysis.gene_set import save_gene_set
+    study_dir = _project(tmp_path, ['TTN', 'MYH7', 'DCN'])
+    proj = study_dir.parent
+    save_gene_set(proj / 'meta_analysis' / 'original_counts' / 'Endothelial_Cell'
+                  / 'consensus_reml_analytical_genes.csv', {'TTN', 'DCN'})
+    ws, page = _page(workspace, study_dir)
+    ws.current_adata = ad.AnnData(
+        X=sp.csr_matrix(np.ones((2, 3), dtype=np.float32)),
+        obs=pd.DataFrame({'cell_type': ['Endothelial Cell', 'Fibroblast']},
+                         index=['c0', 'c1']),
+        var=pd.DataFrame(index=['TTN', 'MYH7', 'DCN']))
+    assert not page.meta_genes_check.isChecked()          # off by default
+    assert page._batch_fdr_genes('cell_type', None) is None
+    page.meta_genes_check.setChecked(True)
+    assert ws.fdr_meta_gene_sets
+    # Fibroblast has no meta-analysis, so it is left out (and skipped).
+    assert page._batch_fdr_genes('cell_type', None) == {'Endothelial Cell': {'TTN', 'DCN'}}
+    assert "meta-analysis gene set" in page._gene_universe_record()
+    # With the shared-atlas option too, the two lists intersect.
+    page._refresh_atlas_genes_option()
+    page.atlas_genes_check.setChecked(True)
+    assert page._batch_fdr_genes('cell_type', ['Endothelial Cell']) == {
+        'Endothelial Cell': {'TTN', 'DCN'}}
+    # Recorded under a name the Methods Comparison does not read as
+    # pathway gene sets.
+    assert page._fdr_scope(batch=True) == 'shared_atlas_and_meta_genes'
+    assert page._fdr_scope() == 'shared_atlas'

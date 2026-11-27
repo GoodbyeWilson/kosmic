@@ -23,7 +23,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from kosmic.comparison.agreement import Rule
+from kosmic.comparison.agreement import Rule, gene_characteristics
 from kosmic.comparison.bundle import ComparisonBundle
 from kosmic.comparison.design import Design, load_design
 from kosmic.comparison.ma import MA_METHODS, load_ma
@@ -169,14 +169,19 @@ def run_comparison(project, selection: Selection, methods, rule: Rule, *,
 
     ma_ids = [m for m in methods if m in MA_METHODS]
     ma_settings = {}
+    reml = None
     if ma_ids:
         results = load_ma(project, selection.path, list(selection.names), ma_ids,
-                          de_method=de_method, counts=selection.counts, progress=say)
+                          de_method=de_method, counts=selection.counts,
+                          studies=selection.studies, progress=say)
         for mid, res in results.items():
             sources[mid] = {'source': res.source, 'note': res.note,
                             'path': str(res.path) if res.path else None}
             ma_settings = res.settings
             tables.append(to_standard(mid, res.table, rule.alpha))
+        if 'ma_reml' in results:
+            reml = results['ma_reml'].table
+    genes = _gene_characteristics(project, selection, de_method, reml, rule, say)
 
     params = {'counts': selection.counts, 'cell_type': selection.cell_type,
               'studies': selection.studies, 'dataset_names': list(selection.names),
@@ -185,7 +190,28 @@ def run_comparison(project, selection: Selection, methods, rule: Rule, *,
               'sources': sources, 'meta_analysis_settings': ma_settings,
               'method_labels': {m: METHOD_LABELS[m] for m in methods}, **merged_info}
     bundle = ComparisonBundle.build(pd.concat(tables, ignore_index=True), rule, params,
-                                    methods)
+                                    methods, genes=genes)
     folder = bundle.save(project, selection.path)
     say(f"Comparison saved in {folder}")
     return bundle
+
+
+def _gene_characteristics(project, selection: Selection, de_method: str, reml, rule: Rule,
+                          say) -> Optional[pd.DataFrame]:
+    """Per gene, from the studies' own DE tables and REML
+    (``agreement.gene_characteristics``). REML is pooled with the comparison's
+    meta-analysis settings when it was not among the methods compared; None
+    when the studies' tables cannot be read."""
+    from kosmic.meta_analysis.saved import study_tables
+
+    tables, missing = study_tables(project, list(selection.names), de_method=de_method,
+                                   counts=selection.counts)
+    if missing or not tables:
+        say("Per-gene study summaries left out: no readable DE table for "
+            + ', '.join(missing or ['any study']) + '.')
+        return None
+    if reml is None:
+        reml = load_ma(project, selection.path, list(selection.names), ['ma_reml'],
+                       de_method=de_method, counts=selection.counts,
+                       studies=selection.studies)['ma_reml'].table
+    return gene_characteristics(tables, reml, rule.alpha)
