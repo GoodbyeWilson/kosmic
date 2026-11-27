@@ -56,18 +56,6 @@ font_scale     = 1.0   # extra multiplier on the app font ladder (1.0 = as desig
 embedding_max_points = 100000  # cells drawn on the interactive UMAP/t-SNE; a random subset above this (0 = all).
                                # Legend counts, hover and exported figures still use every cell.
 
-[de.independent_filtering]
-# Optional pct-cells filter on the enrichment page. OFF by default: it
-# re-runs BH on a reduced universe *after* the DE test, so the
-# enrichment page would disagree with the DE page about which genes are
-# significant (4,106 vs 3,275 on the DCM EC data). Bourgon-style
-# independent filtering applies before testing, on a statistic
-# independent of the test statistic under the null -- DESeq2 already
-# does that internally on mean normalised counts. Left available as a
-# sensitivity analysis rather than the default.
-enrichment_default_pct    = 0.05   # threshold when the user switches it on
-enrichment_on_by_default  = false  # ORA runs on the DE-significant list as exported
-
 [meta_analysis.independent_filtering]
 # Cross-study Bourgon-style filter on the consensus meta-analysis page.
 # Drops genes below an aggregate pct-expressing threshold before pooling

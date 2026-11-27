@@ -42,9 +42,7 @@ class _Ws:
 
 def _de_page(de):
     from kosmic.gui.de_analysis.pages.enrichment_page import EnrichmentPage
-    page = EnrichmentPage(_Ws(de))
-    page._method_combo.setCurrentIndex(page._method_combo.findData('gsea'))
-    return page
+    return EnrichmentPage(_Ws(de))
 
 
 def _capture(monkeypatch):
@@ -62,51 +60,38 @@ def _capture(monkeypatch):
     return seen
 
 
-def test_the_de_page_opens_on_gsea_of_hallmark_ranked_by_the_statistic(app):
+def test_the_de_page_runs_gsea_of_hallmark_ranked_by_the_statistic(app):
     page = _de_page(DE)
-    assert page._method_combo.currentData() == 'gsea'
     assert page._library_combo.currentData() == 'MSigDB_Hallmark_2026.2_Hs'
-    assert [page._rank_combo.itemData(i) for i in range(page._rank_combo.count())] == \
-        ['statistic', 'logfoldchanges']
-    assert not page._rank_combo.isHidden()
     assert page._rank_by() == 'statistic'
-    page._method_combo.setCurrentIndex(page._method_combo.findData('ora'))
-    assert page._rank_combo.isHidden()      # ORA does not rank genes
+    assert not hasattr(page, '_method_combo') and not hasattr(page, '_rank_combo')
+    assert 'Wald statistic' in page._about.text()
 
 
-def test_gsea_ranks_by_the_test_statistic_when_chosen(app, monkeypatch):
+def test_gsea_ranks_by_the_test_statistic(app, monkeypatch):
     seen = _capture(monkeypatch)
     page = _de_page(DE)
-    page._rank_combo.setCurrentIndex(page._rank_combo.findData('statistic'))
     page._run_gsea()
     assert seen['rank'] == {'A': 1.0, 'B': -6.0, 'C': 4.0}
-    assert page._enrichment_params('gsea')['rank_by'] == 'statistic'
-
-
-def test_gsea_ranks_by_log2fc_when_that_is_chosen(app, monkeypatch):
-    seen = _capture(monkeypatch)
-    page = _de_page(DE)
-    page._rank_combo.setCurrentIndex(page._rank_combo.findData('logfoldchanges'))
-    page._run_gsea()
-    assert seen['rank'] == {'A': 3.0, 'B': -0.5, 'C': 0.2}
+    params = page._enrichment_params()
+    assert params['method'] == 'gsea' and params['rank_by'] == 'statistic'
+    assert (params['gsea_min_size'], params['gsea_max_size']) == (15, 500)
 
 
 def test_a_result_without_the_statistic_is_not_ranked_by_something_else(app, monkeypatch):
     seen = _capture(monkeypatch)
     page = _de_page(DE.drop(columns='statistic'))
-    page._rank_combo.setCurrentIndex(page._rank_combo.findData('statistic'))
     page._run_gsea()
     assert 'rank' not in seen
     assert "no 'statistic' column" in page._status_label.text()
     assert page._run_btn.isEnabled()
 
 
-def test_the_meta_step_offers_no_choice_and_ranks_by_the_pooled_z(app):
+def test_the_meta_step_ranks_by_the_pooled_z(app):
     from kosmic.gui.meta_analysis.pages.enrichment_step import MetaEnrichmentPage
     p = MetaEnrichmentPage()
-    p._method_combo.setCurrentIndex(p._method_combo.findData('gsea'))
     assert p._rank_by() == 'z_stat'
-    assert p._rank_combo.isHidden()
+    assert 'pooled z-statistic' in p._about.text()
 
 
 def test_the_meta_step_saves_gsea_under_the_run_it_ranked(app, tmp_path):

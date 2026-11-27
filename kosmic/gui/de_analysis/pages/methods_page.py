@@ -400,7 +400,12 @@ class MethodsPage(SimplePage):
                       'gsea': 'Preranked GSEA'}.get(p.get('method'), str(p.get('method')))
             found = (f"{p.get('n_terms_sig', 0):,} of {p.get('n_terms', 0):,} terms at "
                      f"FDR < {p.get('fdr', 0):g}")
-            if p.get('method') != 'gsea':
+            if p.get('method') == 'gsea':
+                ranked = f"ranked by {p['rank_by']}; " if p.get('rank_by') else ""
+                sizes = (f"sets of {p['gsea_min_size']}-{p['gsea_max_size']} genes; "
+                         if p.get('gsea_min_size') else "")
+                found = ranked + sizes + found
+            else:
                 found = f"{p.get('n_genes_in', 0):,} genes in; " + found
             items.append((f"{method}:", f"{p.get('library', '')}; {found}"))
         return items

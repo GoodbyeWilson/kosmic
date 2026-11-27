@@ -111,10 +111,10 @@ def test_a_study_enrichment_run_is_recorded_with_its_library(app, tmp_path):
                                       'fdr': [0.01, 0.2], 'pvals_pooled': [0.001, 0.1]}))
     ws.h5ad_path = str(tmp_path / 'S.h5ad')          # a study, so the run is recorded
     page = EnrichmentPage(ws)
-    page._results_df = pd.DataFrame({'Term': ['T1', 'T2'], 'FDR': [0.01, 0.5]})
+    page._results_df = pd.DataFrame({'names': ['T1', 'T2'], 'pvals_adj': [0.01, 0.5]})
     _, page._library_source = libraries.load_library('MSigDB_Hallmark_2026.2_Hs')
 
-    page._record_study_enrichment('ora')
+    page._record_study_enrichment()
     (entry,) = provenance.load(tmp_path)['stages']
     assert entry['stage'] == 'enrichment'
     assert entry['params']['n_terms_sig'] == 1

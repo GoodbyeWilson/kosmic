@@ -11,7 +11,15 @@ from kosmic.de import saved  # noqa: E402
 from kosmic.paths import de_downstream_dir  # noqa: E402
 from tests import test_downstream_per_run as per_run  # noqa: E402
 
-ORA, _choose = per_run.ORA, per_run._choose
+ORA, GSEA, _choose = per_run.ORA, per_run.GSEA, per_run._choose
+
+
+def _saved_ora(ws, df):
+    """An over-representation result as earlier versions of the Enrichment
+    page left it: held by the workspace and saved in the chosen run's folder,
+    which Figure Export still reads."""
+    saved.save_enrichment(ws.enrichment_page._results_folder(), df)
+    ws.enrichment_results = df
 app, ws = per_run.app, per_run.ws          # the stage 3 fixtures
 
 
@@ -26,7 +34,7 @@ def _source(w):
 
 def test_figure_export_names_and_reads_the_run_chosen_in_the_bar(ws):
     _choose(ws, 'Fibroblast')
-    ws.enrichment_page._annotate_direction_and_display(ORA.assign(Term=['fibro', 'T2']))
+    _saved_ora(ws, ORA.assign(Term=['fibro', 'T2']))
     st = _source(ws).de_state()
     assert st.run_label == 'Fibroblast (DE workspace)'
     assert list(st.enrichment_results['Term']) == ['fibro', 'T2']
@@ -36,9 +44,9 @@ def test_figure_export_names_and_reads_the_run_chosen_in_the_bar(ws):
 def test_a_saved_run_picked_in_figure_export_is_not_given_the_workspaces_results(ws):
     # Endothelial Cell has a saved ORA run; the DE workspace shows Fibroblast's.
     _choose(ws, 'Endothelial Cell')
-    ws.enrichment_page._annotate_direction_and_display(ORA.assign(Term=['endo', 'T2']))
+    _saved_ora(ws, ORA.assign(Term=['endo', 'T2']))
     _choose(ws, 'Fibroblast')
-    ws.enrichment_page._annotate_direction_and_display(ORA.assign(Term=['fibro', 'T2']))
+    _saved_ora(ws, ORA.assign(Term=['fibro', 'T2']))
     src = _source(ws)
     endo = next(r for r in saved.list_gene_de_runs(ws.project_dir)
                 if r.cell_type == 'Endothelial Cell')
@@ -98,13 +106,13 @@ def test_the_methods_sheet_describes_the_chosen_run_and_names_the_others(ws):
     page = ws.enrichment_page
     for ct in ('Endothelial Cell', 'Fibroblast'):
         _choose(ws, ct)
-        page._annotate_direction_and_display(ORA)
-        page._record_study_enrichment('ora')
+        page._show_gsea_results(GSEA)
+        page._record_study_enrichment()
     ws.switch_tab(4)                                    # Methods (discovery)
     text = ws.methods_page._text.toPlainText()
     assert 'Results for:' in text and 'Fibroblast' in text
     assert 'Cell-type column:' in text and 'annotation' in text
-    assert 'Over-representation:' in text and '2 genes in' in text
+    assert 'Preranked GSEA:' in text and 'ranked by statistic' in text
     assert 'Endothelial Cell (original counts): enrichment' in text
 
     _choose(ws, 'Endothelial Cell')                     # refreshed for the new run

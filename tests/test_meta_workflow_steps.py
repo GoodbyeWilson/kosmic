@@ -93,14 +93,6 @@ def test_meta_enrichment_hosts_the_de_page(enrich):
     assert isinstance(enrich, EnrichmentPage)
 
 
-def test_meta_enrichment_offers_both_methods(enrich):
-    """The old meta card was ORA-only; GSEA was the substantive gap."""
-    ep = enrich
-    methods = [ep._method_combo.itemData(i)
-               for i in range(ep._method_combo.count())]
-    assert set(methods) == {"ora", "gsea"}
-
-
 def test_meta_enrichment_has_the_full_library_list(enrich):
     """The DE page's libraries: the bundled MSigDB Hallmark (human and
     mouse) and the eight Enrichr libraries."""
@@ -111,9 +103,9 @@ def test_meta_ranks_gsea_by_pooled_z(enrich):
     assert enrich.rank_column == "z_stat"
 
 
-def test_de_still_ranks_gsea_by_log2fc(app):
+def test_de_ranks_gsea_by_the_wald_statistic(app):
     """The seam must not change the DE page's own behaviour."""
-    assert EnrichmentPage.rank_column == "logfoldchanges"
+    assert EnrichmentPage.rank_column == "statistic"
 
 
 def test_pooled_columns_are_translated(app, meta_df):
@@ -135,35 +127,6 @@ def test_meta_enrichment_clears(app, meta_df):
 
 # -- direction filter (the meta-only feature, now shared) -------------
 
-def test_direction_filter_splits_up_and_down(app, meta_df):
-    p = MetaEnrichmentPage()
-    p.set_meta_results(meta_df)
-    ep = p
-    counts = {}
-    for i in range(ep._direction_combo.count()):
-        ep._direction_combo.setCurrentIndex(i)
-        study, _, _ = ep._get_sig_genes()
-        lfc = meta_df.set_index("names").loc[study, "logfoldchanges"]
-        counts[ep._direction_combo.currentData()] = (
-            int((lfc > 0).sum()), int((lfc < 0).sum()))
-    assert counts["up"][1] == 0
-    assert counts["down"][0] == 0
-    assert counts["both"] == (counts["up"][0], counts["down"][1])
-
-
-def test_direction_filter_leaves_background_alone(app, meta_df):
-    """The ORA denominator must stay the whole tested universe."""
-    p = MetaEnrichmentPage()
-    p.set_meta_results(meta_df)
-    ep = p
-    backgrounds = []
-    for i in range(ep._direction_combo.count()):
-        ep._direction_combo.setCurrentIndex(i)
-        _, bg, _ = ep._get_sig_genes()
-        backgrounds.append(len(bg))
-    assert len(set(backgrounds)) == 1
-
-
 # -- enrichment provenance ---------------------------------------------
 #
 # ORA results are normalised to an 'FDR' column; the fgsea summary
@@ -175,27 +138,6 @@ def _recorded_enrichment(folder, selection):
     from kosmic.meta_analysis.io import meta_provenance_dir
     return provenance.last_stage(meta_provenance_dir(folder, selection),
                                  "meta_enrichment")["params"]
-
-
-def test_ora_record_counts_significant_terms(app, meta_df, tmp_path):
-    p = MetaEnrichmentPage()
-    p.set_project_folder(tmp_path, selection="Cardiomyocyte")
-    p.set_meta_results(meta_df)
-    p._p_thresh.setValue(0.05)
-    ora = pd.DataFrame({
-        "Term": ["a", "b", "c"],
-        "P_value": [1e-5, 1e-3, 0.5],
-        "FDR": [3e-5, 0.01, 0.6],
-        "Fold_Enrichment": [3.0, 2.0, 1.0],
-        "Gene_Count": [3, 2, 1],
-        "Genes": [["G1", "G2", "G3"], ["G4", "G5"], ["G6"]],
-    })
-    p._on_enrichr_finished((ora, "done"))
-    rec = _recorded_enrichment(tmp_path, "Cardiomyocyte")
-    assert rec["method"] == "ora"
-    assert rec["n_terms"] == 3
-    assert rec["n_terms_sig"] == 2
-    assert rec["results_file"] is None
 
 
 def test_gsea_record_counts_significant_terms(app, meta_df, tmp_path):
@@ -341,28 +283,10 @@ def test_run_and_export_sit_outside_the_accordion(enrich):
     assert "Export CSV..." in outside
 
 
-def test_method_and_library_share_one_card(enrich):
-    """Picking GSEA rewrites the library list, so they are one decision."""
-    from kosmic.gui.shared.widgets import StageSummaryCard
-
-    holder = None
-    for card in enrich.findChildren(StageSummaryCard):
-        if enrich._method_combo in card.findChildren(type(enrich._method_combo)):
-            holder = card
-    assert holder is not None
-    widgets = holder.findChildren(type(enrich._method_combo))
-    assert enrich._library_combo in widgets
-
-
-def test_ora_and_gsea_offer_the_same_libraries(enrich):
-    enrich._method_combo.setCurrentIndex(0)          # ORA
-    ora_n = enrich._library_combo.count()
-    enrich._method_combo.setCurrentIndex(1)          # GSEA
-    gsea_n = enrich._library_combo.count()
-    assert ora_n == gsea_n == 10
-    assert not enrich._fdr_spin.isEnabled()          # GSEA is threshold-free
-    enrich._method_combo.setCurrentIndex(0)
-    assert enrich._fdr_spin.isEnabled()
+def test_the_library_has_a_card_of_its_own(enrich):
+    """GSEA is the only method, so the library is the one choice of its card."""
+    assert enrich._library_combo in enrich._library_card.findChildren(
+        type(enrich._library_combo))
 
 
 def _summary(card):
@@ -418,7 +342,7 @@ def test_no_control_demands_a_wildly_oversized_card(enrich):
     enrich.resize(1400, 900)
     enrich.show()
     try:
-        for key in ("genes", "method", "terms"):
+        for key in ("library", "sets"):
             enrich._accordion.toggle(key)
             enrich.grab()  # force a real layout pass
             card = getattr(enrich, f"_{key}_card")

@@ -279,22 +279,6 @@ def test_reopening_a_saved_run_sets_the_de_page_to_its_rule(app, tmp_path):
     assert page.fc_filter.value() == 0.25 and page.ws.significance[2] is True
 
 
-def test_enrichment_starts_from_the_runs_rule_once_per_run(app):
-    from types import SimpleNamespace
-
-    from kosmic.gui.de_analysis.pages.enrichment_page import EnrichmentPage
-    page = SimpleNamespace(_fdr_spin=_spin(0.05), _lfc_spin=_spin(0.25),
-                           ws=SimpleNamespace(significance=(0.05, 0.0, False)))
-    EnrichmentPage._sync_significance(page)
-    assert page._lfc_spin.value() == 0.0
-    page._lfc_spin.setValue(1.0)                          # typed by the user
-    EnrichmentPage._sync_significance(page)
-    assert page._lfc_spin.value() == 1.0                  # kept: same run
-    page.ws.significance = (0.05, 0.5, False)             # another run shown
-    EnrichmentPage._sync_significance(page)
-    assert page._lfc_spin.value() == 0.5
-
-
 def test_figure_gate_starts_from_the_runs_rule(app, tmp_path):
     from kosmic.de import saved
     from kosmic.gui.figure_export.pages.volcano import VolcanoPage

@@ -21,6 +21,9 @@ GENES = [f'G{i}' for i in range(6)]
 ORA = pd.DataFrame({'Term': ['T1', 'T2'], 'P_value': [0.001, 0.2], 'FDR': [0.01, 0.4],
                     'Fold_Enrichment': [3.0, 1.1], 'Gene_Count': [2, 1], 'Term_Size': [20, 30],
                     'Genes': ['G0, G1', 'G1']})
+GSEA = pd.DataFrame({'names': ['T1', 'T2'], 'nes': [2.0, -1.2], 'es': [0.6, -0.4],
+                     'pvals': [0.001, 0.2], 'pvals_adj': [0.01, 0.4],
+                     'leading_edge': ['G0;G1', 'G1']})
 
 
 @pytest.fixture(scope='module')
@@ -86,34 +89,34 @@ def _choose(w, name):
 
 # -- Enrichment ----------------------------------------------------------------------
 
-def test_ora_runs_of_two_cell_types_are_saved_separately(ws):
+def test_gsea_runs_of_two_cell_types_are_saved_separately(ws):
+    from kosmic.de.fgsea import GSEA_LIBRARY_RESULTS_FILE, load_fgsea_results
     page = ws.enrichment_page
     for ct, term in (('Endothelial Cell', 'endo'), ('Fibroblast', 'fibro')):
         _choose(ws, ct)
-        page._annotate_direction_and_display(ORA.assign(Term=[term, 'T2']))
+        page._show_gsea_results(GSEA.assign(names=[term, 'T2']))
     study = ws.project_dir
     for ct, term in (('Endothelial Cell', 'endo'), ('Fibroblast', 'fibro')):
-        back = saved.read_enrichment(de_downstream_dir(study, 'original_counts', ct))
-        assert list(back['Term']) == [term, 'T2']
+        back = load_fgsea_results(
+            de_downstream_dir(study, 'original_counts', ct) / GSEA_LIBRARY_RESULTS_FILE)
+        assert list(back['names']) == [term, 'T2']
     # Nothing is written to the flat folder of earlier versions.
-    assert not (de_pathway_scoring_dir(study) / saved.ENRICHMENT_RESULTS_FILE).exists()
+    assert not (de_pathway_scoring_dir(study) / GSEA_LIBRARY_RESULTS_FILE).exists()
 
 
 def test_choosing_another_run_clears_and_shows_its_saved_results(ws):
     page = ws.enrichment_page
-    page._method_combo.setCurrentIndex(page._method_combo.findData('ora'))  # GSEA is the default
     _choose(ws, 'Endothelial Cell')
-    page._annotate_direction_and_display(ORA)
+    page._show_gsea_results(GSEA)
     assert page._table.rowCount() == 2
 
     _choose(ws, 'Fibroblast')                       # nothing saved for it
     assert page._table.rowCount() == 0
-    assert ws.enrichment_results is None
-    assert 'No saved run' in page._status_label.text()
+    assert 'No saved GSEA' in page._status_label.text()
 
     _choose(ws, 'Endothelial Cell')                 # its saved run comes back
     assert page._table.rowCount() == 2
-    assert list(ws.enrichment_results['Term']) == ['T1', 'T2']
+    assert list(page._results_df['names']) == ['T1', 'T2']
     assert 'Endothelial Cell' in page._status_label.text()
 
 
@@ -121,8 +124,8 @@ def test_enrichment_provenance_keeps_one_entry_per_cell_type(ws):
     page = ws.enrichment_page
     for ct in ('Endothelial Cell', 'Fibroblast', 'Endothelial Cell'):
         _choose(ws, ct)
-        page._annotate_direction_and_display(ORA)
-        page._record_study_enrichment('ora')
+        page._show_gsea_results(GSEA)
+        page._record_study_enrichment()
     stages = [st for st in provenance.load(ws.h5ad_path.parent)['stages']
               if st['stage'] == 'enrichment']
     # The rerun of Endothelial Cell replaced its entry; Fibroblast's stays.
