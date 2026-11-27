@@ -1,6 +1,7 @@
-# Enrichment Page (DE Discovery mode): over-representation analysis of
-# significant DE genes via GO (local elim) or Enrichr-based ORA, run
-# separately for upregulated and downregulated genes.
+# Enrichment Page (DE Discovery mode): over-representation analysis (ORA)
+# of the significant DE genes, or preranked GSEA of every gene, against a
+# gene-set library (bundled MSigDB Hallmark, or one downloaded from Enrichr,
+# which includes the GO libraries).
 #
 # In the DE workspace the page works on the gene DE run chosen in the run
 # bar (ADR-016): it saves its results in that run's folder and, when
@@ -30,13 +31,6 @@ from kosmic import (
     DEFAULT_FDR, DEFAULT_LFC_THRESHOLD,
     DE_ENRICH_IF_DEFAULT_PCT, DE_ENRICH_IF_ON_BY_DEFAULT,
 )
-
-# Libraries grouped by source
-_GO_LIBRARIES = [
-    ("GO Biological Process", "GO_BP"),
-    ("GO Molecular Function", "GO_MF"),
-    ("GO Cellular Component", "GO_CC"),
-]
 
 # Published libraries bundled with KOSMIC, used exactly as released
 # (kosmic.reference.pathways.libraries). Listed before the Enrichr ones.
@@ -249,21 +243,9 @@ class EnrichmentPage(SidebarTabbedPage):
 
         method_lay.addWidget(QLabel("Library:"))
         self._library_combo = NoScrollComboBox()
-        self._library_combo.currentIndexChanged.connect(self._on_library_changed)
         method_lay.addWidget(self._library_combo)
-        self._populate_libraries(gsea_only=False)
+        self._populate_libraries()
 
-        self._algo_label = QLabel("Algorithm:")
-        method_lay.addWidget(self._algo_label)
-        self._algo_combo = NoScrollComboBox()
-        self._algo_combo.addItem("Fisher + BH", "fisher")
-        self._algo_combo.addItem("elim (KOSMIC's own, under review)", "elim")
-        self._algo_combo.setToolTip(
-            "Fisher + BH: the standard over-representation test with FDR correction.\n"
-            "elim: KOSMIC's own variant, not topGO's elim. It removes a significant\n"
-            "term's genes from every later term and keeps the full background, so it\n"
-            "is more conservative than topGO's. Under review.")
-        method_lay.addWidget(self._algo_combo)
         method_lay.addStretch()
 
         # -- Term filters ---------------------------------------------
@@ -316,8 +298,6 @@ class EnrichmentPage(SidebarTabbedPage):
             w.setVisible(False)
         terms_lay.addStretch()
 
-        self._on_library_changed()
-
         for key, title, icon in (
                 ('genes', "Genes tested", "dataset"),
                 ('method', "Method", "bar-chart-2"),
@@ -356,7 +336,6 @@ class EnrichmentPage(SidebarTabbedPage):
         for _sig in (self._method_combo.currentIndexChanged,
                      self._library_combo.currentIndexChanged,
                      self._direction_combo.currentIndexChanged,
-                     self._algo_combo.currentIndexChanged,
                      self._fdr_spin.valueChanged,
                      self._lfc_spin.valueChanged,
                      self._p_thresh.valueChanged,
@@ -396,21 +375,10 @@ class EnrichmentPage(SidebarTabbedPage):
         dir_note.setWordWrap(True)
         self.content_layout.addWidget(dir_note)
 
-    def _on_library_changed(self):
-        """Show/hide GO-specific algorithm selector."""
-        lib_id = self._library_combo.currentData()
-        is_go = lib_id is not None and lib_id in ("GO_BP", "GO_MF", "GO_CC")
-        self._algo_label.setVisible(is_go)
-        self._algo_combo.setVisible(is_go)
-
-    def _populate_libraries(self, gsea_only):
-        """Fill the library combo. Preranked GSEA needs fetchable gene-set
-        libraries, so the local-GO methods are offered for ORA only."""
+    def _populate_libraries(self):
+        """Fill the library combo: the same libraries serve ORA and GSEA."""
         self._library_combo.blockSignals(True)
         self._library_combo.clear()
-        if not gsea_only:
-            for display, lib_id in _GO_LIBRARIES:
-                self._library_combo.addItem(f"GO: {display}", lib_id)
         for display, lib_id in _BUNDLED_LIBRARIES:
             self._library_combo.addItem(f"MSigDB: {display}", lib_id)
         for display, lib_id in _ENRICHR_LIBRARIES:
@@ -426,7 +394,6 @@ class EnrichmentPage(SidebarTabbedPage):
     def _on_method_changed(self):
         """Switch between ORA and preranked GSEA."""
         is_gsea = self._method_combo.currentData() == "gsea"
-        self._populate_libraries(gsea_only=is_gsea)
         offer_rank = is_gsea and bool(self.RANK_CHOICES)
         self._rank_label.setVisible(offer_rank)
         self._rank_combo.setVisible(offer_rank)
@@ -441,7 +408,6 @@ class EnrichmentPage(SidebarTabbedPage):
         self._fdr_spin.setEnabled(not is_gsea)
         self._lfc_spin.setEnabled(not is_gsea)
         self._run_btn.setText("Run GSEA" if is_gsea else "Run Enrichment")
-        self._on_library_changed()
 
     def _scoped_de_results(self):
         """
@@ -512,13 +478,7 @@ class EnrichmentPage(SidebarTabbedPage):
                      f"{self._gsea_min_size.value()}-{self._gsea_max_size.value()} genes")
         else:
             terms = f"FDR<{self._p_thresh.value():g}, min {self._min_genes.value()} genes"
-        # Not isVisible(): that is False whenever the page itself is not
-        # shown, so the algorithm silently vanished from the summary.
-        # The library is what decides whether an algorithm applies.
-        algo = ("GO " + self._algo_combo.currentData()
-                if self._library_combo.currentData() in ("GO_BP", "GO_MF", "GO_CC")
-                else "")
-        self._terms_card.set_summary([terms, algo])
+        self._terms_card.set_summary([terms, ""])
 
     def _update_gene_count(self):
         """Update the live count of significant genes with direction breakdown."""
@@ -623,28 +583,15 @@ class EnrichmentPage(SidebarTabbedPage):
         if not lib_id:
             return
 
-        if lib_id in ("GO_BP", "GO_MF", "GO_CC"):
-            ontology = lib_id.split("_")[1]
-            from kosmic.gui.de_analysis.workers import GOEnrichmentWorker
-            self._worker = GOEnrichmentWorker(
-                study_genes=study,
-                background_genes=background,
-                ontology=ontology,
-                method=self._algo_combo.currentData(),
-                alpha=self._p_thresh.value(),
-                min_genes=self._min_genes.value(),
-            )
-            on_finished_cb = self._on_go_finished
-        else:
-            from kosmic.gui.de_analysis.workers import EnrichrORAWorker
-            self._worker = EnrichrORAWorker(
-                study_genes=study,
-                background_genes=background,
-                library_name=lib_id,
-                alpha=self._p_thresh.value(),
-                min_genes=self._min_genes.value(),
-            )
-            on_finished_cb = self._on_enrichr_finished
+        from kosmic.gui.de_analysis.workers import EnrichrORAWorker
+        self._worker = EnrichrORAWorker(
+            study_genes=study,
+            background_genes=background,
+            library_name=lib_id,
+            alpha=self._p_thresh.value(),
+            min_genes=self._min_genes.value(),
+        )
+        on_finished_cb = self._on_enrichr_finished
 
         if self.ws.progress_bar:
             self.ws.progress_bar.setRange(0, 100)
@@ -668,23 +615,6 @@ class EnrichmentPage(SidebarTabbedPage):
     def _on_worker_pct(self, pct):
         if self.ws.progress_bar:
             self.ws.progress_bar.setValue(pct)
-
-    def _on_go_finished(self, payload):
-        results_df, message = payload
-        self._run_btn.setEnabled(True)
-        if self.ws.progress_bar:
-            self.ws.progress_bar.setValue(0)
-        self._status_label.setText(message)
-        self.ws.log_message.emit(message)
-        self.ws.status_message.emit(message)
-        norm = self._normalise_go(results_df)
-        self._annotate_direction_and_display(norm)
-        self._library_source = {
-            'library': self._library_combo.currentData(),
-            'provider': 'Gene Ontology (annotation files bundled with KOSMIC)',
-            'accessed': _now(),
-        }
-        self._record_study_enrichment('go')
 
     def _on_enrichr_finished(self, payload):
         results_df, message = payload
@@ -786,9 +716,9 @@ class EnrichmentPage(SidebarTabbedPage):
     # Provenance
     # ------------------------------------------------------------------
 
-    # The adjusted p-value column of each method's results table: ORA and
-    # GO are normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
-    _ADJ_P_COLUMN = {'go': 'FDR', 'ora': 'FDR', 'gsea': 'pvals_adj'}
+    # The adjusted p-value column of each method's results table: ORA's
+    # is normalised to 'FDR', the fgsea summary keeps 'pvals_adj'.
+    _ADJ_P_COLUMN = {'ora': 'FDR', 'gsea': 'pvals_adj'}
 
     def _enrichment_params(self, method) -> dict:
         """What one enrichment run used and found, for the provenance."""
@@ -1053,32 +983,6 @@ class EnrichmentPage(SidebarTabbedPage):
     # ------------------------------------------------------------------
     # Normalise results to common format
     # ------------------------------------------------------------------
-
-    def _normalise_go(self, df):
-        import pandas as pd
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        norm = pd.DataFrame()
-        norm['Term'] = df.get('GO_ID', '').astype(str) + ' ' + df.get('Term', '').astype(str)
-        norm['P_value'] = df['P_value']
-        if 'P_adjusted' in df.columns:
-            norm['FDR'] = df['P_adjusted']
-        else:
-            # elim p-values are not multiplicity-adjusted (the topGO
-            # convention). The column holds the p-value significance is
-            # judged on; the label says which it is.
-            norm['FDR'] = df['P_value']
-            norm.attrs['significance_label'] = 'elim P (uncorrected)'
-        norm['Fold_Enrichment'] = df.get('Fold_Enrichment', 1.0)
-        norm['Gene_Count'] = df.get('Genes', df.get('Gene_Count', '')).apply(
-            lambda x: len(x) if isinstance(x, list) else 0
-        )
-        norm['Term_Size'] = df.get('Term_Size', norm['Gene_Count'])
-        norm['Genes'] = df.get('Genes', '').apply(
-            lambda x: ', '.join(x) if isinstance(x, list) else str(x)
-        )
-        return norm
 
     def _normalise_enrichr(self, df):
         import pandas as pd

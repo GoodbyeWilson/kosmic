@@ -247,9 +247,8 @@ what genome-wide discovery misses:
 
 Over-representation and gene-set enrichment on discovery results use
 Fisher's exact test against the tested-gene background and preranked
-GSEA respectively; Gene Ontology enrichment uses Fisher's exact test
-with BH correction by default (KOSMIC's *elim* option is its own
-variant, not topGO's, and is under review).
+GSEA respectively, against the chosen library (the Gene Ontology
+libraries among them).
 
 ## Gene identity across studies
 

@@ -6,13 +6,9 @@ Identify over-represented pathways among your significant DE genes.
 
 Enrichment analysis tests whether your significant DE genes are enriched for membership in known biological pathways or gene sets. This is the interpretation endpoint of discovery mode.
 
-## GO enrichment
-
-Gene Ontology enrichment uses local GO annotations. 'Fisher + BH' (the default) is the standard over-representation test with FDR correction. 'elim' is KOSMIC's own variant, not topGO's elim algorithm: it removes a significant term's genes from every term tested after it, not only from its parent terms, and keeps the full background, so it is more conservative. It is under review.
-
 ## Enrichr libraries
 
-Over-representation analysis against pathway databases downloaded from Enrichr (KEGG, Reactome, MSigDB Hallmark, WikiPathways, etc.). Uses Fisher's exact test with BH correction.
+Over-representation analysis against pathway databases downloaded from Enrichr (KEGG, Reactome, MSigDB Hallmark, WikiPathways, the Gene Ontology libraries, etc.). Uses Fisher's exact test with BH correction.
 
 Enrichr libraries are downloaded each time the enrichment runs. Enrichr keeps no version history, so a library served under the same name could change between two runs.
 

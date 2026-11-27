@@ -20,8 +20,8 @@ def _terms(fdr):
 
 def test_enrichment_axis_names_the_statistic():
     fig = create_enrichment_bar_plot(_terms([0.001, 0.01]),
-                                     significance_label='elim P (uncorrected)')
-    assert fig.axes[0].get_xlabel() == '−log10 elim P (uncorrected)'
+                                     significance_label='P (uncorrected)')
+    assert fig.axes[0].get_xlabel() == '−log10 P (uncorrected)'
     plt.close(fig)
 
 
@@ -109,11 +109,11 @@ def test_enrichment_dot_plot():
                        'Gene_Count': [14, 120, 30]})
     terms, note = top_terms(df)
     assert list(terms['Term']) == ['tricarboxylic acid cycle', 'b'] and note is None
-    fig = create_enrichment_dot_plot(df, significance_label='elim P (uncorrected)')
+    fig = create_enrichment_dot_plot(df, significance_label='P (uncorrected)')
     ax = fig.axes[0]
     assert ax.get_xlabel() == 'Fold enrichment'
     assert ax.get_yticklabels()[0].get_text() == 'tricarboxylic acid cycle'   # top row
-    assert 'elim P' in fig.axes[1].get_ylabel()
+    assert 'P (uncorrected)' in fig.axes[1].get_ylabel()
     plt.close(fig)
 
 

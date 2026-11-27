@@ -11,7 +11,8 @@ any departure from it is either removed or shown to the user and documented.
 | 21c57a1 | Stouffer, Fisher and gwOP floored each study's p at 1/n genes and dropped p = 1 studies. Removed: each p is used as it is (1e-300 only to keep an underflow finite). SumRank's z now takes its sign from SumRank's own direction. |
 | 168564c | DE-page GSEA can rank by the Wald statistic (log2FC / SE), the usual choice for DESeq2 results. Meta GSEA files are saved per pooling run, so methods no longer overwrite each other's. |
 | 46e1f80 | REML I² is tau² / (tau² + s²) with the REML tau², as metafor computes it (was the DerSimonian-Laird (Q - df) / Q). Methods Comparison takes Stouffer's direction from its z. Preranked GSEA tests sets with 15-500 genes in the ranking (GSEA's defaults; was a hidden 3-5000), now a setting. `bh_fdr` counts a p of 0 instead of giving it FDR 1. |
-| (with this file) | SumRank top-50%: the Monte Carlo p is (count + 1) / (n + 1) (Phipson & Smyth 2010), never 0. Before, a gene could get p = 0, which BH, now counting p = 0, would have called significant. HKSJ and REML comments corrected (the truncation is metafor's `adhoc`). Help: GO elim no longer described as topGO's; the claim that DL and REML coincide for two studies removed. |
+| ee00a55 | SumRank top-50%: the Monte Carlo p is (count + 1) / (n + 1) (Phipson & Smyth 2010), never 0. Before, a gene could get p = 0, which BH, now counting p = 0, would have called significant. HKSJ and REML comments corrected (the truncation is metafor's `adhoc`). Help: GO elim no longer described as topGO's; the claim that DL and REML coincide for two studies removed. |
+| (with this) | Local GO enrichment removed: its "elim" was not topGO's (it removed a significant term's genes from every later term, not only its ancestors, and never shrank the background). GO stays available as the Enrichr GO libraries, with the same Fisher + BH ORA and preranked GSEA as every library. `kosmic/de/go_enrichment.py`, the 37 MB of bundled GO files and the goatools dependency are gone. |
 
 ## Still to fix (Kirk to decide how)
 
@@ -19,7 +20,6 @@ None of these is used in the DCM paper.
 
 | # | Area | Where | Problem | Textbook version |
 |---|---|---|---|---|
-| 1 | GO enrichment, "elim" (was the default) | `kosmic/de/go_enrichment.py` | Not topGO's elim: removes a significant term's genes from every later term, not only from its ancestors, and never shrinks the background, so it is far too conservative. The help described topGO's version. | topGO elim (Alexa et al. 2006). |
 | 2 | Pathway meta-analysis, "DESeq2 + VIF (recommended)" | `kosmic/gui/meta_analysis/pages/pathway_ma_page.py:164-184`, `PATHWAY_VIF_RHO` | Home-made: a fixed inter-gene correlation of 0.1, not CAMERA's estimated one. If it cannot run it falls back to Welch while still recording "DESeq2 + VIF". Mouse gene names never match the human sets. Help page is a TODO. | CAMERA (Wu & Smyth 2012) with the correlation estimated from the data, or a per-donor pathway score. |
 | 3 | HKSJ option | `kosmic/meta_analysis/pooling/pooling_core.py:256` | Truncates q at 1, which is metafor's `test="adhoc"`, while the code and labels say `knha`. | Either plain HKSJ (`knha`), or keep the truncation and call it the ad hoc variant (Knapp & Hartung 2003). |
 | 4 | gwOP | `kosmic/meta_analysis/pooling/gwop.py:61-165` | The per-gene weights cancel out. The null CDF lookup grid (10,001 points, clipped at 1e-15) makes the strongest p-values about 10^17 times too small. The permutation engine's gwOP differs from the analytical one. | Li & Tseng 2011 adaptively weighted / ordered p as published, with an exact or permutation null. |
@@ -33,8 +33,6 @@ None of these is used in the DCM paper.
 
 ## Meanwhile in the app
 
-- GO enrichment: the default algorithm is now Fisher + BH; elim is listed as
-  "KOSMIC's own, under review", with the difference in its tooltip and help.
 - Pathway meta-analysis: "DESeq2 + VIF (KOSMIC's own, under review)", no longer
   "recommended"; the tooltip gives the fixed correlation of 0.1.
 - HKSJ: the tooltip says it is the ad hoc (truncated) variant.

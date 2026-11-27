@@ -10,7 +10,7 @@
 # - 'PathwayScoringWorker' -- pathway-level DE on pseudobulk scores
 # - 'PathwayDataWorker'   -- loads the gene sets a pathway run needs
 # - 'CellTypeBatchWorker' -- the per-cell-type batch run ('kosmic.de.batch')
-# - 'GOEnrichmentWorker', 'EnrichrORAWorker' -- enrichment of a gene list
+# - 'EnrichrORAWorker' -- over-representation of a gene list
 # - 'SpilloverWorker'     -- the ambient-spillover diagnostic for one pathway
 # - 'MetaExportWorker'    -- writes the DE result + pseudobulk where the
 #                            Meta-Analysis workspace will find them
@@ -636,48 +636,6 @@ class CellTypeBatchWorker(BaseWorker):
                    + (f", {n_failed} failed" if n_failed else "")
                    + (" (cancelled)" if self._cancelled else ""))
         return runs, summary, message
-
-
-class GOEnrichmentWorker(BaseWorker):
-    """
-    Worker thread for GO term enrichment (elim algorithm).
-
-    Wraps src.gene_sets.go_enrichment.run_enrichment().
-    Emits 'finished_ok' with '(results_df, message)'.
-    """
-
-    def __init__(self, study_genes, background_genes,
-                 ontology='BP', method='elim', alpha=DEFAULT_FDR,
-                 min_genes=5):
-        super().__init__()
-        self.study_genes = study_genes
-        self.background_genes = background_genes
-        self.ontology = ontology
-        self.method = method
-        self.alpha = alpha
-        self.min_genes = min_genes
-
-    def _run(self):
-        from kosmic.de.go_enrichment import run_enrichment
-
-        df = run_enrichment(
-            study_genes=self.study_genes,
-            background_genes=self.background_genes,
-            ontology=self.ontology,
-            method=self.method,
-            alpha=self.alpha,
-            min_genes=self.min_genes,
-            progress_callback=self._on_progress,
-        )
-
-        n_sig = (df['P_value'] < self.alpha).sum() if not df.empty else 0
-        message = (
-            f"GO enrichment complete: {n_sig} significant terms "
-            f"from {len(df)} tested ({self.ontology}, {self.method})")
-        return (df, message)
-
-    def _on_progress(self, msg):
-        self.progress.emit(msg)
 
 
 class EnrichrORAWorker(BaseWorker):

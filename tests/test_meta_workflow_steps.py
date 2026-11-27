@@ -102,9 +102,9 @@ def test_meta_enrichment_offers_both_methods(enrich):
 
 
 def test_meta_enrichment_has_the_full_library_list(enrich):
-    """Seven hardcoded Enrichr libraries became the DE page's eleven, plus
-    the bundled MSigDB Hallmark, human and mouse."""
-    assert enrich._library_combo.count() == 13
+    """The DE page's libraries: the bundled MSigDB Hallmark (human and
+    mouse) and the eight Enrichr libraries."""
+    assert enrich._library_combo.count() == 10
 
 
 def test_meta_ranks_gsea_by_pooled_z(enrich):
@@ -341,7 +341,7 @@ def test_run_and_export_sit_outside_the_accordion(enrich):
     assert "Export CSV..." in outside
 
 
-def test_method_library_and_algorithm_share_one_card(enrich):
+def test_method_and_library_share_one_card(enrich):
     """Picking GSEA rewrites the library list, so they are one decision."""
     from kosmic.gui.shared.widgets import StageSummaryCard
 
@@ -352,15 +352,14 @@ def test_method_library_and_algorithm_share_one_card(enrich):
     assert holder is not None
     widgets = holder.findChildren(type(enrich._method_combo))
     assert enrich._library_combo in widgets
-    assert enrich._algo_combo in widgets
 
 
-def test_method_still_constrains_the_library_list(enrich):
+def test_ora_and_gsea_offer_the_same_libraries(enrich):
     enrich._method_combo.setCurrentIndex(0)          # ORA
     ora_n = enrich._library_combo.count()
     enrich._method_combo.setCurrentIndex(1)          # GSEA
     gsea_n = enrich._library_combo.count()
-    assert ora_n == 13 and gsea_n == 10
+    assert ora_n == gsea_n == 10
     assert not enrich._fdr_spin.isEnabled()          # GSEA is threshold-free
     enrich._method_combo.setCurrentIndex(0)
     assert enrich._fdr_spin.isEnabled()
@@ -379,17 +378,6 @@ def test_every_card_summarises_itself(enrich):
     for card in enrich.findChildren(StageSummaryCard):
         lines = _summary(card)
         assert lines and any(ln.strip() for ln in lines)
-
-
-def test_algorithm_shows_without_the_page_being_visible(enrich):
-    """isVisible() is False off-screen, which hid it from the summary."""
-    enrich._method_combo.setCurrentIndex(0)
-    for i in range(enrich._library_combo.count()):
-        if enrich._library_combo.itemData(i) == "GO_BP":
-            enrich._library_combo.setCurrentIndex(i)
-            break
-    # Fisher + BH is the default GO algorithm (elim is KOSMIC's own variant).
-    assert "GO fisher" in " ".join(_summary(enrich._terms_card))
 
 
 def test_meta_gsea_saves_into_the_selection_folder(enrich, tmp_path):

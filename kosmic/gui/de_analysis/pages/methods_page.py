@@ -395,6 +395,7 @@ class MethodsPage(SimplePage):
         items = []
         for st in self._run_stages(self._load_provenance(), 'enrichment'):
             p = st.get('params') or {}
+            # 'go': KOSMIC's former local GO test, kept to describe older runs.
             method = {'go': 'GO over-representation', 'ora': 'Over-representation',
                       'gsea': 'Preranked GSEA'}.get(p.get('method'), str(p.get('method')))
             found = (f"{p.get('n_terms_sig', 0):,} of {p.get('n_terms', 0):,} terms at "

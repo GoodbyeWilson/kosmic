@@ -1,8 +1,6 @@
 """Sentinel tests for DE-side enrichment + pathway scoring features.
 
 - ORA (Fisher's exact + BH FDR over a gene-set library)
-- GO elim enrichment (run-and-shape sentinel; correctness against
-  goatools reference is implicit via shared dependency).
 """
 from __future__ import annotations
 
@@ -76,39 +74,6 @@ def test_ora_case_collision_counts_one_background_gene():
     assert row['Term_Size'] == 10
     assert row['Gene_Count'] == 3
     assert row['Genes'] == ['G0', 'G1', 'G2']
-
-
-# ----------------------------------------------------------------------
-# GO elim enrichment: shape sentinel using bundled reference data.
-# Correctness against goatools is implicit -- we delegate to that
-# library; this test just proves the pipeline wires up and produces
-# defensible output for a planted gene set.
-# ----------------------------------------------------------------------
-def test_go_elim_enrichment_recovers_glycolysis_term():
-    """A pure glycolysis gene set must surface a glycolysis GO term as
-    significant. This validates the elim algorithm + bundled gene2go +
-    obo data are all wired up correctly."""
-    from kosmic.de.go_enrichment import run_enrichment
-
-    study = [
-        'HK1', 'HK2', 'GPI', 'PFKL', 'PFKM', 'ALDOA', 'TPI1',
-        'GAPDH', 'PGK1', 'PGAM1', 'ENO1', 'PKM', 'LDHA',
-    ]
-    background = study + [
-        'TP53', 'BRCA1', 'EGFR', 'MYC', 'KRAS', 'PTEN',
-        'AKT1', 'MTOR', 'BAX', 'BCL2', 'CDK4', 'RB1',
-    ]
-
-    result = run_enrichment(study, background, ontology='BP',
-                             method='elim', alpha=0.05, min_genes=5)
-
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) > 0
-    assert {'GO_ID', 'Term', 'P_value'} <= set(result.columns)
-    # The top-ranked term for a pure glycolysis input must be glycolysis.
-    top = result.sort_values('P_value').iloc[0]
-    assert 'glycolysis' in top['Term'].lower()
-    assert top['P_value'] < 0.01
 
 
 # ----------------------------------------------------------------------

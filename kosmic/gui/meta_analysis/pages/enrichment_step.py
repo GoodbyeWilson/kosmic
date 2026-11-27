@@ -117,10 +117,6 @@ class MetaEnrichmentPage(EnrichmentPage):
     # that the Methods step renders, which the DE workspace has no part
     # in. Both finish handlers funnel through _record_enrichment.
 
-    def _on_go_finished(self, payload):
-        super()._on_go_finished(payload)
-        self._record_enrichment('go')
-
     def _on_enrichr_finished(self, payload):
         super()._on_enrichr_finished(payload)
         self._record_enrichment('ora')
