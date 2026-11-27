@@ -46,7 +46,6 @@ PATHWAY_MIN_GENES            = _cfg["pathway_scoring"]["min_genes"]
 PATHWAY_MIN_COVERAGE         = _cfg["pathway_scoring"]["min_coverage"]
 PATHWAY_BORDERLINE_COVERAGE  = _cfg["pathway_scoring"]["borderline_coverage"]
 PATHWAY_VIF_RHO              = _cfg["pathway_scoring"]["vif_rho"]
-PATHWAY_N_CTRL_GENES         = _cfg["pathway_scoring"]["n_ctrl_genes"]
 
 # GWAS overlap
 GWAS_LP_THRESHOLD            = _cfg["gwas"]["lp_threshold"]

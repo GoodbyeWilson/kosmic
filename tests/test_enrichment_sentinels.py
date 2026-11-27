@@ -141,7 +141,7 @@ def test_pathway_detection_and_coverage_gates():
     assert bad['status'].startswith('dropped') and bad['detected'] == 1
 
 
-def test_pathway_scores_counts_layer_routes_and_vst_runs():
+def test_pathway_scores_counts_layer_routes():
     a, genes = _toy_pathway_adata()
     pw = {'PW1': genes[:20], 'PW2': genes[20:40]}
 
@@ -155,11 +155,10 @@ def test_pathway_scores_counts_layer_routes_and_vst_runs():
     # The decontaminated layer is a different count source -> different score.
     assert not np.allclose(raw_sm, dec_sm)
 
-    vst_sm, _, vnames = compute_pathway_scores(
-        a, pw, 'sample', 'condition', min_cells=1, normalization='vst')
-    assert vnames == names
-    assert vst_sm.shape == raw_sm.shape
-    assert np.all(np.isfinite(vst_sm)) and vst_sm.min() > 0  # log2-like scale
+    # The other normalisations earlier versions offered are refused.
+    with pytest.raises(ValueError):
+        compute_pathway_scores(a, pw, 'sample', 'condition', min_cells=1,
+                               normalization='vst')
 
 
 def test_pseudobulk_expression_matrix_matches_method():
@@ -206,25 +205,6 @@ def test_expression_matrix_zero_floor():
     assert np.allclose(cpm['G5'].to_numpy(float), 0.0)
     assert np.allclose(dsq['G5'].to_numpy(float), 0.0)
     assert (vst['G5'].to_numpy(float) > 0).all()  # VST floor is non-zero
-
-
-def test_pathway_gene_standardization():
-    """The gene-standardised VST scorer z-scores each gene across donors, so
-    the module score is a different, mean-zero (equal-weight) quantity -- not
-    the log2 VST score."""
-    a, genes = _toy_pathway_adata()
-    pw = {'PW1': genes[:20]}
-
-    plain, _, _ = compute_pathway_scores(
-        a, pw, 'sample', 'condition', min_cells=1, normalization='vst')
-    std, _, _ = compute_pathway_scores(
-        a, pw, 'sample', 'condition', min_cells=1, normalization='vst',
-        standardize_genes=True)
-
-    assert std.shape == plain.shape
-    assert not np.allclose(plain, std)
-    # Per-gene z-scoring makes the per-donor module score mean-zero.
-    assert abs(float(std[:, 0].mean())) < 1e-6
 
 
 # ----------------------------------------------------------------------

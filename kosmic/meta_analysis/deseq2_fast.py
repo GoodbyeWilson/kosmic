@@ -38,7 +38,13 @@ _IRLS_TOL = 1e-8
 # Size Factors (median-of-ratios)
 
 def _compute_size_factors(counts: np.ndarray) -> np.ndarray:
-    """Median-of-ratios size factor estimation (DESeq2 method).
+    """DESeq2's median-of-ratios size factors, computed by pydeseq2 itself
+    (pydeseq2.preprocessing.deseq2_norm): each gene's geometric mean over
+    the samples is the reference, genes with a zero in any sample are left
+    out, and a sample's size factor is its median ratio to the reference.
+
+    Earlier versions computed their own variant, which treated zeros as
+    missing and so used genes DESeq2 leaves out.
 
     Parameters
     ----------
@@ -48,21 +54,21 @@ def _compute_size_factors(counts: np.ndarray) -> np.ndarray:
     Returns
     -------
     size_factors : ndarray (n_samples,)
+
+    Raises
+    ------
+    ValueError
+        When the size factors are undefined: no gene is free of zeros, or a
+        sample has no positive count. DESeq2 then stops too, pointing to its
+        'poscounts' estimator; no other estimator is substituted here.
     """
-    with np.errstate(divide='ignore'):
-        log_counts = np.log(counts.astype(np.float64))
-    log_counts[~np.isfinite(log_counts)] = np.nan
-
-    log_geo_means = np.nanmean(log_counts, axis=0)
-
-    finite_mask = np.isfinite(log_geo_means)
-    if finite_mask.sum() == 0:
-        totals = counts.sum(axis=1).astype(np.float64)
-        return totals / np.exp(np.mean(np.log(totals)))
-
-    log_ratios = log_counts[:, finite_mask] - log_geo_means[finite_mask]
-    size_factors = np.exp(np.nanmedian(log_ratios, axis=1))
-    size_factors = np.maximum(size_factors, 1e-8)
+    from pydeseq2.preprocessing import deseq2_norm
+    _, size_factors = deseq2_norm(np.asarray(counts, dtype=np.float64))
+    size_factors = np.asarray(size_factors, dtype=np.float64)
+    if not np.all(np.isfinite(size_factors) & (size_factors > 0)):
+        raise ValueError(
+            "DESeq2 size factors are undefined for these counts: every gene has "
+            "a zero in some sample, or a sample has no counts.")
     return size_factors
 
 
