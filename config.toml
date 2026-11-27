@@ -20,7 +20,6 @@ gene_detection_pct   = 0.05   # gene kept in a pathway score if detected in >= t
 min_genes            = 3      # drop pathway if fewer than N genes survive coverage
 min_coverage         = 0.30   # drop pathway below this fraction of detected annotated genes
 borderline_coverage  = 0.50   # below this -> orange warning in coverage table
-vif_rho              = 0.1    # CAMERA-style inter-gene correlation correction
 
 [gwas]
 lp_threshold = 7.30103   # -log10(5e-8), genome-wide significance
