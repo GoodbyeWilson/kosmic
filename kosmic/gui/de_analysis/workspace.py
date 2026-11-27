@@ -176,12 +176,18 @@ class DEWorkspace(QWidget):
     def _setup_ui(self):
         layout = borderless(QVBoxLayout, self)
 
-        # The run bar above every page (ADR-016); shown by refresh_run_bar.
+        # The run bar (ADR-016); shown by refresh_run_bar, which puts it at
+        # the top of the shown page's results area, above its tabs: it
+        # chooses which finished run the results show, which is not a
+        # setting of the next run, so it stays out of the setup sidebar.
+        # A page without a results area (Methods) has it above the page.
         from kosmic.gui.de_analysis.run_bar import RunBar
+        self._top_layout = layout
         self.run_bar = RunBar(self)
         self.run_bar.run_chosen.connect(self.select_run)
         self.run_bar.hide()
         layout.addWidget(self.run_bar)
+        self._run_bar_layout = layout
 
         self.stack = QStackedWidget()
 
@@ -451,12 +457,24 @@ class DEWorkspace(QWidget):
             self.gene_de_page._try_load_previous_results()
         self.refresh_run_bar()
 
+    def _place_run_bar(self) -> None:
+        """Move the run bar to the top of the shown page's results area."""
+        page = self.stack.currentWidget()
+        target = getattr(page, 'content_layout', None) or self._top_layout
+        if target is self._run_bar_layout and target.indexOf(self.run_bar) == 0:
+            return
+        self._run_bar_layout.removeWidget(self.run_bar)
+        target.insertWidget(0, self.run_bar)
+        self._run_bar_layout = target
+
     def refresh_run_bar(self) -> None:
         """Show the bar on the pages after gene DE once there is a run, and
         write its line from the chosen run."""
         from kosmic.gui.de_analysis.run_bar import detail_text
         run = self.shown_run
         show = bool(self.cell_type_runs) and self.stack.currentIndex() in self._RUN_BAR_PAGES
+        if show:
+            self._place_run_bar()
         self.run_bar.setVisible(show)
         if run is None:
             self.run_bar.set_detail("")

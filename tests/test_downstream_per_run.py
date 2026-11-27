@@ -197,3 +197,20 @@ def test_saved_runs_are_listed_when_the_study_finishes_loading_on_gene_de(app, t
     setup._on_loaded((_adata(), str(study / 'processed_data' / 'S1.h5ad'), ''))
     assert sorted(r.cell_type for r in w.cell_type_runs) == ['Endothelial Cell', 'Fibroblast']
     assert not w.run_bar.isHidden()
+
+
+def test_the_run_bar_sits_above_each_pages_results(ws):
+    """'Results for' chooses which finished run is shown, so it heads the
+    results area of each page, not the setup sidebar; Methods has no
+    results area and keeps it above the page."""
+    gene_de, enrichment = ws.gene_de_page, ws.enrichment_page
+    pages = ws.get_page_map()
+    ws.switch_tab(pages.index(3))                      # Gene DE
+    assert gene_de.content_layout.indexOf(ws.run_bar) == 0
+    ws.switch_tab(pages.index(5))                      # Enrichment
+    assert enrichment.content_layout.indexOf(ws.run_bar) == 0
+    assert gene_de.content_layout.indexOf(ws.run_bar) == -1
+    ws.switch_tab(pages.index(6))                      # Methods
+    assert ws._top_layout.indexOf(ws.run_bar) == 0
+    ws.switch_tab(pages.index(3))
+    assert gene_de.content_layout.indexOf(ws.run_bar) == 0
