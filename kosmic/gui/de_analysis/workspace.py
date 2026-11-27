@@ -500,7 +500,12 @@ class DEWorkspace(QWidget):
         self.h5ad_path = None
         self._manual_load = False
         gc.collect()
+        self._sync_run_buttons()
         return had
+
+    def _sync_run_buttons(self):
+        if hasattr(self, 'gene_de_page'):
+            self.gene_de_page.sync_run_buttons()
 
     def set_adata(self, adata):
         """Receive adata from the scRNA pipeline."""
@@ -511,6 +516,7 @@ class DEWorkspace(QWidget):
         # scRNA's copy can differ from the file (unsaved steps), so results
         # made from it are not kept when the file is loaded later.
         self.results_dataset = None
+        self._sync_run_buttons()
         if adata is not None:
             self.mark_step_complete(0)  # Step 0 = Load Data
             self.status_message.emit(

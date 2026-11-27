@@ -283,6 +283,9 @@ class GeneDEPage(SidebarTabbedPage):
         # The run bar's choice (ADR-016): show that run here and give its
         # table to the steps after gene DE.
         self.ws.run_changed.connect(self._apply_shown_run)
+        # A study finishes loading in the background, often after this page
+        # was opened: the Run buttons follow it, not only page activation.
+        self.ws.dataset_loaded.connect(lambda _path: self.sync_run_buttons())
 
     def _setup_ui(self):
         left_layout = self.sidebar_layout
@@ -1250,12 +1253,18 @@ class GeneDEPage(SidebarTabbedPage):
 
     # --- Activation ---
 
+    def sync_run_buttons(self):
+        """Enable the Run buttons when a dataset is loaded and no DE is running."""
+        running = self.de_worker is not None and self.de_worker.isRunning()
+        ready = self.ws.current_adata is not None and not running
+        self.run_btn.setEnabled(ready)
+        self.batch_btn.setEnabled(ready)
+        self._ge_run_btn.setEnabled(ready)
+
     def on_activated(self):
         """Called when page becomes visible. Auto-loads previous results if available."""
         has_data = self.ws.current_adata is not None
-        self.run_btn.setEnabled(has_data)
-        self.batch_btn.setEnabled(has_data)
-        self._ge_run_btn.setEnabled(has_data)
+        self.sync_run_buttons()
         self._refresh_study_control()
         self._refresh_atlas_genes_option()
         self._refresh_dataset_card()
