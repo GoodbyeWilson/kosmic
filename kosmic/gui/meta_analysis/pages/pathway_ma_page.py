@@ -1,9 +1,14 @@
 # Pathway-Level Meta-Analysis Page
 #
-# Single-method pooling at the pathway level. The user picks one
-# pooling method (DL, HKSJ, REML, Stouffer's Z, sign test); the page
-# runs it across studies and BH-corrects. Multi-method "consensus"
-# (max-FDR across methods) is only on the gene-level page.
+# Pools each study's Pathway DE results across studies. In each study the
+# Pathway DE page (DE workspace) scores every donor (DESeq2-normalised log2
+# expression averaged over a pathway's genes) and compares disease and
+# control donors with Welch's t-test, giving each pathway an effect (the
+# difference in mean score, log2) and its standard error. Here those
+# effects are pooled with REML (or DL) random effects, as genes are, and
+# BH-corrected. Only tables made with that score and test are pooled; a
+# table saved by an earlier version (which may have used one of the
+# scoring methods since removed) is named, not pooled.
 
 
 from PyQt6.QtWidgets import (
@@ -27,10 +32,9 @@ from kosmic.gui.shared.widgets import (
 from kosmic.gui.shared import run_worker
 from kosmic.numerical import neg_log10
 from kosmic.paths import meta_output_dir
-from kosmic import DEFAULT_FDR, MIN_STUDIES, PATHWAY_VIF_RHO
-from kosmic.meta_analysis.direction import (
-    add_wald_pvalues, count_significant_conflicts,
-)
+from kosmic import DEFAULT_FDR
+from kosmic.meta_analysis.direction import count_significant_conflicts
+from kosmic.de.pathway_scoring import SCORING_METHOD
 
 
 _RESULT_COLUMNS = [
@@ -45,9 +49,8 @@ _RESULT_COLUMNS = [
     Column("I^2",       "heterogeneity_i2", ".2f"),
 ]
 
-# Shown only when the per-study tables carry adjusted p-values: the
-# pathway-DE results, or the Wald p-values added to the DESeq2+VIF
-# summaries.
+# Shown when the per-study tables carry adjusted p-values (the Pathway DE
+# results do).
 _DIRECTION_COLUMNS = [
     Column("Up",       "n_up",               "d",
            tooltip="Studies with study FDR < 0.05 and log2FC > 0"),
@@ -58,243 +61,46 @@ _DIRECTION_COLUMNS = [
 ]
 
 
-# Available pooling methods. (key, display, tooltip)
-_PATHWAY_METHODS = [
-    ('dl', 'DL', 'DerSimonian-Laird random effects (effect-size pooling)'),
-    ('hksj', 'HKSJ', 'DL with Hartung-Knapp t-CI (more conservative for small k)'),
-    ('reml', 'REML', 'Restricted Maximum Likelihood random effects'),
-    ('stouffer', "Stouffer's Z",
-     "Precision-weighted combination of per-study p-values"),
-    ('sign', 'Sign Test',
-     "Counts studies showing same effect direction (binomial null)"),
-]
-
-
-# ---------------------------------------------------------------------------
-# Pooling helpers (module-level)
-# ---------------------------------------------------------------------------
-
-
-def _pool_advanced(base_df, adv_method):
-    """
-    Run DL+HKSJ, REML, or Stouffer across all pathways at once.
-
-    Returns a Series of p-values indexed by 'base_df.index' (pathway name).
-    Falls back to the base pooled p-value if a pathway has fewer than 2
-    valid per-study effects.
-    """
-    out = pd.Series(index=base_df.index, dtype=float)
-
-    # Each advanced method goes through a single vectorised pool_fn call
-    # across all pathways. Same input shape, different pool function.
-    if adv_method == 'hartung_knapp':
-        from kosmic.meta_analysis.pooling.dl import dl_fast
-        def pool_fn(per_study):
-            return dl_fast(per_study, min_studies=MIN_STUDIES, hksj=True)
-    elif adv_method == 'reml':
-        from kosmic.meta_analysis.pooling.reml import reml_fast
-        def pool_fn(per_study):
-            return reml_fast(per_study, min_studies=MIN_STUDIES)
-    elif adv_method == 'stouffer':
-        from kosmic.meta_analysis.pooling.stouffer import stouffer_fast
-        def pool_fn(per_study):
-            return stouffer_fast(per_study, min_studies=MIN_STUDIES, weighted=True)
-    else:
-        return base_df['pvals_pooled'].copy()
-
-    per_study = _build_per_study_dfs(base_df)
-    if not per_study:
-        return base_df['pvals_pooled'].copy()
-    result = pool_fn(per_study)
-    pval_map = dict(zip(result['names'], result['pvals_pooled']))
-    for name in base_df.index:
-        out[name] = float(np.clip(
-            pval_map.get(name, base_df.loc[name, 'pvals_pooled']),
-            1e-300, 1.0))
-    return out
-
-
-def _build_per_study_dfs(base_df):
-    """
-    Transpose base_df's per-pathway study_effects lists into per-study
-    DataFrames suitable for dl_fast / reml_fast / stouffer_fast. One
-    DataFrame per dataset, each holding a (pathway → logfc, se, pval) row
-    for every pathway that dataset contributed to. DL/REML ignore pvals
-    at proportion_top=1.0; Stouffer uses them.
-    """
-    study_records = {}  # dataset -> list of {names, logfc, se, pval}
-    for name, row in base_df.iterrows():
-        effects_data = row.get('study_effects', [])
-        if not isinstance(effects_data, list):
-            continue
-        for d in effects_data:
-            logfc = d.get('logfc', np.nan)
-            se = d.get('se', np.nan)
-            if not (np.isfinite(logfc) and np.isfinite(se) and se > 0):
-                continue
-            pval = d.get('pval', np.nan)
-            if not np.isfinite(pval) or pval <= 0 or pval >= 1:
-                pval = 0.5  # neutral fallback for downstream pool fns
-            ds = d.get('dataset', 'unknown')
-            study_records.setdefault(ds, []).append({
-                'names': name, 'logfc': logfc, 'se': se, 'pval': pval,
-            })
-
-    per_study = []
-    for ds, records in study_records.items():
-        per_study.append(pd.DataFrame({
-            'names': [r['names'] for r in records],
-            'logfoldchanges': [r['logfc'] for r in records],
-            'se': [r['se'] for r in records],
-            'pvals': [r['pval'] for r in records],
-            'dataset': [ds] * len(records),
-        }))
-    return per_study
+def usable_tables(datasets):
+    """Split the per-study tables into those made with the pathway score and
+    test the meta-analysis pools, and the names of the others (saved by an
+    earlier version, or with another scoring method), which are not pooled."""
+    usable = [d for d in datasets if d.get('scoring_method') == SCORING_METHOD]
+    other = [d.get('name', '?') for d in datasets
+             if d.get('scoring_method') != SCORING_METHOD]
+    return usable, other
 
 
 class PathwayMAWorker(BaseWorker):
     """
-    Run pathway-level pooling off the UI thread.
-
+    Pool the per-study pathway results off the UI thread.
     Emits finished_ok with a tuple '(meta_df, method_keys)'.
     """
 
-    def __init__(self, datasets, gene_datasets, project_folder,
-                 method_keys, min_studies,
-                 scoring_method='cpm_welch', rho=PATHWAY_VIF_RHO,
-                 pathway_gene_sets=None, parent=None):
+    def __init__(self, datasets, method_keys, min_studies, parent=None):
         super().__init__(parent)
         self.datasets = datasets
-        self.gene_datasets = gene_datasets
-        self.project_folder = project_folder
         self.method_keys = method_keys
         self.min_studies = min_studies
-        self.scoring_method = scoring_method  # 'cpm_welch' or 'deseq2_vif'
-        self.rho = rho
-        self.pathway_gene_sets = pathway_gene_sets or {}
-
-    def _build_deseq2_vif_datasets(self):
-        """
-        Build per-study pathway-level DataFrames from gene-level
-        DESeq2 results with CAMERA-style VIF adjustment.
-
-        For each study and each pathway:
-          logFC = IV-weighted mean of per-gene logFCs
-          SE = sqrt(sum(w_i^2 * se_i^2) / (sum(w_i))^2) * sqrt(VIF)
-          VIF = 1 + (m - 1) * rho
-        where w_i = 1/se_i^2 and rho is the inter-gene correlation.
-        """
-        if not self.gene_datasets or not self.pathway_gene_sets:
-            return None
-
-        rho = self.rho
-        results_per_study = []
-
-        for ds in self.gene_datasets:
-            df = ds if isinstance(ds, pd.DataFrame) else ds.get('df')
-            if df is None:
-                continue
-
-            gene_col = 'names' if 'names' in df.columns else df.columns[0]
-            if 'logfoldchanges' not in df.columns or 'se' not in df.columns:
-                continue
-
-            gene_df = df.set_index(gene_col)
-            rows = []
-
-            for pw_name, pw_genes in self.pathway_gene_sets.items():
-                # Find genes present in this study
-                available = [g for g in pw_genes
-                             if g.upper() in gene_df.index or g in gene_df.index]
-                if len(available) < 2:
-                    continue
-
-                lfcs, ses = [], []
-                for g in available:
-                    key = g.upper() if g.upper() in gene_df.index else g
-                    if key not in gene_df.index:
-                        continue
-                    r = gene_df.loc[key]
-                    if isinstance(r, pd.DataFrame):
-                        r = r.iloc[0]
-                    lfc = r.get('logfoldchanges', np.nan)
-                    se = r.get('se', np.nan)
-                    if (np.isfinite(lfc) and np.isfinite(se)
-                            and se > 0):
-                        lfcs.append(float(lfc))
-                        ses.append(float(se))
-
-                m = len(lfcs)
-                if m < 2:
-                    continue
-
-                lfcs = np.array(lfcs)
-                ses = np.array(ses)
-                w = 1.0 / (ses ** 2)
-                w_sum = w.sum()
-
-                # IV-weighted mean logFC
-                pw_lfc = float((w * lfcs).sum() / w_sum)
-
-                # SE with VIF adjustment
-                vif = 1.0 + (m - 1) * rho
-                pw_se_raw = float(np.sqrt((w ** 2 * ses ** 2).sum())
-                                  / w_sum)
-                pw_se = pw_se_raw * np.sqrt(vif)
-
-                rows.append({
-                    'names': pw_name,
-                    'logfoldchanges': pw_lfc,
-                    'se': pw_se,
-                    'n_genes': m,
-                })
-
-            if rows:
-                # So the direction columns can be counted.
-                results_per_study.append(add_wald_pvalues(pd.DataFrame(rows)))
-
-        return results_per_study if results_per_study else None
 
     def _run(self):
         from kosmic.numerical import bh_fdr
         from kosmic.meta_analysis.pooling_dispatch import get_analytical_pool_fn
-
-        # Step 1: Build per-study pathway DataFrames
-        if self.scoring_method == 'deseq2_vif':
-            self.progress.emit(
-                "Building pathway summaries from DESeq2 "
-                f"(VIF, rho={self.rho})...")
-            vif_dfs = self._build_deseq2_vif_datasets()
-            if vif_dfs:
-                dfs = vif_dfs
-            else:
-                self.progress.emit(
-                    "DESeq2+VIF failed; falling back to CPM+Welch")
-                dfs = [d['df'] for d in self.datasets]
-        else:
-            dfs = [d['df'] for d in self.datasets]
-
         from kosmic.meta_analysis.direction import unadjusted_warning
+
+        dfs = [d['df'] for d in self.datasets]
         warning = unadjusted_warning(dfs)
         if warning:
             self.progress.emit(f"Warning: {warning}")
-
-        # Step 2: Pool across studies using the same vectorised
-        # code as gene-level MA (no reimplementation).
-        method_key = self.method_keys[0] if self.method_keys else 'dl'
+        # The same vectorised pooling as the gene-level meta-analysis.
+        method_key = self.method_keys[0] if self.method_keys else 'reml'
         self.progress.emit(f"Pooling ({method_key})...")
         pool_fn = get_analytical_pool_fn(method_key, self.min_studies)
         result = pool_fn(dfs, min_studies=self.min_studies)
-
         if result.empty:
-            raise RuntimeError(
-                f"No pathways in >= {self.min_studies} studies.")
-
-        # Step 3: BH FDR
+            raise RuntimeError(f"No pathways in >= {self.min_studies} studies.")
         result['fdr'] = bh_fdr(result['pvals_pooled'])
-
-        result = result.sort_values('pvals_pooled').reset_index(
-            drop=True)
+        result = result.sort_values('pvals_pooled').reset_index(drop=True)
         return (result, self.method_keys)
 
 
@@ -319,7 +125,6 @@ class PathwayMAPage(SidebarPage):
         self._method_keys = []  # active method keys for the current run
         self._scatter_data = None
         self._forest_xlim = None
-        self._method_checkboxes = {}
         self._pathway_gene_sets = {}
         self._setup_ui()
 
@@ -345,23 +150,20 @@ class PathwayMAPage(SidebarPage):
         info_group.add_widget(self._info_label)
         lay.addWidget(info_group)
 
+        about = HintLabel(
+            "Pools each study's Pathway DE results. In each study, every donor "
+            "gets one score per pathway (DESeq2-normalised log2 expression "
+            "averaged over its genes) and Welch's t-test compares disease with "
+            "control. Here the studies' effects are pooled with random effects, "
+            "as genes are. Run Pathway DE in each study first.")
+        about.setWordWrap(True)
+        lay.addWidget(about)
+
         settings_group = SettingsGroup("Analysis Settings", collapsible=True, expanded=True)
         self._min_studies = QSpinBox()
         self._min_studies.setRange(2, 20)
         self._min_studies.setValue(2)
         settings_group.add_row("Min studies:", self._min_studies)
-
-        self._scoring_combo = QComboBox()
-        self._scoring_combo.addItems([
-            "DESeq2 + VIF (KOSMIC's own, under review)",
-            "CPM + Welch (legacy)"])
-        self._scoring_combo.setToolTip(
-            "DESeq2 + VIF: pathway summaries from per-gene DESeq2 results, with\n"
-            "the SE inflated by a variance inflation factor for a fixed inter-gene\n"
-            "correlation of 0.1. KOSMIC's own method, not CAMERA (which estimates\n"
-            "the correlation from the data). Under review.\n\n"
-            "CPM + Welch: mean log2-CPM, Welch t-test. Legacy.")
-        settings_group.add_row("Scoring:", self._scoring_combo)
 
         self._pooling_combo = QComboBox()
         self._pooling_combo.addItem("REML", userData='reml')
@@ -504,9 +306,14 @@ class PathwayMAPage(SidebarPage):
                 "then scan the project folder."
             )
         else:
-            lines = [f"{n} studies with pathway DE:"]
-            for d in datasets:
+            usable, other = usable_tables(datasets)
+            lines = [f"{len(usable)} of {n} studies with pathway DE can be pooled:"]
+            for d in usable:
                 lines.append(f"  {d['name']} ({len(d['df'])} pathways)")
+            if other:
+                lines.append("")
+                lines.append("Not pooled, made by an earlier version of Pathway "
+                             "DE (re-run it there): " + ", ".join(other))
             self._info_label.setText("\n".join(lines))
 
     # ------------------------------------------------------------------
@@ -522,15 +329,17 @@ class PathwayMAPage(SidebarPage):
         method_keys = [pooling_key]
         min_studies = self._min_studies.value()
 
-        if len(self._datasets) < min_studies:
+        usable, other = usable_tables(self._datasets)
+        if other:
+            self.log_message.emit(
+                "Pathway MA: not pooled, made by an earlier version of Pathway "
+                "DE (re-run it there): " + ", ".join(other))
+        if len(usable) < min_studies:
             self._status_label.setText(
-                f"Need >= {min_studies} studies, have "
-                f"{len(self._datasets)}.")
+                f"Need >= {min_studies} studies made with the current Pathway DE, "
+                f"have {len(usable)}." + (
+                    " Re-run Pathway DE in: " + ", ".join(other) if other else ""))
             return
-
-        scoring = ('deseq2_vif'
-                   if self._scoring_combo.currentIndex() == 0
-                   else 'cpm_welch')
         pw_gene_sets = self._pathway_gene_sets
 
         # Snapshot settings now so the sidecar JSON written on success
@@ -539,10 +348,11 @@ class PathwayMAPage(SidebarPage):
         self._last_run_settings = {
             'pooling_method':  pooling_key,
             'min_studies':     min_studies,
-            'scoring_method':  scoring,
-            'vif_rho':         PATHWAY_VIF_RHO if scoring == 'deseq2_vif' else None,
-            'n_studies_input': len(self._datasets),
-            'study_names':     [d.get('name', '?') for d in self._datasets],
+            'scoring_method':  SCORING_METHOD,
+            'per_study_test':  "Welch's t-test",
+            'n_studies_input': len(usable),
+            'study_names':     [d.get('name', '?') for d in usable],
+            'not_pooled':      other,
             'n_pathways_in_geneset': len(pw_gene_sets) if pw_gene_sets else 0,
         }
 
@@ -554,18 +364,12 @@ class PathwayMAPage(SidebarPage):
         self._run_btn.setEnabled(False)
         self._status_label.setText("Running pathway meta-analysis...")
         self.log_message.emit(
-            f"Pathway MA: {len(self._datasets)} studies, "
-            f"pooling={pooling_key}, scoring={scoring}")
+            f"Pathway MA: {len(usable)} studies, pooling={pooling_key}")
 
         # Fixed at launch: the selection may change while it runs.
         self._run_output_selection = self._output_selection
-        self._run_study_names = [d.get('name', '?') for d in (self._datasets or [])]
-        self._worker = PathwayMAWorker(
-            self._datasets, self._gene_datasets, self._project_folder,
-            method_keys, min_studies,
-            scoring_method=scoring, rho=PATHWAY_VIF_RHO,
-            pathway_gene_sets=pw_gene_sets,
-        )
+        self._run_study_names = [d.get('name', '?') for d in usable]
+        self._worker = PathwayMAWorker(usable, method_keys, min_studies)
         run_worker(
             self._worker,
             on_finished=self._on_worker_finished,

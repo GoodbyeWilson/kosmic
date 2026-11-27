@@ -615,7 +615,14 @@ class MetaAnalysisWorkspace(QWidget):
                 pw_df = load_de_results(filepath, dataset_name=entry["accession"])
                 require_se(pw_df, filepath)
                 name = entry["accession"]
-                self._all_pathway_datasets.append({'path': filepath, 'name': name, 'df': pw_df})
+                # How the table was made (its run record); None for a table
+                # saved by an earlier version, which may have used any of
+                # the scoring methods since removed.
+                from kosmic.de.saved import read_run_record
+                record = read_run_record(filepath) or {}
+                self._all_pathway_datasets.append({
+                    'path': filepath, 'name': name, 'df': pw_df,
+                    'scoring_method': record.get('scoring_method')})
                 if verbose:
                     self._log(f"Loaded pathway DE: {name} "
                               f"({len(pw_df)} pathways)")

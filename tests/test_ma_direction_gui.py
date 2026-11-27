@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -90,22 +91,35 @@ def test_pathway_results_columns_follow_the_table(app, results_df):
     assert "Conflict" not in _headers(page._results_table)
 
 
-def test_deseq2_vif_summaries_carry_adjusted_pvalues(app):
-    """The default pathway scoring must yield countable per-study tables."""
+def _pathway_table(effects):
+    return pd.DataFrame({'names': ['PW_A', 'PW_B'], 'logfoldchanges': effects,
+                         'se': [0.1, 0.1], 'pvals': [0.001, 0.5],
+                         'pvals_adj': [0.002, 0.5]})
+
+
+def test_only_tables_from_the_current_pathway_de_are_pooled():
+    """A table saved by an earlier version may have used a scoring method
+    since removed: it is named, not pooled."""
+    from kosmic.gui.meta_analysis.pages.pathway_ma_page import usable_tables
+    datasets = [{'name': 'S1', 'df': _pathway_table([0.5, 0.0]), 'scoring_method': 'deseq2'},
+                {'name': 'S2', 'df': _pathway_table([0.4, 0.1]), 'scoring_method': 'deseq2'},
+                {'name': 'Old', 'df': _pathway_table([0.9, 0.0]), 'scoring_method': None},
+                {'name': 'Cpm', 'df': _pathway_table([0.9, 0.0]),
+                 'scoring_method': 'pseudobulk_cpm'}]
+    usable, other = usable_tables(datasets)
+    assert [d['name'] for d in usable] == ['S1', 'S2']
+    assert other == ['Old', 'Cpm']
+
+
+def test_the_studies_pathway_effects_are_pooled_with_reml(app):
     from kosmic.gui.meta_analysis.pages.pathway_ma_page import PathwayMAWorker
-
-    genes = [f'G{i}' for i in range(6)]
-    up = pd.DataFrame({'names': genes, 'se': 0.1,
-                       'logfoldchanges': [2.0, 2.2, 1.8, 0.1, -0.1, 0.0]})
-    down = up.assign(logfoldchanges=-up['logfoldchanges'])
-    worker = PathwayMAWorker(
-        [], [up, down], None, ['reml'], 2, scoring_method='deseq2_vif',
-        pathway_gene_sets={'PW_A': genes[:3], 'PW_B': genes[3:]})
-    per_study = worker._build_deseq2_vif_datasets()
-
-    assert all({'pvals', 'pvals_adj'} <= set(df.columns) for df in per_study)
-    from kosmic.meta_analysis.direction import annotate_direction
-    out = annotate_direction(
-        pd.DataFrame({'names': ['PW_A', 'PW_B']}), per_study).set_index('names')
-    assert bool(out.loc['PW_A', 'direction_conflict'])
-    assert not out.loc['PW_B', 'direction_conflict']
+    from kosmic.meta_analysis.pooling.reml import reml_fast
+    tables = [_pathway_table([0.5, 0.0]), _pathway_table([0.4, 0.1])]
+    worker = PathwayMAWorker([{'name': f'S{i}', 'df': t} for i, t in enumerate(tables)],
+                             ['reml'], 2)
+    meta, keys = worker._run()
+    assert keys == ['reml']
+    direct = reml_fast(tables, min_studies=2).set_index('names')
+    meta = meta.set_index('names')
+    assert np.isclose(meta.loc['PW_A', 'logfoldchanges'], direct.loc['PW_A', 'logfoldchanges'])
+    assert 'fdr' in meta.columns

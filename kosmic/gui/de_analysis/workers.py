@@ -302,9 +302,18 @@ class PathwayScoringWorker(BaseWorker):
 
         scoring_dir = self.scoring_dir
         scoring_dir.mkdir(parents=True, exist_ok=True)
-        pathway_de.to_csv(
-            scoring_dir / f'{self.level_label}pathway_de_results.csv', index=False
-        )
+        results_path = scoring_dir / f'{self.level_label}pathway_de_results.csv'
+        pathway_de.to_csv(results_path, index=False)
+        # Beside the table, how it was made: the meta-analysis pools only
+        # tables made with the same score and test.
+        from kosmic.de.saved import save_run_record
+        save_run_record(results_path, {
+            'scoring_method': self.method,
+            'test': "Welch's t-test",
+            'counts_layer': self.counts_layer,
+            'gene_detection_pct': self.gene_detection_pct,
+            'min_coverage': self.min_coverage,
+        })
         if coverage_report is not None and not coverage_report.empty:
             coverage_report.to_csv(
                 scoring_dir / f'{self.level_label}pathway_coverage.csv', index=False)
